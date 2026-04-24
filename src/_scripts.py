@@ -7,7 +7,7 @@ def dev():
 
 
 def lint():
-    sys.exit(subprocess.call(["ruff", "check", "."]))
+    sys.exit(subprocess.call(["ruff", "check", ".", "--fix"]))
 
 
 def fmt():

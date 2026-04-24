@@ -20,6 +20,12 @@ class JobDAO:
     async def update_status(self, job_id: str, status: JobStatus) -> None:
         await self._col.update_one({"_id": job_id}, {"$set": {"status": status}})
 
+    async def save_result(self, job_id: str, result: dict) -> None:
+        await self._col.update_one(
+            {"_id": job_id},
+            {"$set": {"status": JobStatus.done, "result": result}},
+        )
+
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})
         jobs = []
