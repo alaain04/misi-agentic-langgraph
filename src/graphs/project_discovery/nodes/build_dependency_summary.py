@@ -42,55 +42,93 @@ def _collect_direct_dependencies(
         if data.get("format") != "package.json":
             continue
         for name, spec in data.get("dependencies", {}).items():
-            entries.append(DependencyEntry(name=name, version_spec=spec, is_dev=False))
+            entries.append(DependencyEntry(name=name, version_spec=spec))
         for name, spec in data.get("dev_dependencies", {}).items():
-            entries.append(DependencyEntry(name=name, version_spec=spec, is_dev=True))
+            entries.append(DependencyEntry(name=name, version_spec=spec))
         return entries  # only process the first package.json found
 
     for path, data in parsed_manifests.items():
         if data.get("format") != "pnpm-lock.yaml":
             continue
         for name, spec in data.get("dependencies", {}).items():
-            entries.append(DependencyEntry(name=name, version_spec=spec, is_dev=False))
+            entries.append(DependencyEntry(name=name, version_spec=spec))
         for name, spec in data.get("dev_dependencies", {}).items():
-            entries.append(DependencyEntry(name=name, version_spec=spec, is_dev=True))
+            entries.append(DependencyEntry(name=name, version_spec=spec))
         return entries
 
     return entries
 
 
-def _get_project_name(parsed_manifests: dict[str, Any], repo_name: str) -> str:
+def _get_project_name(parsed_manifests: dict[str, Any]) -> str:
     for _, data in parsed_manifests.items():
         if data.get("format") == "package.json" and data.get("name"):
             return data["name"]
-    return repo_name
+    return "unknown"
 
 
-def _extract_transitive_info(parsed_manifests: dict[str, Any]) -> dict[str, Any]:
-    """Extract transitive dependency info from whichever lock file was parsed."""
-    for path, data in parsed_manifests.items():
-        fmt = data.get("format")
-        if fmt in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
-            return {
-                "source": fmt,
-                "resolved_count": data.get("resolved_packages_count", 0),
-                "package_names": data.get("package_names", []),
-            }
-    return {"source": None, "resolved_count": 0, "package_names": []}
+def _build_dependency_tree(
+    direct_deps: list[DependencyEntry],
+    resolved: dict[str, str],
+    edges: dict[str, list[str]],
+) -> dict[str, Any]:
+    """
+    Recursively build a dependency tree starting from direct_deps.
+    Cycles are detected per-path and marked with "circular": True.
+    """
+
+    def _node(name: str, path: frozenset[str]) -> dict[str, Any]:
+        version = resolved.get(name, "")
+        if name in path:
+            return {"version": version, "circular": True}
+        children = edges.get(name, [])
+        new_path = path | {name}
+        return {
+            "version": version,
+            "deps": {child: _node(child, new_path) for child in children},
+        }
+
+    return {dep["name"]: _node(dep["name"], frozenset()) for dep in direct_deps}
+
+
+def _collect_lock_data(
+    parsed_manifests: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Return (resolved_packages, package_edges) from the first lock file found."""
+    for data in parsed_manifests.values():
+        if data.get("format") in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
+            return data.get("resolved_packages", {}), data.get("package_edges", {})
+    return {}, {}
+
+
+def _collect_transitive_dependencies(
+    parsed_manifests: dict[str, Any],
+    direct_deps: list[DependencyEntry],
+) -> list[DependencyEntry]:
+    """
+    Build the list of transitive dependencies from the lock file.
+    Transitive = all resolved packages minus the direct dependencies.
+    """
+    direct_names = {d["name"] for d in direct_deps}
+
+    for data in parsed_manifests.values():
+        if data.get("format") in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
+            resolved: dict[str, str] = data.get("resolved_packages", {})
+            return [
+                DependencyEntry(name=name, version_spec=version)
+                for name, version in resolved.items()
+                if name not in direct_names
+            ]
+    return []
 
 
 def _build_prompt(
-    repo_owner: str,
-    repo_name: str,
+    project_name: str,
     concern: str,
     pm: str,
     direct_deps: list[DependencyEntry],
-    transitive_info: dict[str, Any],
+    transitive_deps: list[DependencyEntry],
     manifest_files: list[str],
 ) -> str:
-    prod_deps = [d for d in direct_deps if not d["is_dev"]]
-    dev_deps = [d for d in direct_deps if d["is_dev"]]
-
     def _fmt_deps(deps: list[DependencyEntry], limit: int = 20) -> str:
         items = [f"{d['name']} ({d['version_spec']})" for d in deps[:limit]]
         result = ", ".join(items)
@@ -99,34 +137,25 @@ def _build_prompt(
         return result or "none"
 
     transitive_section = ""
-    if transitive_info["source"]:
+    if transitive_deps:
+        sample = _fmt_deps(transitive_deps, 30)
         transitive_section = (
-            f"\nLock file ({transitive_info['source']}): "
-            f"{transitive_info['resolved_count']} total installed packages "
-            f"(direct + transitive)"
+            f"\nTransitive dependencies ({len(transitive_deps)}): {sample}"
         )
-        names = transitive_info["package_names"]
-        if names:
-            sample = ", ".join(names[:30])
-            if len(names) > 30:
-                sample += f", … and {len(names) - 30} more"
-            transitive_section += f"\nSample installed packages: {sample}"
 
     return f"""\
-You are analysing a GitHub repository's JavaScript/Node.js dependency structure.
+You are analysing a JavaScript/Node.js project's dependency structure.
 
-Repository: {repo_owner}/{repo_name}
+Project: {project_name}
 Package manager: {pm}
 Manifest files found: {", ".join(manifest_files) or "none"}
 Analysis concern: {concern}
 
-Direct production dependencies ({len(prod_deps)}): {_fmt_deps(prod_deps)}
-Direct dev dependencies ({len(dev_deps)}): {_fmt_deps(dev_deps, 10)}{transitive_section}
+Direct dependencies ({len(direct_deps)}): {_fmt_deps(direct_deps)}{transitive_section}
 
 Write a concise dependency discovery summary (3-5 sentences) that covers:
 1. What the project uses for package management and how many direct dependencies it has
-2. The transitive dependency chain installed (total packages from lock file), if 
-available
+2. The transitive dependency chain installed (total packages from lock file), if any
 3. Notable packages relevant to the concern: "{concern}"
 
 Be factual and specific. Output only the summary text, no headings or bullet points."""
@@ -145,19 +174,21 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
                 direct_dependencies_count=0,
             ),
             "direct_dependencies": [],
+            "transitive_dependencies": [],
+            "dependency_tree": {},
             "discovery_summary": f"Discovery failed: {state['discovery_error']}",
         }
 
     parsed_manifests: dict[str, Any] = state.get("parsed_manifests", {})
-    repo_owner: str = state.get("repo_owner", "")
-    repo_name: str = state.get("repo_name", "")
     manifest_files: list[str] = state.get("manifest_files", [])
     concern: str = state.get("concern", "")
 
     pm = _detect_package_manager(parsed_manifests)
     direct_deps = _collect_direct_dependencies(parsed_manifests)
-    project_name = _get_project_name(parsed_manifests, repo_name)
-    transitive_info = _extract_transitive_info(parsed_manifests)
+    resolved, edges = _collect_lock_data(parsed_manifests)
+    transitive_deps = _collect_transitive_dependencies(parsed_manifests, direct_deps)
+    project_name = _get_project_name(parsed_manifests)
+    dep_tree = _build_dependency_tree(direct_deps, resolved, edges)
 
     metadata = ProjectMetadata(
         name=project_name,
@@ -166,12 +197,14 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
     )
 
     prompt = _build_prompt(
-        repo_owner, repo_name, concern, pm, direct_deps, transitive_info, manifest_files
+        project_name, concern, pm, direct_deps, transitive_deps, manifest_files
     )
     response = await _llm.ainvoke(prompt)
 
     return {
         "project_metadata": metadata,
         "direct_dependencies": direct_deps,
+        "transitive_dependencies": transitive_deps,
+        "dependency_tree": dep_tree,
         "discovery_summary": response.content,
     }

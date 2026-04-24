@@ -27,6 +27,7 @@ dev = "src._scripts:dev"
 lint = "src._scripts:lint"
 format = "src._scripts:fmt"
 test = "src._scripts:test"
+curl-test = "src._scripts:curl_test"
 
 [dependency-groups]
 dev = [

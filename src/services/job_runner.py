@@ -11,16 +11,22 @@ logger = logging.getLogger(__name__)
 
 async def run_discovery(
     job_id: str,
-    repo_url: str,
+    package_json: str,
+    lock_file: str,
+    lock_file_name: str,
     concern: str,
-    token: str | None,
 ) -> None:
     dao = JobDAO()
     await dao.update_status(job_id, JobStatus.running)
 
     try:
         result = await project_discovery_subgraph.ainvoke(
-            {"repo_url": repo_url, "concern": concern, "token": token}
+            {
+                "package_json_content": package_json,
+                "lock_file_content": lock_file,
+                "lock_file_name": lock_file_name,
+                "concern": concern,
+            }
         )
 
         if result.get("discovery_error"):

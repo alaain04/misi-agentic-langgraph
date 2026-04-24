@@ -1,7 +1,8 @@
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 from src.models.job import Job
 from src.services.job_dao import JobDAO
@@ -9,18 +10,22 @@ from src.services.job_runner import run_discovery
 
 router = APIRouter()
 
+LockFileName = Literal["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
+
 
 class AnalysisRequest(BaseModel):
-    repo_url: HttpUrl
-    token: str | None = None
+    package_json: str
+    lock_file: str
+    lock_file_name: LockFileName
     concern: str
 
 
 @router.post("/analyze", status_code=202)
 async def analyze(request: AnalysisRequest):
     job = Job(
-        repo_url=str(request.repo_url),
-        token=request.token,
+        package_json=request.package_json,
+        lock_file=request.lock_file,
+        lock_file_name=request.lock_file_name,
         concern=request.concern,
     )
 
@@ -30,9 +35,10 @@ async def analyze(request: AnalysisRequest):
     asyncio.create_task(
         run_discovery(
             job_id=job.id,
-            repo_url=job.repo_url,
+            package_json=job.package_json,
+            lock_file=job.lock_file,
+            lock_file_name=job.lock_file_name,
             concern=job.concern,
-            token=job.token,
         )
     )
 

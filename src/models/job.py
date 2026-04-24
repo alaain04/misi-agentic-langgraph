@@ -14,8 +14,9 @@ class JobStatus(StrEnum):
 
 class Job(BaseModel):
     id: str = Field(default_factory=lambda: str(ObjectId()))
-    repo_url: str
-    token: str | None = None
+    package_json: str
+    lock_file: str
+    lock_file_name: str
     concern: str
     status: JobStatus = JobStatus.pending
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
