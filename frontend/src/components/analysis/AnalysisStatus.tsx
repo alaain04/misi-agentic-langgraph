@@ -55,9 +55,7 @@ export function AnalysisStatus({ traceId, status, discovery }: AnalysisStatusPro
             </div>
           )}
 
-          {isAwaiting && (
-            <div className="h-px w-full bg-[--badge-awaiting-border]" />
-          )}
+          {isAwaiting && <div className="h-px w-full bg-[--badge-awaiting-border]" />}
         </div>
 
         {/* Right column: project metadata + manifest files */}
@@ -72,10 +70,11 @@ export function AnalysisStatus({ traceId, status, discovery }: AnalysisStatusPro
                 <dd className="text-[--color-text]">{discovery!.project_metadata!.name}</dd>
 
                 <dt className="tracking-widest text-[--color-muted] uppercase">Manager</dt>
-                <dd className="text-[--color-text]">{discovery!.project_metadata!.package_manager}</dd>
+                <dd className="text-[--color-text]">
+                  {discovery!.project_metadata!.package_manager}
+                </dd>
               </dl>
             </div>
-{/* 
           </div>
         )}
       </div>

@@ -20,8 +20,8 @@ export function mapResponseToGraphState(response: StatusResponse | null): GraphR
   // During pending/running, subgraph plan is unknown — hide subgraph nodes
   // unless they already appear in artifacts (they started running)
   const showSubgraphs = status === 'done' || status === 'failed' || status === 'awaiting_approval'
-  const hasArtifactSubgraphs = (response.artifacts ?? []).some(
-    (a) => GRAPH_NODES.find((n) => n.id === a.node && n.isSubgraph),
+  const hasArtifactSubgraphs = (response.artifacts ?? []).some((a) =>
+    GRAPH_NODES.find((n) => n.id === a.node && n.isSubgraph),
   )
 
   const nodes = GRAPH_NODES.filter(
@@ -29,12 +29,14 @@ export function mapResponseToGraphState(response: StatusResponse | null): GraphR
       !def.isSubgraph ||
       (showSubgraphs && activeSubgraphIds.has(def.id)) ||
       (hasArtifactSubgraphs && artifactMap.has(def.id as NodeId)),
-  ).map((def): GraphNodeState => ({
-    id: def.id,
-    def,
-    status: deriveStatus(def.id, status, results, activeSubgraphIds, artifactMap),
-    hasDetail: hasDetail(def.id, results),
-  }))
+  ).map(
+    (def): GraphNodeState => ({
+      id: def.id,
+      def,
+      status: deriveStatus(def.id, status, results, activeSubgraphIds, artifactMap),
+      hasDetail: hasDetail(def.id, results),
+    }),
+  )
 
   return { nodes, edges: filterEdges(nodes) }
 }
@@ -80,7 +82,7 @@ function deriveStatus(
     return 'idle'
   }
   if (jobStatus === 'pending') return 'idle'
-  if (jobStatus === 'running') return 'idle'  // node hasn't started yet (no artifact)
+  if (jobStatus === 'running') return 'idle' // node hasn't started yet (no artifact)
   if (jobStatus === 'done') return 'done'
   // failed job: nodes without results are failed
   if (id === 'project_discovery') return results?.discovery ? 'done' : 'failed'
@@ -95,7 +97,7 @@ function hasDetail(id: NodeId, results: StatusResponse['results']): boolean {
   if (id === 'project_discovery') return !!results.discovery
   if (id === 'planner') return !!(results.plan && results.plan.length > 0)
   if (id === 'final_report') return !!results.final_report
-  return !!(results.subgraph_results?.some((r) => r.subgraph === id))
+  return !!results.subgraph_results?.some((r) => r.subgraph === id)
 }
 
 function filterEdges(nodes: GraphNodeState[]) {

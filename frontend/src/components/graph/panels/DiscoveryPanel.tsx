@@ -24,11 +24,17 @@ export function DiscoveryPanel({ results }: PanelProps) {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1 rounded-lg border border-[--color-border] bg-[--color-surface-raised] p-4">
             <p className="font-mono text-2xl font-semibold text-[--color-text]">{directCount}</p>
-            <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">Direct</p>
+            <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
+              Direct
+            </p>
           </div>
           <div className="space-y-1 rounded-lg border border-[--color-border] bg-[--color-surface-raised] p-4">
-            <p className="font-mono text-2xl font-semibold text-[--color-text]">{transitiveCount}</p>
-            <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">Transitive</p>
+            <p className="font-mono text-2xl font-semibold text-[--color-text]">
+              {transitiveCount}
+            </p>
+            <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
+              Transitive
+            </p>
           </div>
         </div>
       )}
@@ -58,7 +64,9 @@ export function DiscoveryPanel({ results }: PanelProps) {
       {/* Discovery summary */}
       {discovery.discovery_summary && (
         <div className="space-y-2">
-          <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">Summary</p>
+          <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
+            Summary
+          </p>
           <div className="rounded border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
             <p className="font-mono text-sm leading-relaxed text-[--color-text]">
               {discovery.discovery_summary}

@@ -5,7 +5,11 @@ import type { AnalysisResult, AnalysisRequest, JobStatus, StatusResponse } from 
 
 interface UseAnalysisResult {
   submit: (req: AnalysisRequest) => Promise<void>
-  approvePlan: (action: 'approve' | 'modify' | 'cancel' | 'refine', plan?: string[], feedback?: string) => Promise<void>
+  approvePlan: (
+    action: 'approve' | 'modify' | 'cancel' | 'refine',
+    plan?: string[],
+    feedback?: string,
+  ) => Promise<void>
   traceId: string | null
   status: JobStatus | null
   result: AnalysisResult | null
@@ -31,7 +35,13 @@ export function useAnalysis(): UseAnalysisResult {
     return getAnalysisStatus(traceIdRef.current)
   }, [])
 
-  const { data, error: pollError, isPolling, startPolling, resumePolling } = usePolling(pollFn, 2000, isTerminal)
+  const {
+    data,
+    error: pollError,
+    isPolling,
+    startPolling,
+    resumePolling,
+  } = usePolling(pollFn, 2000, isTerminal)
 
   const submit = useCallback(
     async (req: AnalysisRequest) => {
@@ -52,7 +62,11 @@ export function useAnalysis(): UseAnalysisResult {
   )
 
   const handleApprovePlan = useCallback(
-    async (action: 'approve' | 'modify' | 'cancel' | 'refine', plan?: string[], feedback?: string) => {
+    async (
+      action: 'approve' | 'modify' | 'cancel' | 'refine',
+      plan?: string[],
+      feedback?: string,
+    ) => {
       if (!traceIdRef.current) return
       await approvePlan(traceIdRef.current, {
         action,

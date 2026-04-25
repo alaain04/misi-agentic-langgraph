@@ -18,7 +18,7 @@ export function FinalReportPanel({ results }: PanelProps) {
 
   return (
     <div className="relative">
-      <pre className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded border border-[--color-border] bg-[--color-surface-raised] p-4 font-mono text-xs leading-relaxed text-[--color-text]">
+      <pre className="max-h-[500px] overflow-auto rounded border border-[--color-border] bg-[--color-surface-raised] p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-[--color-text]">
         <code>{report}</code>
       </pre>
       <button

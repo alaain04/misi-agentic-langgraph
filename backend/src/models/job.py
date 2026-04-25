@@ -24,6 +24,7 @@ class Job(BaseModel):
     completed_at: datetime | None = None
     result: dict | None = None
     artifacts: list[dict] = Field(default_factory=list)
+    assistant_message: str | None = None
 
     def to_doc(self) -> dict:
         doc = self.model_dump()

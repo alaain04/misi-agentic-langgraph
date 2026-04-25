@@ -37,9 +37,7 @@ export function NodeDetailPanel({ nodeId, results, onClose }: NodeDetailPanelPro
       {Panel ? (
         <Panel nodeId={nodeId} results={results} />
       ) : (
-        <p className="font-mono text-xs text-[--color-muted]">
-          No detail available for this node.
-        </p>
+        <p className="font-mono text-xs text-[--color-muted]">No detail available for this node.</p>
       )}
     </div>
   )

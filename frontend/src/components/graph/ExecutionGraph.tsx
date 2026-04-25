@@ -1,7 +1,13 @@
 import { useEffect, useRef } from 'react'
 import * as d3 from 'd3'
 import { cn } from '../../lib/utils'
-import type { GraphRenderData, GraphNodeState, GraphEdgeDef, NodeId, NodeStatus } from './graphDefinition'
+import type {
+  GraphRenderData,
+  GraphNodeState,
+  GraphEdgeDef,
+  NodeId,
+  NodeStatus,
+} from './graphDefinition'
 import { getPanelComponent } from './nodeRegistry'
 
 // ── Layout constants ───────────────────────────────────────────────────────────
@@ -19,8 +25,8 @@ const NODE_W = 132
 const NODE_H = 36
 const NODE_RX = 5
 const SVG_HEIGHT = 320
-const LANE_H = 52       // vertical gap between subgraph node centers
-const MARGIN_R = 30     // right margin before clip
+const LANE_H = 52 // vertical gap between subgraph node centers
+const MARGIN_R = 30 // right margin before clip
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +34,10 @@ function cssVar(el: Element, name: string): string {
   return getComputedStyle(el).getPropertyValue(name).trim()
 }
 
-interface NodePos { x: number; y: number }
+interface NodePos {
+  x: number
+  y: number
+}
 
 function computePositions(nodes: GraphNodeState[]): Map<NodeId, NodePos> {
   const positions = new Map<NodeId, NodePos>()
@@ -54,10 +63,14 @@ function statusStrokeColor(
   colors: { border: string; accent: string; done: string; error: string; running: string },
 ): string {
   switch (status) {
-    case 'active': return colors.running
-    case 'done':   return colors.done
-    case 'failed': return colors.error
-    default:       return colors.border
+    case 'active':
+      return colors.running
+    case 'done':
+      return colors.done
+    case 'failed':
+      return colors.error
+    default:
+      return colors.border
   }
 }
 
@@ -66,10 +79,14 @@ function statusDotFill(
   colors: { accent: string; done: string; error: string; running: string },
 ): string {
   switch (status) {
-    case 'active': return colors.running
-    case 'done':   return colors.done
-    case 'failed': return colors.error
-    default:       return 'transparent'
+    case 'active':
+      return colors.running
+    case 'done':
+      return colors.done
+    case 'failed':
+      return colors.error
+    default:
+      return 'transparent'
   }
 }
 
@@ -91,12 +108,19 @@ interface ExecutionGraphProps {
   className?: string
 }
 
-export function ExecutionGraph({ renderData, selectedNodeId, onNodeClick, className }: ExecutionGraphProps) {
+export function ExecutionGraph({
+  renderData,
+  selectedNodeId,
+  onNodeClick,
+  className,
+}: ExecutionGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   // Stable ref so the D3 handler always calls the latest onNodeClick
   const onNodeClickRef = useRef(onNodeClick)
-  useEffect(() => { onNodeClickRef.current = onNodeClick }, [onNodeClick])
+  useEffect(() => {
+    onNodeClickRef.current = onNodeClick
+  }, [onNodeClick])
 
   useEffect(() => {
     const container = containerRef.current
@@ -104,14 +128,14 @@ export function ExecutionGraph({ renderData, selectedNodeId, onNodeClick, classN
     if (!container || !svgEl) return
 
     const colors = {
-      border:  cssVar(container, '--color-border'),
-      text:    cssVar(container, '--color-text'),
-      muted:   cssVar(container, '--color-muted'),
-      accent:  cssVar(container, '--color-accent'),
+      border: cssVar(container, '--color-border'),
+      text: cssVar(container, '--color-text'),
+      muted: cssVar(container, '--color-muted'),
+      accent: cssVar(container, '--color-accent'),
       surface: cssVar(container, '--color-surface-raised'),
-      error:   cssVar(container, '--color-error'),
-      done:    '#34c785',   // green
-      running: '#eab308',   // yellow-500
+      error: cssVar(container, '--color-error'),
+      done: '#34c785', // green
+      running: '#eab308', // yellow-500
     }
 
     const width = container.clientWidth || 900
@@ -143,13 +167,13 @@ export function ExecutionGraph({ renderData, selectedNodeId, onNodeClick, classN
         .attr('fill', fill)
 
     makeArrow('arrow-default', colors.border)
-    makeArrow('arrow-accent',  colors.accent)
+    makeArrow('arrow-accent', colors.accent)
 
     defs
       .append('style')
       .text(
         '@keyframes nodePulse { 0%,100%{opacity:1} 50%{opacity:0.3} }' +
-        '.node-pulse { animation: nodePulse 1.8s ease-in-out infinite; }',
+          '.node-pulse { animation: nodePulse 1.8s ease-in-out infinite; }',
       )
 
     // Zoom/pan layer
@@ -200,13 +224,11 @@ export function ExecutionGraph({ renderData, selectedNodeId, onNodeClick, classN
       const pos = positions.get(node.id)
       if (!pos) continue
 
-      const isSelected  = node.id === selectedNodeId
-      const isTerminal  = node.id === 'START' || node.id === 'END'
-      const hasPanel    = !!getPanelComponent(node.id)
+      const isSelected = node.id === selectedNodeId
+      const isTerminal = node.id === 'START' || node.id === 'END'
+      const hasPanel = !!getPanelComponent(node.id)
 
-      const strokeColor = isSelected
-        ? colors.accent
-        : statusStrokeColor(node.status, colors)
+      const strokeColor = isSelected ? colors.accent : statusStrokeColor(node.status, colors)
       const strokeWidth = isSelected || node.status !== 'idle' ? 2.5 : 1.5
 
       const g = gNodes
@@ -280,7 +302,7 @@ export function ExecutionGraph({ renderData, selectedNodeId, onNodeClick, classN
           role="img"
         />
       </div>
-      <p className="mt-1.5 text-right select-none font-mono text-[10px] text-[--color-muted]">
+      <p className="mt-1.5 text-right font-mono text-[10px] text-[--color-muted] select-none">
         scroll to zoom · click node to inspect
       </p>
     </div>

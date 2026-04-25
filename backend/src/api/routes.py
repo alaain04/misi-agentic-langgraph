@@ -31,12 +31,11 @@ class AnalysisStatusResponse(BaseModel):
     completed_at: datetime | None = None
     results: dict | None = None
     artifacts: list[dict] = []
+    assistant_message: str | None = None
 
 
-class PlanApprovalRequest(BaseModel):
-    action: Literal["approve", "modify", "cancel", "refine"]
-    plan: list[str] | None = None
-    feedback: str | None = None
+class ChatRequest(BaseModel):
+    message: str
 
 
 class JobListItem(BaseModel):
@@ -97,11 +96,12 @@ async def get_analysis_status(trace_id: str):
         completed_at=job.completed_at,
         results=job.result,
         artifacts=job.artifacts,
+        assistant_message=job.assistant_message,
     )
 
 
-@router.post("/analyze/{trace_id}/approve", status_code=202)
-async def approve_plan(trace_id: str, request: PlanApprovalRequest):
+@router.post("/analyze/{trace_id}/chat", status_code=202)
+async def chat(trace_id: str, request: ChatRequest):
     dao = JobDAO()
     job = await dao.get(trace_id)
     if job is None:
@@ -109,14 +109,9 @@ async def approve_plan(trace_id: str, request: PlanApprovalRequest):
     if job.status != JobStatus.awaiting_approval:
         raise HTTPException(
             status_code=409,
-            detail=f"Job is not awaiting approval (status: {job.status})",
+            detail=f"Job is not awaiting user input (status: {job.status})",
         )
-    decision = {"action": request.action}
-    if request.action == "modify" and request.plan:
-        decision["plan"] = request.plan
-    if request.action == "refine" and request.feedback:
-        decision["feedback"] = request.feedback
-    asyncio.create_task(resume_analysis(job_id=trace_id, decision=decision))
+    asyncio.create_task(resume_analysis(job_id=trace_id, user_message=request.message))
     return {"trace_id": trace_id, "status": JobStatus.running}
 
 

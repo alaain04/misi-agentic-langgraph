@@ -9,6 +9,8 @@ import type { AnalysisRequest, LockFileName } from '../../api/types'
 interface AnalysisFormProps {
   onSubmit: (req: AnalysisRequest) => Promise<void>
   isLoading: boolean
+  initialRequest?: AnalysisRequest
+  initialSampleId?: string
 }
 
 interface FormErrors {
@@ -23,11 +25,13 @@ const lockFileOptions = [
   { value: 'pnpm-lock.yaml', label: 'pnpm-lock.yaml' },
 ]
 
-export function AnalysisForm({ onSubmit, isLoading }: AnalysisFormProps) {
-  const [packageJson, setPackageJson] = useState('')
-  const [lockFile, setLockFile] = useState('')
-  const [lockFileName, setLockFileName] = useState<LockFileName>('package-lock.json')
-  const [concern, setConcern] = useState('')
+export function AnalysisForm({ onSubmit, isLoading, initialRequest }: AnalysisFormProps) {
+  const [packageJson, setPackageJson] = useState(initialRequest?.package_json ?? '')
+  const [lockFile, setLockFile] = useState(initialRequest?.lock_file ?? '')
+  const [lockFileName, setLockFileName] = useState<LockFileName>(
+    initialRequest?.lock_file_name ?? 'package-lock.json',
+  )
+  const [concern, setConcern] = useState(initialRequest?.concern ?? '')
   const [errors, setErrors] = useState<FormErrors>({})
 
   function validate(): boolean {
@@ -53,21 +57,15 @@ export function AnalysisForm({ onSubmit, isLoading }: AnalysisFormProps) {
   return (
     <form onSubmit={(e) => void handleSubmit(e)} noValidate>
       <div className="space-y-6 rounded-lg border border-[--color-border] bg-[--color-surface] p-6">
-        {/* Section label */}
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-xs font-semibold tracking-widest text-[--color-accent] uppercase">
-            01 / input
-          </span>
-          <div className="h-px flex-1 bg-[--color-border]" />
-        </div>
-
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Textarea
               label="package.json"
               id="package-json"
               value={packageJson}
-              onChange={(e) => setPackageJson(e.target.value)}
+              onChange={(e) => {
+                setPackageJson(e.target.value)
+              }}
               placeholder='{ "name": "my-app", "dependencies": { ... } }'
               rows={8}
               error={errors.package_json}

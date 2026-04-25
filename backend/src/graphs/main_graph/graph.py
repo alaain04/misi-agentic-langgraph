@@ -4,17 +4,19 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from src.graphs.main_graph.constants import (
-    FINAL_REPORT,
-    PLAN_REVIEW,
-    PLANNER,
+    ORCHESTRATOR,
     PROJECT_DISCOVERY,
+    RECOMMENDER,
+    REVIEWER,
     RUN_SUBGRAPH,
+    SUMMARIZER,
 )
 from src.graphs.main_graph.nodes import (
-    final_report,
-    plan_review,
-    planner,
+    orchestrator,
+    recommender,
+    reviewer,
     run_subgraph,
+    summarizer,
     task_dispatcher,
 )
 from src.graphs.main_graph.state import MainState
@@ -27,17 +29,19 @@ def build_main_graph():
     builder = StateGraph(MainState)
 
     builder.add_node(PROJECT_DISCOVERY, project_discovery_subgraph)
-    builder.add_node(PLANNER, planner)
-    builder.add_node(PLAN_REVIEW, plan_review)
+    builder.add_node(ORCHESTRATOR, orchestrator)
     builder.add_node(RUN_SUBGRAPH, run_subgraph)
-    builder.add_node(FINAL_REPORT, final_report)
+    builder.add_node(SUMMARIZER, summarizer)
+    builder.add_node(REVIEWER, reviewer)
+    builder.add_node(RECOMMENDER, recommender)
 
     builder.add_edge(START, PROJECT_DISCOVERY)
-    builder.add_edge(PROJECT_DISCOVERY, PLANNER)
-    builder.add_edge(PLANNER, PLAN_REVIEW)
-    builder.add_conditional_edges(PLAN_REVIEW, task_dispatcher, [RUN_SUBGRAPH])
-    builder.add_edge(RUN_SUBGRAPH, FINAL_REPORT)
-    builder.add_edge(FINAL_REPORT, END)
+    builder.add_edge(PROJECT_DISCOVERY, ORCHESTRATOR)
+    builder.add_conditional_edges(ORCHESTRATOR, task_dispatcher, [RUN_SUBGRAPH])
+    builder.add_edge(RUN_SUBGRAPH, SUMMARIZER)
+    builder.add_edge(SUMMARIZER, REVIEWER)
+    builder.add_edge(REVIEWER, RECOMMENDER)
+    builder.add_edge(RECOMMENDER, END)
 
     return builder.compile(checkpointer=_checkpointer)
 

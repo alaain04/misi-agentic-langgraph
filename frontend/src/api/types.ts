@@ -78,6 +78,7 @@ export interface StatusResponse {
   completed_at: string | null
   results?: AnalysisResult
   artifacts?: ArtifactInfo[]
+  assistant_message?: string
 }
 
 export interface JobListItem {
@@ -98,10 +99,4 @@ export interface JobsListResponse {
 
 export interface ErrorResponse {
   detail: string
-}
-
-export interface PlanApprovalRequest {
-  action: 'approve' | 'modify' | 'cancel' | 'refine'
-  plan?: string[]
-  feedback?: string
 }

@@ -39,7 +39,11 @@ const SUBGRAPH_OPTIONS: SubgraphOption[] = [
 interface PlanApprovalProps {
   plan: string[]
   discoverySummary?: string
-  onDecide: (action: 'approve' | 'modify' | 'cancel' | 'refine', plan?: string[], feedback?: string) => Promise<void>
+  onDecide: (
+    action: 'approve' | 'modify' | 'cancel' | 'refine',
+    plan?: string[],
+    feedback?: string,
+  ) => Promise<void>
 }
 
 export function PlanApproval({ plan, discoverySummary, onDecide }: PlanApprovalProps) {
@@ -54,8 +58,7 @@ export function PlanApproval({ plan, discoverySummary, onDecide }: PlanApprovalP
 
   const originalSet = new Set(plan)
   const isModified =
-    selected.size !== originalSet.size ||
-    [...selected].some((id) => !originalSet.has(id))
+    selected.size !== originalSet.size || [...selected].some((id) => !originalSet.has(id))
 
   const handleToggle = (id: string) => {
     setSelected((prev) => {
@@ -257,7 +260,7 @@ export function PlanApproval({ plan, discoverySummary, onDecide }: PlanApprovalP
             size="sm"
             onClick={() => void handleCancel()}
             disabled={isSubmitting}
-            className="text-[--color-error] hover:text-[--color-error] hover:bg-[--color-error]/10"
+            className="text-[--color-error] hover:bg-[--color-error]/10 hover:text-[--color-error]"
           >
             Cancel
           </Button>

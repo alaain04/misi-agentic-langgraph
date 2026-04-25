@@ -34,10 +34,18 @@ class JobDAO:
             },
         )
 
-    async def save_pending_plan(self, job_id: str, partial_result: dict) -> None:
+    async def save_pending_chat(
+        self, job_id: str, assistant_message: str, plan: list[str]
+    ) -> None:
         await self._col.update_one(
             {"_id": job_id},
-            {"$set": {"status": JobStatus.awaiting_approval, "result": partial_result}},
+            {
+                "$set": {
+                    "status": JobStatus.awaiting_approval,
+                    "assistant_message": assistant_message,
+                    "result": {"plan": plan},
+                }
+            },
         )
 
     async def mark_failed(self, job_id: str) -> None:

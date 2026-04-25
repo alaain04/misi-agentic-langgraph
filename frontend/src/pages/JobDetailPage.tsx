@@ -71,7 +71,11 @@ export default function JobDetailPage() {
             <div className="h-px flex-1 bg-[--color-border]" />
           </div>
 
-          <div className={data.results?.discovery?.project_metadata ? 'grid grid-cols-2 gap-6' : undefined}>
+          <div
+            className={
+              data.results?.discovery?.project_metadata ? 'grid grid-cols-2 gap-6' : undefined
+            }
+          >
             {/* Left: job metadata */}
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-3">
@@ -107,27 +111,32 @@ export default function JobDetailPage() {
                   </p>
                   <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 font-mono text-xs">
                     <dt className="tracking-widest text-[--color-muted] uppercase">Name</dt>
-                    <dd className="text-[--color-text]">{data.results.discovery.project_metadata.name}</dd>
+                    <dd className="text-[--color-text]">
+                      {data.results.discovery.project_metadata.name}
+                    </dd>
 
                     <dt className="tracking-widest text-[--color-muted] uppercase">Manager</dt>
-                    <dd className="text-[--color-text]">{data.results.discovery.project_metadata.package_manager}</dd>
+                    <dd className="text-[--color-text]">
+                      {data.results.discovery.project_metadata.package_manager}
+                    </dd>
                   </dl>
                 </div>
 
-                {data.results.discovery.manifest_files && data.results.discovery.manifest_files.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
-                      Manifest Files
-                    </p>
-                    <ul className="space-y-1">
-                      {data.results.discovery.manifest_files.map((file) => (
-                        <li key={file} className="font-mono text-xs text-[--color-text]">
-                          {file}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {data.results.discovery.manifest_files &&
+                  data.results.discovery.manifest_files.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
+                        Manifest Files
+                      </p>
+                      <ul className="space-y-1">
+                        {data.results.discovery.manifest_files.map((file) => (
+                          <li key={file} className="font-mono text-xs text-[--color-text]">
+                            {file}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
               </div>
             )}
           </div>

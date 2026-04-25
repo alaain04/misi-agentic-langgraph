@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { getJobStatus } from '../api/client'
-import { approvePlan } from '../api/analyze'
+import { sendChatMessage } from '../api/analyze'
 import type { StatusResponse } from '../api/types'
 import { usePolling } from '../hooks/usePolling'
 import { Spinner } from '../components/ui/Spinner'
@@ -9,36 +9,55 @@ import { Button } from '../components/ui/Button'
 import { cn } from '../lib/utils'
 
 const SUBGRAPH_LABELS: Record<string, { label: string; description: string }> = {
-  registry: { label: 'Registry', description: 'Check npm registry for outdated versions and vulnerability advisories' },
-  repo: { label: 'Repository', description: 'Analyze GitHub repository health (stars, issues, last commit)' },
-  runtime: { label: 'Runtime', description: 'Verify runtime compatibility and environment configuration' },
-  risk_score: { label: 'Risk Score', description: 'Compute a composite risk score from all available signals' },
-  recommendation: { label: 'Recommendations', description: 'Generate actionable remediation recommendations' },
+  registry: {
+    label: 'Registry',
+    description: 'Check npm registry for outdated versions and vulnerability advisories',
+  },
+  repo: {
+    label: 'Repository',
+    description: 'Analyze GitHub repository health (stars, issues, last commit)',
+  },
+  runtime: {
+    label: 'Runtime',
+    description: 'Verify runtime compatibility and environment configuration',
+  },
+  risk_score: {
+    label: 'Risk Score',
+    description: 'Compute a composite risk score from all available signals',
+  },
+  recommendation: {
+    label: 'Recommendations',
+    description: 'Generate actionable remediation recommendations',
+  },
 }
 
-type AiMessage = { role: 'ai'; plan: string[]; discoverySummary?: string }
+type AiMessage = { role: 'ai'; text: string; plan?: string[] }
 type UserMessage = { role: 'user'; text: string }
 type ChatMessage = AiMessage | UserMessage
-
-function shouldStopPolling(data: StatusResponse): boolean {
-  return (
-    data.status === 'awaiting_approval' ||
-    data.status === 'done' ||
-    data.status === 'failed'
-  )
-}
 
 export default function PlanPage() {
   const { traceId } = useParams<{ traceId: string }>()
   const navigate = useNavigate()
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [feedback, setFeedback] = useState('')
+  const [input, setInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [selectedPlan, setSelectedPlan] = useState<string[]>([])
+  const [isApproved, setIsApproved] = useState(false)
 
-  const lastPlanKeyRef = useRef<string | null>(null)
+  const lastAssistantMessageRef = useRef<string | null>(null)
+  const hadApprovalRef = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const shouldStopPolling = useCallback((data: StatusResponse): boolean => {
+    if (data.status === 'awaiting_approval') {
+      hadApprovalRef.current = true
+      return true
+    }
+    if (data.status === 'running' && hadApprovalRef.current) {
+      return true
+    }
+    return data.status === 'done' || data.status === 'failed'
+  }, [])
 
   const fetchStatus = useCallback((): Promise<StatusResponse> => {
     if (!traceId) return Promise.reject(new Error('No trace ID'))
@@ -55,25 +74,48 @@ export default function PlanPage() {
     startPolling()
   }, [startPolling])
 
-  // When awaiting_approval, push AI message with the plan (deduplicated by plan contents)
+  // When awaiting_approval, push AI message (deduplicated by assistant_message content)
   useEffect(() => {
     if (!data || data.status !== 'awaiting_approval') return
-    const plan = data.results?.plan ?? []
-    const planKey = JSON.stringify(plan)
-    if (planKey === lastPlanKeyRef.current) return
-    lastPlanKeyRef.current = planKey
-    setSelectedPlan(plan)
+    const assistantMessage = data.assistant_message ?? ''
+    if (!assistantMessage) return
+    if (assistantMessage === lastAssistantMessageRef.current) return
+    lastAssistantMessageRef.current = assistantMessage
     setMessages((prev) => [
       ...prev,
       {
         role: 'ai',
-        plan,
-        discoverySummary: data.results?.discovery?.discovery_summary,
+        text: assistantMessage,
+        plan: data.results?.plan,
       },
     ])
   }, [data])
 
-  // Redirect to execution detail once the job moves past planning
+  // Detect approval: when status becomes 'running' after 'awaiting_approval'
+  useEffect(() => {
+    if (!data || !hadApprovalRef.current) return
+    if (data.status === 'running' && !isApproved) {
+      setIsApproved(true)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: 'Plan approved! Execution has started. You will be redirected to the execution detail page in 5 seconds…',
+        },
+      ])
+    }
+  }, [data, isApproved])
+
+  // Redirect 5 seconds after approval
+  useEffect(() => {
+    if (!isApproved || !traceId) return
+    const timer = setTimeout(() => {
+      navigate(`/jobs/${traceId}`, { replace: true })
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [isApproved, navigate, traceId])
+
+  // Redirect to execution detail once the job moves past planning (fallback)
   useEffect(() => {
     if (!data) return
     if (data.status === 'done' || data.status === 'failed') {
@@ -86,57 +128,20 @@ export default function PlanPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isPolling])
 
-  const isAwaitingApproval = data?.status === 'awaiting_approval' && !isPolling
+  const isDisabled = isSubmitting || isPolling
 
-  const handleSendFeedback = async () => {
-    if (!feedback.trim() || !traceId) return
-    const text = feedback.trim()
-    setFeedback('')
-    setMessages((prev) => [...prev, { role: 'user', text }])
+  const handleSend = async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed || !traceId) return
+    setInput('')
+    setMessages((prev) => [...prev, { role: 'user', text: trimmed }])
     setIsSubmitting(true)
     try {
-      await approvePlan(traceId, { action: 'refine', feedback: text })
+      await sendChatMessage(traceId, trimmed)
       resumePolling()
     } finally {
       setIsSubmitting(false)
     }
-  }
-
-  const handleApprove = async () => {
-    if (!traceId) return
-    setIsSubmitting(true)
-    try {
-      const latestAiPlan = [...messages].reverse().find((m): m is AiMessage => m.role === 'ai')?.plan ?? []
-      const originalSet = new Set(latestAiPlan)
-      const selectedSet = new Set(selectedPlan)
-      const isModified =
-        selectedSet.size !== originalSet.size || [...selectedSet].some((id) => !originalSet.has(id))
-      if (isModified) {
-        await approvePlan(traceId, { action: 'modify', plan: selectedPlan })
-      } else {
-        await approvePlan(traceId, { action: 'approve' })
-      }
-      navigate(`/jobs/${traceId}`)
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const handleCancel = async () => {
-    if (!traceId) return
-    setIsSubmitting(true)
-    try {
-      await approvePlan(traceId, { action: 'cancel' })
-      navigate('/jobs')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const toggleStep = (id: string) => {
-    setSelectedPlan((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    )
   }
 
   return (
@@ -156,13 +161,11 @@ export default function PlanPage() {
           02 / plan review
         </span>
         <div className="h-px flex-1 bg-[--color-border]" />
-        {traceId && (
-          <span className="font-mono text-xs text-[--color-muted]">{traceId}</span>
-        )}
+        {traceId && <span className="font-mono text-xs text-[--color-muted]">{traceId}</span>}
       </div>
 
       {/* Chat window */}
-      <div className="min-h-48 space-y-5 rounded-lg border border-[--color-border] bg-[--color-surface] p-5">
+      <div className="min-h-48 space-y-5 rounded-lg">
         {/* Empty state before first message */}
         {messages.length === 0 && !isPolling && !error && (
           <p className="py-8 text-center font-mono text-xs text-[--color-muted]">
@@ -182,70 +185,26 @@ export default function PlanPage() {
             )
           }
 
-          // AI plan message
+          // AI message bubble
           const isLatest = i === messages.length - 1
           return (
-            <div key={i} className={cn('space-y-4', !isLatest && 'opacity-50')}>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-semibold tracking-widest text-[--color-accent] uppercase">
-                  planner
-                </span>
-                <div className="h-px flex-1 bg-[--color-border]" />
-              </div>
-
-              {msg.discoverySummary && (
-                <blockquote className="border-l-2 border-[--color-accent]/40 pl-4">
-                  <p className="font-mono text-xs italic leading-relaxed text-[--color-muted]">
-                    {msg.discoverySummary}
-                  </p>
-                </blockquote>
-              )}
-
-              <div className="space-y-2">
-                <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
-                  Suggested steps
+            <div key={i} className={cn('space-y-3', !isLatest && 'opacity-50')}>
+              <div className="rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
+                <p className="font-mono text-xs leading-relaxed whitespace-pre-wrap text-[--color-text]">
+                  {msg.text}
                 </p>
-                <ul className="space-y-1.5">
-                  {msg.plan.map((id) => {
-                    const meta = SUBGRAPH_LABELS[id]
-                    const checked = selectedPlan.includes(id)
-                    return (
-                      <li key={id}>
-                        <label
-                          className={cn(
-                            'flex cursor-pointer items-start gap-3 rounded border px-3 py-2.5 transition-colors',
-                            isLatest
-                              ? checked
-                                ? 'border-[--color-accent]/40 bg-[--color-surface-raised]'
-                                : 'border-[--color-border] bg-[--color-surface-raised] opacity-60 hover:opacity-90'
-                              : 'border-[--color-border] bg-[--color-surface-raised]',
-                            !isLatest && 'cursor-default',
-                          )}
-                        >
-                          {isLatest && (
-                            <input
-                              type="checkbox"
-                              className="mt-0.5 accent-[--color-accent]"
-                              checked={checked}
-                              onChange={() => toggleStep(id)}
-                              disabled={isSubmitting}
-                            />
-                          )}
-                          <div className="space-y-0.5">
-                            <span className="font-mono text-xs font-medium text-[--color-text]">
-                              {meta?.label ?? id}
-                            </span>
-                            {meta?.description && (
-                              <p className="font-mono text-[10px] text-[--color-muted]">
-                                {meta.description}
-                              </p>
-                            )}
-                          </div>
-                        </label>
-                      </li>
-                    )
-                  })}
-                </ul>
+                {msg.plan && msg.plan.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[--color-border] pt-3">
+                    {msg.plan.map((id) => (
+                      <span
+                        key={id}
+                        className="inline-flex items-center rounded border border-[--color-border] bg-[--color-surface] px-2 py-0.5 font-mono text-[10px] text-[--color-muted]"
+                      >
+                        {SUBGRAPH_LABELS[id]?.label ?? id}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -255,7 +214,7 @@ export default function PlanPage() {
         {isPolling && (
           <div className="flex items-center gap-2 font-mono text-xs text-[--color-muted]">
             <Spinner size="sm" />
-            {messages.length === 0 ? 'Running discovery…' : 'Agent is thinking…'}
+            {messages.length === 0 ? 'Creating the first plan…' : 'Agent is thinking…'}
           </div>
         )}
 
@@ -267,89 +226,78 @@ export default function PlanPage() {
         )}
 
         <div ref={bottomRef} />
-      </div>
-
-      {/* Interaction area — shown only when awaiting approval */}
-      {isAwaitingApproval && (
-        <div className="space-y-4 rounded-lg border border-[--badge-awaiting-border] bg-[--color-surface] p-5">
-          {/* Feedback */}
-          <div className="space-y-2">
-            <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
-              Refine with feedback
-            </p>
-            <div className="flex items-end gap-2">
-              <textarea
-                rows={2}
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                disabled={isSubmitting}
-                placeholder="e.g. skip the runtime check, focus only on security vulnerabilities…"
-                className={cn(
-                  'flex-1 resize-none rounded border border-[--color-border] bg-[--color-surface-raised]',
-                  'px-3 py-2 font-mono text-xs text-[--color-text] placeholder:text-[--color-muted]/40',
-                  'transition-colors focus:border-[--badge-awaiting-border] focus:outline-none',
-                  'disabled:cursor-not-allowed disabled:opacity-40',
-                )}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    void handleSendFeedback()
-                  }
-                }}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleSendFeedback()}
-                disabled={!feedback.trim() || isSubmitting}
-                className="shrink-0"
-              >
-                {isSubmitting ? (
-                  <>
-                    <span className="size-3 animate-spin rounded-full border border-[--color-accent] border-t-transparent" />
-                    Sending…
-                  </>
-                ) : (
-                  'Send'
-                )}
-              </Button>
-            </div>
+        {/* Input area — always visible, disabled while polling/submitting */}
+        <div className="space-y-3 rounded-lg border border-[--color-border] bg-[--color-surface] p-4">
+          <div className="flex h-12 items-stretch gap-2">
+            <textarea
+              rows={2}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={isDisabled}
+              placeholder="Type your response… (Enter to send, Shift+Enter for newline)"
+              className={cn(
+                'h-full flex-1 resize-none rounded border border-[--color-border] bg-[--color-surface-raised]',
+                'px-3 py-2 font-mono text-xs text-[--color-text] placeholder:text-[--color-muted]/40',
+                'transition-colors focus:border-[--color-accent] focus:outline-none',
+                'disabled:cursor-not-allowed disabled:opacity-40',
+              )}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void handleSend(input)
+                }
+              }}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleSend(input)}
+              disabled={!input.trim() || isDisabled}
+              className="h-full"
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="size-3 animate-spin rounded-full border border-[--color-accent] border-t-transparent" />
+                  Sending…
+                </>
+              ) : (
+                'Send'
+              )}
+            </Button>
           </div>
 
-          {/* Approve / Cancel */}
-          <div className="flex items-center justify-between border-t border-[--color-border] pt-4">
-            <span className="font-mono text-xs text-[--color-muted]">
-              {selectedPlan.length} step{selectedPlan.length !== 1 ? 's' : ''} selected
+          {/* Quick-action shortcuts */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] tracking-widest text-[--color-muted] uppercase">
+              quick actions:
             </span>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => void handleCancel()}
-                disabled={isSubmitting}
-                className="text-[--color-error] hover:bg-[--color-error]/10 hover:text-[--color-error]"
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => void handleApprove()}
-                disabled={selectedPlan.length === 0 || isSubmitting}
-              >
-                {isSubmitting ? (
-                  <>
-                    <span className="size-3 animate-spin rounded-full border border-[--color-bg] border-t-transparent" />
-                    Submitting…
-                  </>
-                ) : (
-                  'Run Analysis'
-                )}
-              </Button>
-            </div>
+            <button
+              type="button"
+              disabled={isDisabled}
+              onClick={() => void handleSend('Yes, proceed with the plan')}
+              className={cn(
+                'rounded border border-[--badge-done-border] px-2.5 py-1 font-mono text-[10px]',
+                'text-[--badge-done-text] transition-colors hover:bg-[--badge-done-bg]',
+                'disabled:cursor-not-allowed disabled:opacity-40',
+              )}
+            >
+              Yes, proceed
+            </button>
+            <button
+              type="button"
+              disabled={isDisabled}
+              onClick={() => void handleSend('Cancel this analysis')}
+              className={cn(
+                'rounded border border-[--badge-failed-border] px-2.5 py-1 font-mono text-[10px]',
+                'text-[--badge-failed-text] transition-colors hover:bg-[--badge-failed-bg]',
+                'disabled:cursor-not-allowed disabled:opacity-40',
+              )}
+            >
+              Cancel analysis
+            </button>
           </div>
         </div>
-      )}
+      </div>
     </main>
   )
 }

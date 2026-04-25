@@ -9,7 +9,8 @@ interface BadgeProps {
 const variants: Record<JobStatus, string> = {
   pending: 'bg-[--badge-pending-bg] text-[--badge-pending-text] border-[--badge-pending-border]',
   running: 'bg-[--badge-running-bg] text-[--badge-running-text] border-[--badge-running-border]',
-  awaiting_approval: 'bg-[--badge-awaiting-bg] text-[--badge-awaiting-text] border-[--badge-awaiting-border]',
+  awaiting_approval:
+    'bg-[--badge-awaiting-bg] text-[--badge-awaiting-text] border-[--badge-awaiting-border]',
   done: 'bg-[--badge-done-bg] text-[--badge-done-text] border-[--badge-done-border]',
   failed: 'bg-[--badge-failed-bg] text-[--badge-failed-text] border-[--badge-failed-border]',
 }

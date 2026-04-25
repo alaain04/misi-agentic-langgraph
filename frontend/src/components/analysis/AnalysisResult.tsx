@@ -108,7 +108,10 @@ export function AnalysisResult({ status, result }: AnalysisResultProps) {
             Dependency Tree
           </p>
           <div className="overflow-hidden rounded border border-[--color-border] bg-[--color-surface-raised]">
-            <DependencyTree data={discovery.dependency_tree} projectName={discovery.project_metadata?.name} />
+            <DependencyTree
+              data={discovery.dependency_tree}
+              projectName={discovery.project_metadata?.name}
+            />
           </div>
         </div>
       )}

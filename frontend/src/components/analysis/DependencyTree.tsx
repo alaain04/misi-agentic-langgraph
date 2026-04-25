@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react'
 import * as d3 from 'd3'
 import { cn } from '../../lib/utils'
-import type { DependencyTree as DependencyTreeData, DependencyTreeNode, DepTreeDatum } from '../../api/types'
+import type {
+  DependencyTree as DependencyTreeData,
+  DependencyTreeNode,
+  DepTreeDatum,
+} from '../../api/types'
 
 // ── Augmented D3 node type ─────────────────────────────────────────────────────
 
@@ -132,10 +136,7 @@ export function DependencyTree({ data, projectName, className, height }: Depende
     let selectedNode: TreeNode | null = null
 
     // Curved link path generator (top-to-bottom)
-    function linkPath(
-      src: { x: number; y: number },
-      tgt: { x: number; y: number },
-    ): string {
+    function linkPath(src: { x: number; y: number }, tgt: { x: number; y: number }): string {
       const midY = (src.y + tgt.y) / 2
       return `M${src.x},${src.y} C${src.x},${midY} ${tgt.x},${midY} ${tgt.x},${tgt.y}`
     }
@@ -211,7 +212,9 @@ export function DependencyTree({ data, projectName, className, height }: Depende
       link
         .exit()
         .transition(t)
-        .attr('d', () => linkPath({ x: clickedNode.x, y: clickedNode.y }, { x: clickedNode.x, y: clickedNode.y }))
+        .attr('d', () =>
+          linkPath({ x: clickedNode.x, y: clickedNode.y }, { x: clickedNode.x, y: clickedNode.y }),
+        )
         .remove()
 
       // ── Nodes ──────────────────────────────────────────────────────────────
@@ -362,7 +365,7 @@ export function DependencyTree({ data, projectName, className, height }: Depende
         aria-label="Dependency tree visualization"
         role="img"
       />
-      <p className="absolute right-3 bottom-3 select-none font-mono text-[10px] text-[--color-muted]">
+      <p className="absolute right-3 bottom-3 font-mono text-[10px] text-[--color-muted] select-none">
         scroll to zoom · drag node to reposition · click node to expand/highlight edges
       </p>
     </div>

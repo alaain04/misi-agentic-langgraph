@@ -8,7 +8,11 @@ export function SubgraphPanel({ nodeId, results }: PanelProps) {
   const entry = results?.subgraph_results?.find((r) => r.subgraph === nodeId)
 
   if (!entry) {
-    return <p className="font-mono text-xs text-[--color-muted]">No output recorded for this subgraph.</p>
+    return (
+      <p className="font-mono text-xs text-[--color-muted]">
+        No output recorded for this subgraph.
+      </p>
+    )
   }
 
   const formatted = JSON.stringify(entry.data, null, 2)

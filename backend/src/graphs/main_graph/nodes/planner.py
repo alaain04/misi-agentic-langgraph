@@ -1,4 +1,4 @@
-"""Planner node — LLM decides which subgraphs to run based on discovery output."""
+"""Planner — internal function called by orchestrator to select analysis subgraphs."""
 
 import json
 import logging
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
-_VALID_SUBGRAPHS = {"registry", "repo", "runtime", "risk_score", "recommendation"}
+VALID_SUBGRAPHS = {"registry", "repo", "runtime", "risk_score", "recommendation"}
 
 _FALLBACK_PLAN = ["registry", "risk_score", "recommendation"]
 
@@ -20,19 +20,31 @@ summary, its direct dependencies, and a user concern, decide which analysis
 subgraphs to run. Available subgraphs:
 
 - registry: checks npm registry for outdated versions and vulnerability advisories
-- repo: analyzes the GitHub repository for stars, issues, last commit, maintenance 
-status
+- repo: analyzes the GitHub repository for stars, issues, last commit,
+maintenance status
 - runtime: checks runtime compatibility and environment configuration
 - risk_score: computes a composite risk score from all available signals
 - recommendation: generates actionable remediation recommendations
 
 Return ONLY a valid JSON array of subgraph names, e.g.: ["registry", "risk_score"]
 Choose only the subgraphs relevant to the user's concern. Always include
-"risk_score" and "recommendation" when there are dependencies to analyze.\
+"risk_score" and "recommendation" when there are dependencies to analyze.
+If additional instructions are provided, honor them — 
+they reflect updated user preferences.\
 """
 
 
-async def planner(state: MainState) -> dict:
+async def run_planner(state: MainState, extra_instructions: str = "") -> list[str]:
+    """\
+    Select subgraphs to run based on discovery context and optional user instructions.
+
+    Args:
+        state: current MainState (used for discovery context and concern)
+        extra_instructions: optional user feedback to steer or refine the plan
+
+    Returns:
+        list of subgraph names to execute
+    """
     concern = state.get("concern", "")
     summary = state.get("discovery_summary", "")
     deps = state.get("direct_dependencies", [])
@@ -46,6 +58,10 @@ async def planner(state: MainState) -> dict:
         f"Discovery summary: {summary}\n"
         f"Direct dependencies ({len(deps)}): {dep_list}"
     )
+    if extra_instructions:
+        user_message += (
+            f"\n\nAdditional instructions from the user: {extra_instructions}"
+        )
 
     response = await _llm.ainvoke(
         [
@@ -61,12 +77,12 @@ async def planner(state: MainState) -> dict:
             if raw.startswith("json"):
                 raw = raw[4:]
         plan = json.loads(raw.strip())
-        plan = [s for s in plan if s in _VALID_SUBGRAPHS]
+        plan = [s for s in plan if s in VALID_SUBGRAPHS]
         if not plan:
             plan = _FALLBACK_PLAN
     except (json.JSONDecodeError, TypeError, AttributeError):
-        logger.warning("planner failed to parse LLM response, using fallback plan")
+        logger.warning("run_planner: failed to parse LLM response, using fallback plan")
         plan = _FALLBACK_PLAN
 
-    logger.info("planner selected subgraphs: %s", plan)
-    return {"plan": plan}
+    logger.info("run_planner: selected subgraphs: %s", plan)
+    return plan
