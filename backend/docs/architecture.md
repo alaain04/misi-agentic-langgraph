@@ -65,24 +65,6 @@ Jobs are stored in MongoDB collection `jobs`. The `_id` field is an `ObjectId` s
 
 ---
 
-## Environment variables
-
-Copy `.env.example` to `.env`:
-
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `OPENAI_API_KEY` | Yes | — | LLM calls in `build_dependency_summary` |
-| `MONGODB_URI` | Yes | `mongodb://localhost:27017/misi-langgraph` | Job persistence |
-| `LANGSMITH_API_KEY` | No | — | LangSmith tracing |
-| `LANGSMITH_PROJECT` | No | — | LangSmith project name |
-
-Run MongoDB locally with:
-
-```bash
-docker compose up -d
-```
-
----
 
 ## Full pipeline (planned)
 

@@ -293,8 +293,17 @@ def _submit(lock_file_name: str, concern: str) -> str:
         }
     )
     result = subprocess.run(
-        ["curl", "-s", "-X", "POST", f"{BASE_URL}/analyze",
-         "-H", "Content-Type: application/json", "-d", payload],
+        [
+            "curl",
+            "-s",
+            "-X",
+            "POST",
+            f"{BASE_URL}/analyze",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            payload,
+        ],
         capture_output=True,
         text=True,
     )

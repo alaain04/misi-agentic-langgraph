@@ -14,12 +14,14 @@ class JobStatus(StrEnum):
 
 class Job(BaseModel):
     id: str = Field(default_factory=lambda: str(ObjectId()))
-    package_json: str
-    lock_file: str
-    lock_file_name: str
+    package_json: str | None = None
+    lock_file: str | None = None
+    lock_file_name: str | None = None
     concern: str
     status: JobStatus = JobStatus.pending
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = None
+    result: dict | None = None
 
     def to_doc(self) -> dict:
         doc = self.model_dump()

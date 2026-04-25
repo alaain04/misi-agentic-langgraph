@@ -31,11 +31,11 @@ async def run_discovery(
 
         if result.get("discovery_error"):
             logger.error("job=%s error=%s", job_id, result["discovery_error"])
-            await dao.update_status(job_id, JobStatus.failed)
+            await dao.mark_failed(job_id)
         else:
             logger.info("job=%s done summary=%s", job_id, result["discovery_summary"])
             await dao.save_result(job_id, result)
 
     except Exception:
         logger.exception("job=%s unhandled error in graph", job_id)
-        await dao.update_status(job_id, JobStatus.failed)
+        await dao.mark_failed(job_id)

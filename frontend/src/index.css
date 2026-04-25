@@ -1,0 +1,128 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+/* ─── Tailwind v4 theme extension ────────────────────────────── */
+@theme {
+  --font-display: 'Syne', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+
+  /* Surface scale */
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-border: var(--color-border);
+
+  /* Text */
+  --color-text: var(--color-text);
+  --color-muted: var(--color-muted);
+
+  /* Accent */
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-glow: var(--color-accent-glow);
+
+  /* Semantic */
+  --color-error: var(--color-error);
+}
+
+/* ─── Design tokens ───────────────────────────────────────────── */
+:root {
+  /* Deep graphite background — not pure black, has warmth */
+  --color-bg: #0e0f11;
+  --color-surface: #161820;
+  --color-surface-raised: #1d1f2a;
+  --color-border: #2a2d3a;
+
+  /* Text */
+  --color-text: #e8e9f0;
+  --color-muted: #6b7191;
+
+  /* Amber-gold accent — warm, technical, distinctive */
+  --color-accent: #f5a623;
+  --color-accent-hover: #fbb740;
+  --color-accent-glow: rgba(245, 166, 35, 0.25);
+
+  /* Error */
+  --color-error: #e05252;
+
+  /* Badge colors */
+  --badge-pending-bg: rgba(107, 113, 145, 0.12);
+  --badge-pending-text: #9ba4c7;
+  --badge-pending-border: rgba(107, 113, 145, 0.25);
+
+  --badge-running-bg: rgba(245, 166, 35, 0.1);
+  --badge-running-text: #f5a623;
+  --badge-running-border: rgba(245, 166, 35, 0.3);
+
+  --badge-done-bg: rgba(52, 199, 133, 0.1);
+  --badge-done-text: #34c785;
+  --badge-done-border: rgba(52, 199, 133, 0.3);
+
+  --badge-failed-bg: rgba(224, 82, 82, 0.1);
+  --badge-failed-text: #e05252;
+  --badge-failed-border: rgba(224, 82, 82, 0.3);
+}
+
+/* ─── Base reset ──────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+
+  /* Subtle grid texture */
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(245, 166, 35, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 90%, rgba(100, 108, 200, 0.04) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* ─── Custom animations ───────────────────────────────────────── */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+/* ─── Scrollbar styling (webkit) ─────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* ─── Select option styling (limited but useful) ─────────────── */
+select option {
+  background-color: var(--color-surface-raised);
+  color: var(--color-text);
+}

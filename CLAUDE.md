@@ -1,37 +1,64 @@
-# CLAUDE.md
+## CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance for Claude Code (claude.ai/code) when working with this repository.
 
-## Commands
+## Project Structure
 
-```bash
-uv sync          # install dependencies
-uv run dev       # run the API server
-uv run lint      # lint (ruff check)
-uv run format    # format (ruff format)
-uv run test      # run tests
-docker compose up -d   # start MongoDB
+```
+backend/   # Python/LangGraph API (FastAPI, LangGraph, MongoDB)
+frontend/  # React + TypeScript + Vite web client
 ```
 
-## Documentation
+---
 
-- **[docs/architecture.md](docs/architecture.md)** — system overview, request lifecycle, layer responsibilities, job status lifecycle, environment setup
-- **[docs/graphs.md](docs/graphs.md)** — LangGraph pipeline: current ProjectDiscovery subgraph (implemented) + full planned pipeline
+### Docs
 
-## Quick orientation
+- [backend/docs/architecture.md](backend/docs/architecture.md): system overview, request lifecycle, layers, job status, env setup
+- [backend/docs/graphs.md](backend/docs/graphs.md): LangGraph pipeline (current + planned)
 
-This is a LangGraph-powered dependency risk analysis API:
+### Key conventions
 
-1. `POST /analyze` receives a repo URL + concern → creates a `Job` in MongoDB (`status=pending`) → fires `asyncio.create_task` → returns `202` with `trace_id`
-2. The background task (`job_runner.py`) invokes the LangGraph subgraph, transitioning status to `running` → `done` | `failed`
-3. `GET /analyze/{trace_id}` lets the client poll for status
+- See [backend/README.md](backend/README.md#code-conventions) for backend code conventions.
+- See [frontend/README.md](frontend/README.md#code-conventions) for frontend code conventions.
 
-Layer map: `src/api/` → routes · `src/models/` → entities · `src/db/` → connection · `src/services/` → DAO + runner · `src/graphs/` → LangGraph subgraphs · `src/utils/` → config + LLM factory
+---
 
-## Key conventions
+## Frontend
 
-- All I/O is async (`AsyncMongoClient`, async route handlers, `httpx.AsyncClient` in nodes)
-- Node names in `constants.py`, routing logic in `routes.py` — no raw strings in `graph.py`
-- HTTP nodes use `RetryPolicy(max_attempts=3, backoff_factor=2.0)`
-- Error paths set `discovery_error` and short-circuit; exceptions do not bubble out of nodes
-- `job_dao.py` owns all MongoDB access — graph nodes do not touch the database
+**Location:** `frontend/`
+
+### Main commands (run from `frontend/`):
+
+```bash
+pnpm install        # install dependencies
+pnpm dev            # start Vite dev server
+pnpm build          # build for production
+pnpm lint           # run ESLint
+pnpm format         # run Prettier
+```
+
+### Stack
+
+- React 18 + TypeScript
+- Vite (dev/build tooling)
+- ESLint, Prettier, Husky (lint/format/pre-commit)
+- Tailwind CSS (optional, see config)
+
+### Component implementation
+
+Wrap new UI components in the `frontend/src/` directory. Use idiomatic React patterns (function components, hooks, etc). Place shared assets in `frontend/src/assets/`. Main entry: `frontend/src/App.tsx`.
+
+---
+
+## Integration
+
+- The backend exposes a REST API (`/analyze`, etc.) for the frontend to consume.
+- Develop and test backend and frontend independently; connect via HTTP (see backend docs for endpoints).
+
+---
+
+## Contribution
+
+- Follow async/await and type safety best practices in both backend and frontend.
+- Add/modify components in `frontend/src/` and backend logic in `backend/src/`.
+- See respective README.md files for more details and advanced usage.
