@@ -52,9 +52,17 @@ Poll the status of a previously submitted job. When the job is done, `result` is
 ```json
 {
   "trace_id": "682a1f3c4e5d6a7b8c9d0e1f",
-  "status": "pending" | "running" | "done" | "failed",
+  "status": "pending" | "running" | "awaiting_approval" | "done" | "failed",
   "completed_at": "2026-04-25T12:00:00Z" | null,
-  "result": { ... } | null
+  "result": { ... } | null,
+  "artifacts": [
+    {
+      "node": "project_discovery",
+      "status": "running" | "done" | "failed",
+      "started_at": "2026-04-25T12:00:01Z",
+      "completed_at": "2026-04-25T12:00:03Z" | null
+    }
+  ]
 }
 ```
 
@@ -64,6 +72,16 @@ Poll the status of a previously submitted job. When the job is done, `result` is
 | `status` | `JobStatus` | Current job status |
 | `completed_at` | `string (ISO 8601) \| null` | Timestamp of completion; present when status is `done` or `failed` |
 | `result` | `object \| null` | Analysis result; present only when status is `done` |
+| `artifacts` | `Artifact[]` | Per-node execution status entries; empty until the job starts running |
+
+**Artifact fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `node` | `string` | Graph node or subgraph name (e.g. `"project_discovery"`, `"registry"`) |
+| `status` | `"running" \| "done" \| "failed"` | Current execution status of this node |
+| `started_at` | `string (ISO 8601)` | When the node started executing |
+| `completed_at` | `string (ISO 8601) \| null` | When the node finished; null while still running |
 
 **Response — 404 Not Found**
 
@@ -71,6 +89,57 @@ Poll the status of a previously submitted job. When the job is done, `result` is
 {
   "detail": "trace_id not found"
 }
+```
+
+---
+
+## POST /analyze/{trace_id}/approve
+
+Submit a plan approval decision for a job that is `awaiting_approval`. Resumes the paused LangGraph execution in the background.
+
+**Path parameters**
+
+| Param | Type | Description |
+|---|---|---|
+| `trace_id` | `string` | The `trace_id` returned by `POST /analyze` |
+
+**Request body**
+
+```json
+{
+  "action": "approve" | "modify" | "cancel" | "refine",
+  "plan": ["registry", "risk_score", "recommendation"],
+  "feedback": "Please also include the repo subgraph."
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action` | `"approve" \| "modify" \| "cancel" \| "refine"` | yes | What to do with the generated plan |
+| `plan` | `string[]` | no | Replacement subgraph list; required when `action` is `"modify"`, ignored otherwise |
+| `feedback` | `string` | no | Natural language feedback used to refine the plan via LLM; required when `action` is `"refine"`, ignored otherwise. The job remains in `awaiting_approval` after a `refine` action. |
+
+**Response — 202 Accepted**
+
+```json
+{
+  "trace_id": "682a1f3c4e5d6a7b8c9d0e1f",
+  "status": "running"
+}
+```
+
+**Response — 404 Not Found**
+
+```json
+{ "detail": "trace_id not found" }
+```
+
+**Response — 409 Conflict**
+
+Returned when the job is not currently in `awaiting_approval` status.
+
+```json
+{ "detail": "Job is not awaiting approval (status: done)" }
 ```
 
 ---
@@ -127,7 +196,9 @@ List all analysis jobs with pagination, sorted by creation time descending.
 ## Job status lifecycle
 
 ```
-pending → running → done
+pending → running → awaiting_approval → running → done
+                                                 ↘ failed
+                  ↘ done
                   ↘ failed
 ```
 
@@ -135,6 +206,7 @@ pending → running → done
 |---|---|
 | `pending` | Job created, not yet started |
 | `running` | LangGraph pipeline is executing |
+| `awaiting_approval` | Planner has produced a plan; waiting for human approval via `POST /analyze/{trace_id}/approve` |
 | `done` | Analysis completed successfully |
 | `failed` | Pipeline encountered an unrecoverable error |
 
@@ -145,7 +217,7 @@ pending → running → done
 ```ts
 type LockFileName = "package-lock.json" | "yarn.lock" | "pnpm-lock.yaml";
 
-type JobStatus = "pending" | "running" | "done" | "failed";
+type JobStatus = "pending" | "running" | "awaiting_approval" | "done" | "failed";
 
 interface AnalyzeRequest {
   package_json: string;
@@ -159,11 +231,19 @@ interface AnalyzeResponse {
   status: JobStatus;
 }
 
+interface Artifact {
+  node: string;
+  status: "running" | "done" | "failed";
+  started_at: string;
+  completed_at: string | null;
+}
+
 interface StatusResponse {
   trace_id: string;
   status: JobStatus;
   completed_at: string | null;
   result: Record<string, unknown> | null;
+  artifacts: Artifact[];
 }
 
 interface JobListItem {
@@ -179,6 +259,17 @@ interface JobsListResponse {
   page: number;
   limit: number;
   pages: number;
+}
+
+interface PlanApprovalRequest {
+  action: "approve" | "modify" | "cancel" | "refine";
+  plan?: string[];
+  feedback?: string;
+}
+
+interface PlanApprovalResponse {
+  trace_id: string;
+  status: "running";
 }
 
 interface ErrorResponse {

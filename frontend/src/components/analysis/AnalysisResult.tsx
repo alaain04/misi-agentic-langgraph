@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import type { JobStatus, DiscoveryResult } from '../../api/types'
+import type { JobStatus, AnalysisResult } from '../../api/types'
+import { DependencyTree } from './DependencyTree'
 
 interface AnalysisResultProps {
   status: JobStatus
-  result: DiscoveryResult | undefined
+  result: AnalysisResult | undefined
 }
 
 export function AnalysisResult({ status, result }: AnalysisResultProps) {
@@ -29,6 +30,7 @@ export function AnalysisResult({ status, result }: AnalysisResultProps) {
 
   if (status !== 'done') return null
 
+  const discovery = result?.discovery
   const formatted = JSON.stringify(result, null, 2)
 
   const handleCopy = () => {
@@ -38,8 +40,8 @@ export function AnalysisResult({ status, result }: AnalysisResultProps) {
     })
   }
 
-  const directCount = result?.project_metadata?.direct_dependencies_count ?? 0
-  const transitiveCount = result?.transitive_dependencies?.length ?? 0
+  const directCount = discovery?.project_metadata?.direct_dependencies_count ?? 0
+  const transitiveCount = discovery?.transitive_dependencies?.length ?? 0
 
   return (
     <div className="space-y-6 rounded-lg border border-[--color-border] bg-[--color-surface] p-6">
@@ -51,47 +53,8 @@ export function AnalysisResult({ status, result }: AnalysisResultProps) {
         <div className="h-px flex-1 bg-[--color-border]" />
       </div>
 
-      {/* 1. Discovery summary */}
-      {result?.discovery_summary && (
-        <div className="space-y-2">
-          <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
-            Discovery Summary
-          </p>
-          <div className="rounded border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
-            <p className="font-mono text-sm leading-relaxed text-[--color-text]">
-              {result.discovery_summary}
-            </p>
-          </div>
-
-          {result.discovery_error && (
-            <div className="rounded border border-[--color-error]/30 bg-[--color-error]/5 px-4 py-3">
-              <p className="font-mono text-xs leading-relaxed text-[--color-error]">
-                <span className="font-semibold">Warning: </span>
-                {result.discovery_error}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 2. Project metadata */}
-      {result?.project_metadata && (
-        <div className="space-y-2">
-          <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
-            Project Metadata
-          </p>
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 rounded border border-[--color-border] bg-[--color-surface-raised] px-4 py-3 font-mono text-xs">
-            <dt className="tracking-widest text-[--color-muted] uppercase">Name</dt>
-            <dd className="text-[--color-text]">{result.project_metadata.name}</dd>
-
-            <dt className="tracking-widest text-[--color-muted] uppercase">Package Manager</dt>
-            <dd className="text-[--color-text]">{result.project_metadata.package_manager}</dd>
-          </dl>
-        </div>
-      )}
-
-      {/* 3. Dependency counts */}
-      {result?.project_metadata && (
+      {/* 1. Dependency counts */}
+      {discovery?.project_metadata && (
         <div className="space-y-2">
           <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
             Dependencies
@@ -115,23 +78,42 @@ export function AnalysisResult({ status, result }: AnalysisResultProps) {
         </div>
       )}
 
-      {/* 4. Manifest files */}
-      {result?.manifest_files && result.manifest_files.length > 0 && (
+      {/* 2. Discovery summary */}
+      {discovery?.discovery_summary && (
         <div className="space-y-2">
           <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
-            Manifest Files
+            Discovery Summary
           </p>
-          <ul className="divide-y divide-[--color-border] rounded border border-[--color-border] bg-[--color-surface-raised]">
-            {result.manifest_files.map((file) => (
-              <li key={file} className="px-4 py-2 font-mono text-xs text-[--color-text]">
-                {file}
-              </li>
-            ))}
-          </ul>
+          <div className="rounded border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
+            <p className="font-mono text-sm leading-relaxed text-[--color-text]">
+              {discovery.discovery_summary}
+            </p>
+          </div>
+
+          {discovery.discovery_error && (
+            <div className="rounded border border-[--color-error]/30 bg-[--color-error]/5 px-4 py-3">
+              <p className="font-mono text-xs leading-relaxed text-[--color-error]">
+                <span className="font-semibold">Warning: </span>
+                {discovery.discovery_error}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 5. Raw JSON (collapsible) */}
+      {/* 3. Dependency tree */}
+      {discovery?.dependency_tree && Object.keys(discovery.dependency_tree).length > 0 && (
+        <div className="space-y-2">
+          <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
+            Dependency Tree
+          </p>
+          <div className="overflow-hidden rounded border border-[--color-border] bg-[--color-surface-raised]">
+            <DependencyTree data={discovery.dependency_tree} projectName={discovery.project_metadata?.name} />
+          </div>
+        </div>
+      )}
+
+      {/* 4. Raw JSON (collapsible) */}
       <div className="space-y-2">
         <button
           type="button"

@@ -9,6 +9,7 @@ interface BadgeProps {
 const variants: Record<JobStatus, string> = {
   pending: 'bg-[--badge-pending-bg] text-[--badge-pending-text] border-[--badge-pending-border]',
   running: 'bg-[--badge-running-bg] text-[--badge-running-text] border-[--badge-running-border]',
+  awaiting_approval: 'bg-[--badge-awaiting-bg] text-[--badge-awaiting-text] border-[--badge-awaiting-border]',
   done: 'bg-[--badge-done-bg] text-[--badge-done-text] border-[--badge-done-border]',
   failed: 'bg-[--badge-failed-bg] text-[--badge-failed-text] border-[--badge-failed-border]',
 }
@@ -16,6 +17,7 @@ const variants: Record<JobStatus, string> = {
 const labels: Record<JobStatus, string> = {
   pending: 'pending',
   running: 'running',
+  awaiting_approval: 'awaiting approval',
   done: 'done',
   failed: 'failed',
 }
@@ -33,7 +35,8 @@ export function Badge({ status, className }: BadgeProps) {
         className={cn(
           'size-1.5 rounded-full',
           status === 'running' && 'animate-pulse bg-current',
-          status !== 'running' && 'bg-current',
+          status === 'awaiting_approval' && 'animate-[pulse_2s_ease-in-out_infinite] bg-current',
+          status !== 'running' && status !== 'awaiting_approval' && 'bg-current',
         )}
       />
       {labels[status]}

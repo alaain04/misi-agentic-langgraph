@@ -1,0 +1,5 @@
+PROJECT_DISCOVERY = "project_discovery"
+PLANNER = "planner"
+PLAN_REVIEW = "plan_review"
+RUN_SUBGRAPH = "run_subgraph"
+FINAL_REPORT = "final_report"

@@ -34,6 +34,12 @@ class JobDAO:
             },
         )
 
+    async def save_pending_plan(self, job_id: str, partial_result: dict) -> None:
+        await self._col.update_one(
+            {"_id": job_id},
+            {"$set": {"status": JobStatus.awaiting_approval, "result": partial_result}},
+        )
+
     async def mark_failed(self, job_id: str) -> None:
         await self._col.update_one(
             {"_id": job_id},
@@ -44,6 +50,53 @@ class JobDAO:
                 }
             },
         )
+
+    async def start_artifact(self, job_id: str, node: str) -> None:
+        """Insert or update an artifact entry as 'running'."""
+        now = datetime.now(UTC)
+        artifact = {
+            "node": node,
+            "status": "running",
+            "started_at": now,
+            "completed_at": None,
+        }
+        result = await self._col.update_one(
+            {"_id": job_id, "artifacts.node": node},
+            {
+                "$set": {
+                    "artifacts.$.status": "running",
+                    "artifacts.$.started_at": now,
+                    "artifacts.$.completed_at": None,
+                }
+            },
+        )
+        if result.matched_count == 0:
+            await self._col.update_one(
+                {"_id": job_id},
+                {"$push": {"artifacts": artifact}},
+            )
+
+    async def complete_artifact(self, job_id: str, node: str, status: str) -> None:
+        """Mark an artifact as done or failed. Creates entry if missing."""
+        now = datetime.now(UTC)
+        result = await self._col.update_one(
+            {"_id": job_id, "artifacts.node": node},
+            {"$set": {"artifacts.$.status": status, "artifacts.$.completed_at": now}},
+        )
+        if result.matched_count == 0:
+            await self._col.update_one(
+                {"_id": job_id},
+                {
+                    "$push": {
+                        "artifacts": {
+                            "node": node,
+                            "status": status,
+                            "started_at": now,
+                            "completed_at": now,
+                        }
+                    }
+                },
+            )
 
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})

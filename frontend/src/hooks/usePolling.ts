@@ -5,6 +5,7 @@ export interface UsePollingResult<T> {
   error: Error | null
   isPolling: boolean
   startPolling: () => void
+  resumePolling: () => void
 }
 
 export function usePolling<T>(
@@ -27,6 +28,12 @@ export function usePolling<T>(
 
   const startPolling = useCallback(() => {
     setData(null)
+    setError(null)
+    setIsPolling(true)
+  }, [])
+
+  // Resume polling without clearing existing data (avoids UI flicker)
+  const resumePolling = useCallback(() => {
     setError(null)
     setIsPolling(true)
   }, [])
@@ -60,5 +67,5 @@ export function usePolling<T>(
     }
   }, [isPolling, interval])
 
-  return { data, error, isPolling, startPolling }
+  return { data, error, isPolling, startPolling, resumePolling }
 }

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from src.models.job import Job, JobStatus
 from src.services.job_dao import JobDAO
-from src.services.job_runner import run_discovery
+from src.services.job_runner import resume_analysis, run_analysis
 
 router = APIRouter()
 
@@ -26,8 +26,17 @@ class AnalysisStatusResponse(BaseModel):
     trace_id: str
     status: JobStatus
     concern: str
+    package_json: str | None = None
+    lock_file_name: str | None = None
     completed_at: datetime | None = None
-    result: dict | None = None
+    results: dict | None = None
+    artifacts: list[dict] = []
+
+
+class PlanApprovalRequest(BaseModel):
+    action: Literal["approve", "modify", "cancel", "refine"]
+    plan: list[str] | None = None
+    feedback: str | None = None
 
 
 class JobListItem(BaseModel):
@@ -59,7 +68,7 @@ async def analyze(request: AnalysisRequest):
     await dao.create(job)
 
     asyncio.create_task(
-        run_discovery(
+        run_analysis(
             job_id=job.id,
             package_json=job.package_json,
             lock_file=job.lock_file,
@@ -83,9 +92,32 @@ async def get_analysis_status(trace_id: str):
         trace_id=job.id,
         status=job.status,
         concern=job.concern,
+        package_json=job.package_json,
+        lock_file_name=job.lock_file_name,
         completed_at=job.completed_at,
-        result=job.result,
+        results=job.result,
+        artifacts=job.artifacts,
     )
+
+
+@router.post("/analyze/{trace_id}/approve", status_code=202)
+async def approve_plan(trace_id: str, request: PlanApprovalRequest):
+    dao = JobDAO()
+    job = await dao.get(trace_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="trace_id not found")
+    if job.status != JobStatus.awaiting_approval:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is not awaiting approval (status: {job.status})",
+        )
+    decision = {"action": request.action}
+    if request.action == "modify" and request.plan:
+        decision["plan"] = request.plan
+    if request.action == "refine" and request.feedback:
+        decision["feedback"] = request.feedback
+    asyncio.create_task(resume_analysis(job_id=trace_id, decision=decision))
+    return {"trace_id": trace_id, "status": JobStatus.running}
 
 
 @router.get("/jobs", response_model=JobsListResponse)
@@ -108,4 +140,6 @@ async def list_jobs(
         )
         for j in jobs
     ]
-    return JobsListResponse(items=items, total=total, page=page, limit=limit, pages=pages)
+    return JobsListResponse(
+        items=items, total=total, page=page, limit=limit, pages=pages
+    )

@@ -61,6 +61,10 @@
   --badge-failed-bg: rgba(224, 82, 82, 0.1);
   --badge-failed-text: #e05252;
   --badge-failed-border: rgba(224, 82, 82, 0.3);
+
+  --badge-awaiting-bg: rgba(234, 179, 8, 0.1);
+  --badge-awaiting-text: #eab308;
+  --badge-awaiting-border: rgba(234, 179, 8, 0.3);
 }
 
 /* ─── Base reset ──────────────────────────────────────────────── */
