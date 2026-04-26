@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import type { PanelProps } from './DiscoveryPanel'
 
-export function SubgraphPanel({ nodeId, results }: PanelProps) {
+export function SubgraphPanel({ nodeId, results, artifacts }: PanelProps) {
   const [rawOpen, setRawOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const entry = results?.subgraph_results?.find((r) => r.subgraph === nodeId)
+  // Prefer live artifact result (available as soon as node completes),
+  // fall back to the finalized subgraph_results entry.
+  const artifact = artifacts?.find((a) => a.node === nodeId)
+  const data: unknown =
+    artifact?.result ?? results?.subgraph_results?.find((r) => r.subgraph === nodeId)?.data
 
-  if (!entry) {
+  if (data === undefined || data === null) {
     return (
       <p className="font-mono text-xs text-[--color-muted]">
         No output recorded for this subgraph.
@@ -15,7 +19,7 @@ export function SubgraphPanel({ nodeId, results }: PanelProps) {
     )
   }
 
-  const formatted = JSON.stringify(entry.data, null, 2)
+  const formatted = JSON.stringify(data, null, 2)
 
   const handleCopy = () => {
     void navigator.clipboard.writeText(formatted).then(() => {
@@ -28,7 +32,7 @@ export function SubgraphPanel({ nodeId, results }: PanelProps) {
     <div className="space-y-4">
       <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 font-mono text-xs">
         <dt className="tracking-widest text-[--color-muted] uppercase">Subgraph</dt>
-        <dd className="text-[--color-text]">{entry.subgraph}</dd>
+        <dd className="text-[--color-text]">{nodeId}</dd>
       </dl>
 
       <div className="space-y-2">

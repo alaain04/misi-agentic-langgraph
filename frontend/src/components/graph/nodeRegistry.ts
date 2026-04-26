@@ -15,13 +15,15 @@ type PanelComponent = ComponentType<PanelProps>
 // To add a new subgraph panel: add one line here (or reuse SubgraphPanel).
 export const NODE_PANEL_REGISTRY = new Map<NodeId, PanelComponent>([
   ['project_discovery', DiscoveryPanel],
-  ['planner', PlannerPanel],
+  ['orchestrator', PlannerPanel],
   ['registry', SubgraphPanel],
   ['repo', SubgraphPanel],
   ['runtime', SubgraphPanel],
   ['risk_score', SubgraphPanel],
   ['recommendation', SubgraphPanel],
-  ['final_report', FinalReportPanel],
+  ['summarizer', FinalReportPanel],
+  ['reviewer', FinalReportPanel],
+  ['recommender', FinalReportPanel],
 ])
 
 export function getPanelComponent(id: NodeId): PanelComponent | undefined {

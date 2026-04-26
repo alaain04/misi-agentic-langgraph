@@ -18,7 +18,12 @@ interface UseAnalysisResult {
 }
 
 function isTerminal(data: StatusResponse): boolean {
-  return data.status === 'done' || data.status === 'failed' || data.status === 'awaiting_approval'
+  return (
+    data.status === 'done' ||
+    data.status === 'failed' ||
+    data.status === 'cancelled' ||
+    data.status === 'awaiting_approval'
+  )
 }
 
 export function useAnalysis(): UseAnalysisResult {

@@ -43,6 +43,7 @@ export default function PlanPage() {
   const [input, setInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isApproved, setIsApproved] = useState(false)
+  const [isCancelled, setIsCancelled] = useState(false)
 
   const lastAssistantMessageRef = useRef<string | null>(null)
   const hadApprovalRef = useRef(false)
@@ -56,7 +57,7 @@ export default function PlanPage() {
     if (data.status === 'running' && hadApprovalRef.current) {
       return true
     }
-    return data.status === 'done' || data.status === 'failed'
+    return data.status === 'done' || data.status === 'failed' || data.status === 'cancelled'
   }, [])
 
   const fetchStatus = useCallback((): Promise<StatusResponse> => {
@@ -115,6 +116,30 @@ export default function PlanPage() {
     return () => clearTimeout(timer)
   }, [isApproved, navigate, traceId])
 
+  // Detect cancellation: when status becomes 'cancelled' after 'awaiting_approval'
+  useEffect(() => {
+    if (!data || !hadApprovalRef.current) return
+    if (data.status === 'cancelled' && !isCancelled) {
+      setIsCancelled(true)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: 'Analysis cancelled. You will be redirected to the job detail page in 5 seconds…',
+        },
+      ])
+    }
+  }, [data, isCancelled])
+
+  // Redirect 5 seconds after cancellation
+  useEffect(() => {
+    if (!isCancelled || !traceId) return
+    const timer = setTimeout(() => {
+      navigate(`/jobs/${traceId}`, { replace: true })
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [isCancelled, navigate, traceId])
+
   // Redirect to execution detail once the job moves past planning (fallback)
   useEffect(() => {
     if (!data) return
@@ -165,69 +190,70 @@ export default function PlanPage() {
       </div>
 
       {/* Chat window */}
-      <div className="min-h-48 space-y-5 rounded-lg">
-        {/* Empty state before first message */}
-        {messages.length === 0 && !isPolling && !error && (
-          <p className="py-8 text-center font-mono text-xs text-[--color-muted]">
-            Waiting for the planner…
-          </p>
-        )}
+      <div className="rounded-lg border border-[--color-border] bg-[--color-surface]">
+        {/* Scrollable messages area */}
+        <div className="max-h-[420px] space-y-5 overflow-y-auto p-4">
+          {/* Empty state before first message */}
+          {messages.length === 0 && !isPolling && !error && (
+            <p className="py-8 text-center font-mono text-xs text-[--color-muted]">
+              Waiting for the planner…
+            </p>
+          )}
 
-        {/* Messages */}
-        {messages.map((msg, i) => {
-          if (msg.role === 'user') {
+          {/* Messages */}
+          {messages.map((msg, i) => {
+            if (msg.role === 'user') {
+              return (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-lg rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
+                    <p className="font-mono text-xs text-[--color-text]">{msg.text}</p>
+                  </div>
+                </div>
+              )
+            }
+
+            // AI message bubble
+            const isLatest = i === messages.length - 1
             return (
-              <div key={i} className="flex justify-end">
-                <div className="max-w-lg rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
-                  <p className="font-mono text-xs text-[--color-text]">{msg.text}</p>
+              <div key={i} className={cn('space-y-3', !isLatest && 'opacity-50')}>
+                <div className="rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
+                  <p className="font-mono text-xs leading-relaxed whitespace-pre-wrap text-[--color-text]">
+                    {msg.text}
+                  </p>
+                  {msg.plan && msg.plan.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[--color-border] pt-3">
+                      {msg.plan.map((id) => (
+                        <span
+                          key={id}
+                          className="inline-flex items-center rounded border border-[--color-border] bg-[--color-surface] px-2 py-0.5 font-mono text-[10px] text-[--color-muted]"
+                        >
+                          {SUBGRAPH_LABELS[id]?.label ?? id}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )
-          }
-
-          // AI message bubble
-          const isLatest = i === messages.length - 1
-          return (
-            <div key={i} className={cn('space-y-3', !isLatest && 'opacity-50')}>
-              <div className="rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
-                <p className="font-mono text-xs leading-relaxed whitespace-pre-wrap text-[--color-text]">
-                  {msg.text}
-                </p>
-                {msg.plan && msg.plan.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[--color-border] pt-3">
-                    {msg.plan.map((id) => (
-                      <span
-                        key={id}
-                        className="inline-flex items-center rounded border border-[--color-border] bg-[--color-surface] px-2 py-0.5 font-mono text-[10px] text-[--color-muted]"
-                      >
-                        {SUBGRAPH_LABELS[id]?.label ?? id}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+          })}
+          {/* Polling / thinking indicator */}
+          {isPolling && (
+            <div className="flex items-center gap-2 font-mono text-xs text-[--color-muted]">
+              <Spinner size="sm" />
+              {messages.length === 0 ? 'Creating the first plan…' : 'Agent is thinking…'}
             </div>
-          )
-        })}
+          )}
 
-        {/* Polling / thinking indicator */}
-        {isPolling && (
-          <div className="flex items-center gap-2 font-mono text-xs text-[--color-muted]">
-            <Spinner size="sm" />
-            {messages.length === 0 ? 'Creating the first plan…' : 'Agent is thinking…'}
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div className="rounded border border-[--color-error]/40 bg-[--color-error]/5 px-4 py-3">
-            <p className="font-mono text-xs text-[--color-error]">{error.message}</p>
-          </div>
-        )}
-
-        <div ref={bottomRef} />
+          {/* Error */}
+          {error && (
+            <div className="rounded border border-[--color-error]/40 bg-[--color-error]/5 px-4 py-3">
+              <p className="font-mono text-xs text-[--color-error]">{error.message}</p>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
         {/* Input area — always visible, disabled while polling/submitting */}
-        <div className="space-y-3 rounded-lg border border-[--color-border] bg-[--color-surface] p-4">
+        <div className="space-y-3 border-t border-[--color-border] p-4">
           <div className="flex h-12 items-stretch gap-2">
             <textarea
               rows={2}
@@ -266,36 +292,28 @@ export default function PlanPage() {
             </Button>
           </div>
 
-          {/* Quick-action shortcuts */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[10px] tracking-widest text-[--color-muted] uppercase">
-              quick actions:
-            </span>
-            <button
-              type="button"
-              disabled={isDisabled}
-              onClick={() => void handleSend('Yes, proceed with the plan')}
-              className={cn(
-                'rounded border border-[--badge-done-border] px-2.5 py-1 font-mono text-[10px]',
-                'text-[--badge-done-text] transition-colors hover:bg-[--badge-done-bg]',
-                'disabled:cursor-not-allowed disabled:opacity-40',
-              )}
-            >
-              Yes, proceed
-            </button>
-            <button
-              type="button"
-              disabled={isDisabled}
-              onClick={() => void handleSend('Cancel this analysis')}
-              className={cn(
-                'rounded border border-[--badge-failed-border] px-2.5 py-1 font-mono text-[10px]',
-                'text-[--badge-failed-text] transition-colors hover:bg-[--badge-failed-bg]',
-                'disabled:cursor-not-allowed disabled:opacity-40',
-              )}
-            >
-              Cancel analysis
-            </button>
-          </div>
+          {/* Quick-action shortcuts — only when awaiting user input */}
+          {!isDisabled && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[10px] tracking-widest text-[--color-muted] uppercase">
+                quick actions:
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSend('Yes, proceed with the plan')}
+                className="rounded border border-[--badge-done-border] px-2.5 py-1 font-mono text-[10px] text-[--badge-done-text] transition-colors hover:bg-[--badge-done-bg]"
+              >
+                Yes, proceed
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSend('Cancel this analysis')}
+                className="rounded border border-[--badge-failed-border] px-2.5 py-1 font-mono text-[10px] text-[--badge-failed-text] transition-colors hover:bg-[--badge-failed-bg]"
+              >
+                Cancel analysis
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </main>

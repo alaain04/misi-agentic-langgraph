@@ -13,31 +13,32 @@ export const SAMPLES: Sample[] = [
     label: 'Supply chain',
     description: 'Express API with a postinstall script hidden in a transitive dep',
     request: {
-      lock_file_name: 'package-lock.json',
-      concern: 'Supply chain attack via malicious postinstall scripts in transitive dependencies',
-      package_json: JSON.stringify(
-        {
-          name: 'payment-service',
-          version: '1.0.0',
-          description: 'Internal payment processing microservice',
-          scripts: { start: 'node index.js', build: 'tsc' },
-          dependencies: {
-            express: '^4.18.2',
-            axios: '^1.6.0',
-            lodash: '^4.17.21',
-            'node-fetch': '^2.7.0',
-            dotenv: '^16.3.1',
+      metadata: {
+        lock_file_name: 'package-lock.json',
+        concern: 'Supply chain attack via malicious postinstall scripts in transitive dependencies',
+        package_json: JSON.stringify(
+          {
+            name: 'payment-service',
+            version: '1.0.0',
+            description: 'Internal payment processing microservice',
+            scripts: { start: 'node index.js', build: 'tsc' },
+            dependencies: {
+              express: '^4.18.2',
+              axios: '^1.6.0',
+              lodash: '^4.17.21',
+              'node-fetch': '^2.7.0',
+              dotenv: '^16.3.1',
+            },
+            devDependencies: {
+              typescript: '^5.2.2',
+              '@types/express': '^4.17.21',
+              '@types/lodash': '^4.14.202',
+            },
           },
-          devDependencies: {
-            typescript: '^5.2.2',
-            '@types/express': '^4.17.21',
-            '@types/lodash': '^4.14.202',
-          },
-        },
-        null,
-        2,
-      ),
-      lock_file: `{
+          null,
+          2,
+        ),
+        lock_file: `{
   "name": "payment-service",
   "version": "1.0.0",
   "lockfileVersion": 2,
@@ -106,6 +107,7 @@ export const SAMPLES: Sample[] = [
     }
   }
 }`,
+      },
     },
   },
   {
@@ -113,35 +115,36 @@ export const SAMPLES: Sample[] = [
     label: 'License compliance',
     description: 'React SPA mixing MIT, Apache-2.0, and GPL-3.0 licensed packages',
     request: {
-      lock_file_name: 'package-lock.json',
-      concern:
-        'License compliance — identify any GPL or AGPL dependencies that could affect commercial distribution',
-      package_json: JSON.stringify(
-        {
-          name: 'admin-dashboard',
-          version: '2.3.1',
-          description: 'Internal admin dashboard',
-          scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
-          dependencies: {
-            react: '^18.2.0',
-            'react-dom': '^18.2.0',
-            'react-router-dom': '^6.20.0',
-            recharts: '^2.9.3',
-            'date-fns': '^2.30.0',
-            'pdf-lib': '^1.17.1',
-            'qrcode.react': '^3.1.0',
-            'gpl-chart-utils': '^1.2.0',
+      metadata: {
+        lock_file_name: 'package-lock.json',
+        concern:
+          'License compliance — identify any GPL or AGPL dependencies that could affect commercial distribution',
+        package_json: JSON.stringify(
+          {
+            name: 'admin-dashboard',
+            version: '2.3.1',
+            description: 'Internal admin dashboard',
+            scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+            dependencies: {
+              react: '^18.2.0',
+              'react-dom': '^18.2.0',
+              'react-router-dom': '^6.20.0',
+              recharts: '^2.9.3',
+              'date-fns': '^2.30.0',
+              'pdf-lib': '^1.17.1',
+              'qrcode.react': '^3.1.0',
+              'gpl-chart-utils': '^1.2.0',
+            },
+            devDependencies: {
+              vite: '^5.0.0',
+              '@vitejs/plugin-react': '^4.2.0',
+              typescript: '^5.2.2',
+            },
           },
-          devDependencies: {
-            vite: '^5.0.0',
-            '@vitejs/plugin-react': '^4.2.0',
-            typescript: '^5.2.2',
-          },
-        },
-        null,
-        2,
-      ),
-      lock_file: `{
+          null,
+          2,
+        ),
+        lock_file: `{
   "name": "admin-dashboard",
   "version": "2.3.1",
   "lockfileVersion": 2,
@@ -223,6 +226,7 @@ export const SAMPLES: Sample[] = [
     }
   }
 }`,
+      },
     },
   },
   {
@@ -230,30 +234,31 @@ export const SAMPLES: Sample[] = [
     label: 'Known CVEs',
     description: 'Node API with several packages pinned to versions with published CVEs',
     request: {
-      lock_file_name: 'package-lock.json',
-      concern:
-        'Known vulnerabilities (CVEs) in pinned dependency versions — assess exploitability and upgrade urgency',
-      package_json: JSON.stringify(
-        {
-          name: 'legacy-api',
-          version: '0.9.4',
-          description: 'Legacy REST API (not yet migrated)',
-          scripts: { start: 'node server.js' },
-          dependencies: {
-            express: '4.16.1',
-            lodash: '4.17.4',
-            jsonwebtoken: '8.5.1',
-            'node-serialize': '0.0.4',
-            minimist: '1.2.0',
-            handlebars: '4.7.6',
-            tar: '2.2.1',
-            marked: '0.3.9',
+      metadata: {
+        lock_file_name: 'package-lock.json',
+        concern:
+          'Known vulnerabilities (CVEs) in pinned dependency versions — assess exploitability and upgrade urgency',
+        package_json: JSON.stringify(
+          {
+            name: 'legacy-api',
+            version: '0.9.4',
+            description: 'Legacy REST API (not yet migrated)',
+            scripts: { start: 'node server.js' },
+            dependencies: {
+              express: '4.16.1',
+              lodash: '4.17.4',
+              jsonwebtoken: '8.5.1',
+              'node-serialize': '0.0.4',
+              minimist: '1.2.0',
+              handlebars: '4.7.6',
+              tar: '2.2.1',
+              marked: '0.3.9',
+            },
           },
-        },
-        null,
-        2,
-      ),
-      lock_file: `{
+          null,
+          2,
+        ),
+        lock_file: `{
   "name": "legacy-api",
   "version": "0.9.4",
   "lockfileVersion": 2,
@@ -316,6 +321,7 @@ export const SAMPLES: Sample[] = [
     }
   }
 }`,
+      },
     },
   },
   {
@@ -323,35 +329,36 @@ export const SAMPLES: Sample[] = [
     label: 'Typosquatting',
     description: 'Next.js app with suspicious package names resembling popular libraries',
     request: {
-      lock_file_name: 'package-lock.json',
-      concern:
-        'Typosquatting and dependency confusion — identify packages with names deceptively similar to well-known libraries',
-      package_json: JSON.stringify(
-        {
-          name: 'storefront',
-          version: '1.4.0',
-          description: 'E-commerce storefront',
-          scripts: { dev: 'next dev', build: 'next build', start: 'next start' },
-          dependencies: {
-            next: '^14.0.3',
-            react: '^18.2.0',
-            'react-dom': '^18.2.0',
-            'cross-fetch': '^4.0.0',
-            'node-mailer': '^0.1.1',
-            coa: '^2.0.2',
-            colors: '1.4.0',
-            'ua-parse-js': '^1.0.35',
-            '@loadable/component': '^5.15.3',
+      metadata: {
+        lock_file_name: 'package-lock.json',
+        concern:
+          'Typosquatting and dependency confusion — identify packages with names deceptively similar to well-known libraries',
+        package_json: JSON.stringify(
+          {
+            name: 'storefront',
+            version: '1.4.0',
+            description: 'E-commerce storefront',
+            scripts: { dev: 'next dev', build: 'next build', start: 'next start' },
+            dependencies: {
+              next: '^14.0.3',
+              react: '^18.2.0',
+              'react-dom': '^18.2.0',
+              'cross-fetch': '^4.0.0',
+              'node-mailer': '^0.1.1',
+              coa: '^2.0.2',
+              colors: '1.4.0',
+              'ua-parse-js': '^1.0.35',
+              '@loadable/component': '^5.15.3',
+            },
+            devDependencies: {
+              typescript: '^5.2.2',
+              '@types/react': '^18.2.41',
+            },
           },
-          devDependencies: {
-            typescript: '^5.2.2',
-            '@types/react': '^18.2.41',
-          },
-        },
-        null,
-        2,
-      ),
-      lock_file: `{
+          null,
+          2,
+        ),
+        lock_file: `{
   "name": "storefront",
   "version": "1.4.0",
   "lockfileVersion": 2,
@@ -417,6 +424,7 @@ export const SAMPLES: Sample[] = [
     }
   }
 }`,
+      },
     },
   },
 ]

@@ -30,7 +30,10 @@ _DISCOVERY_OUTPUT_KEYS = {
 
 async def _finalize(dao: JobDAO, job_id: str, result: dict) -> None:
     delete_store(job_id)
-    if result.get("discovery_error"):
+    if result.get("cancelled"):
+        logger.info("job=%s cancelled by user", job_id)
+        await dao.mark_cancelled(job_id)
+    elif result.get("discovery_error"):
         logger.error("job=%s error=%s", job_id, result["discovery_error"])
         await dao.mark_failed(job_id)
     else:
@@ -55,7 +58,7 @@ async def _finalize(dao: JobDAO, job_id: str, result: dict) -> None:
 
 
 async def _stream_graph(
-    graph, input_data, config, dao: JobDAO, job_id: str
+    graph, input_data, config, dao: JobDAO, job_id: str, on_orchestrator_complete=None
 ) -> dict | None:
     """Stream graph execution, tracking backbone node artifacts.
 
@@ -74,15 +77,24 @@ async def _stream_graph(
                 await dao.complete_artifact(job_id, "project_discovery", "done")
                 await dao.start_artifact(job_id, ORCHESTRATOR)
             elif node_name == ORCHESTRATOR:
-                await dao.complete_artifact(job_id, ORCHESTRATOR, "done")
+                artifact_status = "cancelled" if node_update.get("cancelled") else "done"
+                await dao.complete_artifact(job_id, ORCHESTRATOR, artifact_status)
+                if on_orchestrator_complete and not node_update.get("cancelled"):
+                    await on_orchestrator_complete()
             elif node_name == SUMMARIZER:
                 await dao.start_artifact(job_id, SUMMARIZER)
+                if "summary" in node_update:
+                    await dao.update_artifact_data(job_id, SUMMARIZER, {"output": node_update["summary"]})
                 await dao.complete_artifact(job_id, SUMMARIZER, "done")
             elif node_name == REVIEWER:
                 await dao.start_artifact(job_id, REVIEWER)
+                if "review" in node_update:
+                    await dao.update_artifact_data(job_id, REVIEWER, {"output": node_update["review"]})
                 await dao.complete_artifact(job_id, REVIEWER, "done")
             elif node_name == RECOMMENDER:
                 await dao.start_artifact(job_id, RECOMMENDER)
+                if "recommendation" in node_update:
+                    await dao.update_artifact_data(job_id, RECOMMENDER, {"output": node_update["recommendation"]})
                 await dao.complete_artifact(job_id, RECOMMENDER, "done")
 
     return interrupt_payload
@@ -138,9 +150,12 @@ async def run_analysis(
 async def resume_analysis(job_id: str, user_message: str) -> None:
     """Resume the orchestrator with a plain-text user message."""
     dao = JobDAO()
-    await dao.update_status(job_id, JobStatus.running)
+    await dao.update_status(job_id, JobStatus.processing)
 
     config = {"configurable": {"thread_id": job_id}}
+
+    async def _on_approved() -> None:
+        await dao.update_status(job_id, JobStatus.running)
 
     try:
         interrupt_payload = await _stream_graph(
@@ -149,6 +164,7 @@ async def resume_analysis(job_id: str, user_message: str) -> None:
             config,
             dao,
             job_id,
+            on_orchestrator_complete=_on_approved,
         )
 
         if interrupt_payload is not None:

@@ -1,6 +1,7 @@
 """Orchestrator node — LLM agent that coordinates planning via conversational loop."""
 
 import logging
+from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END
@@ -8,6 +9,7 @@ from langgraph.types import Command, interrupt
 
 from src.graphs.main_graph.nodes.planner import run_planner
 from src.graphs.main_graph.state import MainState
+from src.services.job_dao import JobDAO
 from src.services.vector_store import get_or_create_store
 from src.utils.llm import Model, get_llm
 
@@ -134,6 +136,16 @@ async def orchestrator(state: MainState) -> dict | Command:
         intent = await _classify_intent(plan, user_input)
         logger.info("orchestrator: job=%s intent=%r plan=%s", job_id, intent, plan)
 
+        # Record this conversation turn in the artifact
+        proposal = {
+            "created_at": datetime.now(UTC).isoformat(),
+            "plan": plan,
+            "assistant_message": assistant_msg,
+            "user_response": user_input,
+            "user_intended_action": intent,
+        }
+        await JobDAO().push_proposal(job_id, proposal)
+
         new_messages = [
             AIMessage(content=assistant_msg),
             HumanMessage(content=user_input),
@@ -151,7 +163,10 @@ async def orchestrator(state: MainState) -> dict | Command:
             return {"plan": plan, "messages": new_messages}
 
         if intent == "cancel":
-            return Command(goto=END, update={"plan": [], "messages": new_messages})
+            return Command(
+                goto=END,
+                update={"plan": [], "messages": new_messages, "cancelled": True},
+            )
 
         # "change" — re-plan with the user's instructions, then loop
         plan = await run_planner(state, extra_instructions=user_input)

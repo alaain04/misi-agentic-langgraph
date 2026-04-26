@@ -12,21 +12,25 @@ import { getPanelComponent } from './nodeRegistry'
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
-const LAYER_X: Record<number, number> = {
-  0: 55,
-  1: 210,
-  2: 375,
-  3: 545,
-  4: 715,
-  5: 850,
+/** Center Y coordinate for each layer (top → bottom). */
+const LAYER_Y: Record<number, number> = {
+  0: 44, // START
+  1: 128, // discovery
+  2: 216, // orchestrator
+  3: 316, // subgraphs (spread horizontally)
+  4: 416, // summarizer
+  5: 502, // reviewer
+  6: 588, // recommender
+  7: 660, // END
 }
 
 const NODE_W = 132
 const NODE_H = 36
 const NODE_RX = 5
-const SVG_HEIGHT = 320
-const LANE_H = 52 // vertical gap between subgraph node centers
-const MARGIN_R = 30 // right margin before clip
+const CIRCLE_R = 22 // radius for terminal (START / END) nodes
+const SUBGRAPH_GAP = 12 // horizontal gap between adjacent subgraph rects
+const SVG_HEIGHT = 720
+const V_MARGIN = 24 // bottom padding below last node
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -39,20 +43,21 @@ interface NodePos {
   y: number
 }
 
-function computePositions(nodes: GraphNodeState[]): Map<NodeId, NodePos> {
+function computePositions(nodes: GraphNodeState[], containerWidth: number): Map<NodeId, NodePos> {
   const positions = new Map<NodeId, NodePos>()
   const subgraphs = nodes
     .filter((n) => n.def.isSubgraph)
     .sort((a, b) => (a.def.laneIndex ?? 0) - (b.def.laneIndex ?? 0))
 
   const numSub = subgraphs.length
-  const totalSubH = Math.max(0, numSub - 1) * LANE_H
-  const subY0 = SVG_HEIGHT / 2 - totalSubH / 2
+  const totalSubW = numSub * NODE_W + Math.max(0, numSub - 1) * SUBGRAPH_GAP
+  // leftmost subgraph center X
+  const subX0 = (containerWidth - totalSubW) / 2 + NODE_W / 2
 
   let subIdx = 0
   for (const node of nodes) {
-    const x = LAYER_X[node.def.layer] ?? 0
-    const y = node.def.isSubgraph ? subY0 + subIdx++ * LANE_H : SVG_HEIGHT / 2
+    const y = LAYER_Y[node.def.layer] ?? 0
+    const x = node.def.isSubgraph ? subX0 + subIdx++ * (NODE_W + SUBGRAPH_GAP) : containerWidth / 2
     positions.set(node.id, { x, y })
   }
   return positions
@@ -90,13 +95,14 @@ function statusDotFill(
   }
 }
 
-function edgePath(sp: NodePos, tp: NodePos): string {
-  const sx = sp.x + NODE_W / 2
-  const sy = sp.y
-  const tx = tp.x - NODE_W / 2
-  const ty = tp.y
-  const midX = (sx + tx) / 2
-  return `M${sx},${sy} C${midX},${sy} ${midX},${ty} ${tx},${ty}`
+/** Vertical cubic bezier: exits bottom of source, enters top of target. */
+function edgePath(sp: NodePos, tp: NodePos, srcIsCircle: boolean, tgtIsCircle: boolean): string {
+  const sx = sp.x
+  const sy = sp.y + (srcIsCircle ? CIRCLE_R : NODE_H / 2)
+  const tx = tp.x
+  const ty = tp.y - (tgtIsCircle ? CIRCLE_R : NODE_H / 2)
+  const midY = (sy + ty) / 2
+  return `M${sx},${sy} C${sx},${midY} ${tx},${midY} ${tx},${ty}`
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -105,6 +111,7 @@ interface ExecutionGraphProps {
   renderData: GraphRenderData
   selectedNodeId: NodeId | null
   onNodeClick: (id: NodeId | null) => void
+  isRunning?: boolean
   className?: string
 }
 
@@ -112,6 +119,7 @@ export function ExecutionGraph({
   renderData,
   selectedNodeId,
   onNodeClick,
+  isRunning = false,
   className,
 }: ExecutionGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -139,7 +147,7 @@ export function ExecutionGraph({
     }
 
     const width = container.clientWidth || 900
-    const positions = computePositions(renderData.nodes)
+    const positions = computePositions(renderData.nodes, width)
 
     // Clear previous render
     d3.select(svgEl).selectAll('*').remove()
@@ -150,7 +158,7 @@ export function ExecutionGraph({
       .attr('height', SVG_HEIGHT)
       .style('overflow', 'hidden')
 
-    // Defs: arrowheads + pulse keyframes
+    // Defs: arrowheads + pulse/flow keyframes
     const defs = svg.append('defs')
 
     const makeArrow = (id: string, fill: string) =>
@@ -173,8 +181,12 @@ export function ExecutionGraph({
       .append('style')
       .text(
         '@keyframes nodePulse { 0%,100%{opacity:1} 50%{opacity:0.3} }' +
-          '.node-pulse { animation: nodePulse 1.8s ease-in-out infinite; }',
+          '.node-pulse { animation: nodePulse 1.8s ease-in-out infinite; }' +
+          '@keyframes edgeFlow { from { stroke-dashoffset: 20 } to { stroke-dashoffset: 0 } }' +
+          '.edge-flow { animation: edgeFlow 0.6s linear infinite; }',
       )
+
+    makeArrow('arrow-flow', colors.running)
 
     // Zoom/pan layer
     const zoomGroup = svg.append('g').attr('class', 'zoom-layer')
@@ -188,17 +200,30 @@ export function ExecutionGraph({
 
     svg.call(zoom)
 
-    // Fit graph in container on first render
-    const graphWidth = (LAYER_X[5] ?? 850) + NODE_W / 2 + MARGIN_R
-    const initialScale = Math.min(1, width / graphWidth)
-    const xOffset = (width - graphWidth * initialScale) / 2
-    svg.call(zoom.transform, d3.zoomIdentity.translate(xOffset, 0).scale(initialScale))
+    // Fit graph vertically; re-center horizontally after scale
+    const maxLayer = Math.max(...renderData.nodes.map((n) => n.def.layer))
+    const graphHeight = (LAYER_Y[maxLayer] ?? 660) + CIRCLE_R + V_MARGIN
+    const initialScale = Math.min(0.98, SVG_HEIGHT / graphHeight)
+    const xOffset = (width * (1 - initialScale)) / 2
+    const yOffset = (SVG_HEIGHT - graphHeight * initialScale) / 2
+    svg.call(zoom.transform, d3.zoomIdentity.translate(xOffset, yOffset).scale(initialScale))
 
     // ── Edges ──────────────────────────────────────────────────────────────────
     const gEdges = zoomGroup.append('g').attr('class', 'edges')
 
+    const nodeStatusMap = new Map(renderData.nodes.map((n) => [n.id, n.status]))
+
     const edgeIsHighlighted = (e: GraphEdgeDef) =>
       e.source === selectedNodeId || e.target === selectedNodeId
+
+    const edgeIsFlowing = (e: GraphEdgeDef) => {
+      if (!isRunning) return false
+      const srcStatus = nodeStatusMap.get(e.source)
+      const tgtStatus = nodeStatusMap.get(e.target)
+      return srcStatus === 'done' && tgtStatus !== 'done' && tgtStatus !== 'failed'
+    }
+
+    const terminalIds = new Set<NodeId>(['START', 'END'])
 
     for (const edge of renderData.edges) {
       const sp = positions.get(edge.source)
@@ -206,15 +231,34 @@ export function ExecutionGraph({
       if (!sp || !tp) continue
 
       const highlighted = edgeIsHighlighted(edge)
+      const flowing = !highlighted && edgeIsFlowing(edge)
 
-      gEdges
+      const path = gEdges
         .append('path')
-        .attr('d', edgePath(sp, tp))
+        .attr('d', edgePath(sp, tp, terminalIds.has(edge.source), terminalIds.has(edge.target)))
         .attr('fill', 'none')
-        .attr('stroke', highlighted ? colors.accent : colors.border)
-        .attr('stroke-width', highlighted ? 2 : 1.5)
-        .attr('stroke-opacity', highlighted ? 0.9 : 0.55)
-        .attr('marker-end', highlighted ? 'url(#arrow-accent)' : 'url(#arrow-default)')
+
+      if (highlighted) {
+        path
+          .attr('stroke', colors.accent)
+          .attr('stroke-width', 2)
+          .attr('stroke-opacity', 0.9)
+          .attr('marker-end', 'url(#arrow-accent)')
+      } else if (flowing) {
+        path
+          .attr('stroke', colors.running)
+          .attr('stroke-width', 1.5)
+          .attr('stroke-opacity', 0.8)
+          .attr('stroke-dasharray', '6 4')
+          .attr('class', 'edge-flow')
+          .attr('marker-end', 'url(#arrow-flow)')
+      } else {
+        path
+          .attr('stroke', colors.border)
+          .attr('stroke-width', 1.5)
+          .attr('stroke-opacity', 0.55)
+          .attr('marker-end', 'url(#arrow-default)')
+      }
     }
 
     // ── Nodes ──────────────────────────────────────────────────────────────────
@@ -230,6 +274,7 @@ export function ExecutionGraph({
 
       const strokeColor = isSelected ? colors.accent : statusStrokeColor(node.status, colors)
       const strokeWidth = isSelected || node.status !== 'idle' ? 2.5 : 1.5
+      const filterAttr = isSelected ? `drop-shadow(0 0 6px ${colors.accent}50)` : null
 
       const g = gNodes
         .append('g')
@@ -240,29 +285,49 @@ export function ExecutionGraph({
           onNodeClickRef.current(node.id === selectedNodeId ? null : node.id)
         })
 
-      // Background rect
-      g.append('rect')
-        .attr('x', -NODE_W / 2)
-        .attr('y', -NODE_H / 2)
-        .attr('width', NODE_W)
-        .attr('height', NODE_H)
-        .attr('rx', NODE_RX)
-        .attr('fill', colors.surface)
-        .attr('stroke', strokeColor)
-        .attr('stroke-width', strokeWidth)
-        .attr('filter', isSelected ? `drop-shadow(0 0 6px ${colors.accent}50)` : null)
+      if (isTerminal) {
+        // Circle shape for START / END
+        g.append('circle')
+          .attr('r', CIRCLE_R)
+          .attr('fill', colors.surface)
+          .attr('stroke', strokeColor)
+          .attr('stroke-width', strokeWidth)
+          .attr('filter', filterAttr)
 
-      // Label
-      g.append('text')
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .attr('fill', isTerminal ? colors.muted : isSelected ? colors.accent : colors.text)
-        .attr('font-family', 'monospace')
-        .attr('font-size', '9px')
-        .attr('font-weight', isSelected ? '600' : '400')
-        .attr('pointer-events', 'none')
-        .attr('letter-spacing', '0.02em')
-        .text(node.def.label)
+        g.append('text')
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('fill', colors.muted)
+          .attr('font-family', 'monospace')
+          .attr('font-size', '8px')
+          .attr('letter-spacing', '0.08em')
+          .attr('pointer-events', 'none')
+          .text(node.def.label)
+      } else {
+        // Background rect
+        g.append('rect')
+          .attr('x', -NODE_W / 2)
+          .attr('y', -NODE_H / 2)
+          .attr('width', NODE_W)
+          .attr('height', NODE_H)
+          .attr('rx', NODE_RX)
+          .attr('fill', colors.surface)
+          .attr('stroke', strokeColor)
+          .attr('stroke-width', strokeWidth)
+          .attr('filter', filterAttr)
+
+        // Label
+        g.append('text')
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('fill', isSelected ? colors.accent : colors.text)
+          .attr('font-family', 'monospace')
+          .attr('font-size', '9px')
+          .attr('font-weight', isSelected ? '600' : '400')
+          .attr('pointer-events', 'none')
+          .attr('letter-spacing', '0.02em')
+          .text(node.def.label)
+      }
 
       // Status dot (top-right corner of rect)
       if (!isTerminal) {
@@ -289,7 +354,7 @@ export function ExecutionGraph({
       svg.on('.zoom', null)
       d3.select(svgEl).selectAll('*').remove()
     }
-  }, [renderData, selectedNodeId])
+  }, [renderData, selectedNodeId, isRunning])
 
   return (
     <div ref={containerRef} className={cn('relative w-full', className)}>

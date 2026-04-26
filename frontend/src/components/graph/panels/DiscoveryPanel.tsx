@@ -1,10 +1,11 @@
-import type { AnalysisResult } from '../../../api/types'
+import type { ArtifactInfo, AnalysisResult } from '../../../api/types'
 import type { NodeId } from '../graphDefinition'
 import { DependencyTree } from '../../analysis/DependencyTree'
 
 export interface PanelProps {
   nodeId: NodeId
   results: AnalysisResult | undefined
+  artifacts: ArtifactInfo[] | undefined
 }
 
 export function DiscoveryPanel({ results }: PanelProps) {

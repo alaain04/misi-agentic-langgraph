@@ -1,5 +1,5 @@
 import type { StatusResponse, ArtifactInfo } from '../../api/types'
-import { GRAPH_NODES, GRAPH_EDGES } from './graphDefinition'
+import { GRAPH_NODES, GRAPH_EDGES, buildGraphDef } from './graphDefinition'
 import type { GraphRenderData, GraphNodeState, NodeStatus, NodeId } from './graphDefinition'
 
 // Pure function — no side effects, no React.
@@ -9,36 +9,30 @@ export function mapResponseToGraphState(response: StatusResponse | null): GraphR
     const nodes = GRAPH_NODES.filter((def) => !def.isSubgraph).map(
       (def): GraphNodeState => ({ id: def.id, def, status: 'idle', hasDetail: false }),
     )
-    return { nodes, edges: filterEdges(nodes) }
+    return { nodes, edges: filterEdges(nodes, GRAPH_EDGES) }
   }
 
   const { status, results } = response
-  const plan = results?.plan ?? []
-  const activeSubgraphIds = new Set<NodeId>(plan as NodeId[])
   const artifactMap = buildArtifactMap(response.artifacts ?? [])
 
-  // During pending/running, subgraph plan is unknown — hide subgraph nodes
-  // unless they already appear in artifacts (they started running)
-  const showSubgraphs = status === 'done' || status === 'failed' || status === 'awaiting_approval'
-  const hasArtifactSubgraphs = (response.artifacts ?? []).some((a) =>
-    GRAPH_NODES.find((n) => n.id === a.node && n.isSubgraph),
-  )
+  // Use backend-provided graph topology if available; fall back to static backbone-only
+  const { nodes: nodeDefs, edges } = response.graph
+    ? buildGraphDef(response.graph)
+    : {
+        nodes: GRAPH_NODES.filter((def) => !def.isSubgraph),
+        edges: GRAPH_EDGES,
+      }
 
-  const nodes = GRAPH_NODES.filter(
-    (def) =>
-      !def.isSubgraph ||
-      (showSubgraphs && activeSubgraphIds.has(def.id)) ||
-      (hasArtifactSubgraphs && artifactMap.has(def.id as NodeId)),
-  ).map(
+  const nodes = nodeDefs.map(
     (def): GraphNodeState => ({
       id: def.id,
       def,
-      status: deriveStatus(def.id, status, results, activeSubgraphIds, artifactMap),
-      hasDetail: hasDetail(def.id, results),
+      status: deriveStatus(def.id, status, results, artifactMap),
+      hasDetail: hasDetail(def.id, results, artifactMap),
     }),
   )
 
-  return { nodes, edges: filterEdges(nodes) }
+  return { nodes, edges: filterEdges(nodes, edges) }
 }
 
 function buildArtifactMap(artifacts: ArtifactInfo[]): Map<NodeId, ArtifactInfo> {
@@ -53,7 +47,6 @@ function deriveStatus(
   id: NodeId,
   jobStatus: StatusResponse['status'],
   results: StatusResponse['results'],
-  _plan: Set<NodeId>,
   artifactMap: Map<NodeId, ArtifactInfo>,
 ): NodeStatus {
   // Terminal nodes
@@ -78,29 +71,38 @@ function deriveStatus(
   // Fallback: derive from job-level status
   if (jobStatus === 'awaiting_approval') {
     if (id === 'project_discovery') return 'done'
-    if (id === 'planner') return 'done'
+    if (id === 'orchestrator') return 'done'
     return 'idle'
   }
   if (jobStatus === 'pending') return 'idle'
   if (jobStatus === 'running') return 'idle' // node hasn't started yet (no artifact)
   if (jobStatus === 'done') return 'done'
-  // failed job: nodes without results are failed
+  // failed job: nodes without artifacts/results are failed
   if (id === 'project_discovery') return results?.discovery ? 'done' : 'failed'
-  if (id === 'planner') return results?.plan ? 'done' : 'failed'
-  if (id === 'final_report') return results?.final_report != null ? 'done' : 'failed'
+  if (id === 'orchestrator') return 'failed'
+  if (id === 'summarizer') return results?.summary ? 'done' : 'failed'
+  if (id === 'reviewer') return results?.review ? 'done' : 'failed'
+  if (id === 'recommender') return results?.recommendation ? 'done' : 'failed'
   const found = results?.subgraph_results?.some((r) => r.subgraph === id)
   return found ? 'done' : 'failed'
 }
 
-function hasDetail(id: NodeId, results: StatusResponse['results']): boolean {
-  if (!results) return false
-  if (id === 'project_discovery') return !!results.discovery
-  if (id === 'planner') return !!(results.plan && results.plan.length > 0)
-  if (id === 'final_report') return !!results.final_report
-  return !!results.subgraph_results?.some((r) => r.subgraph === id)
+function hasDetail(
+  id: NodeId,
+  results: StatusResponse['results'],
+  artifactMap: Map<NodeId, ArtifactInfo>,
+): boolean {
+  if (id === 'project_discovery') return !!results?.discovery
+  if (id === 'orchestrator') return !!artifactMap.get('orchestrator')?.proposals?.length
+  if (id === 'summarizer') return !!(artifactMap.get('summarizer')?.output ?? results?.summary)
+  if (id === 'reviewer') return !!(artifactMap.get('reviewer')?.output ?? results?.review)
+  if (id === 'recommender')
+    return !!(artifactMap.get('recommender')?.output ?? results?.recommendation)
+  const artifact = artifactMap.get(id)
+  return !!(artifact?.result ?? results?.subgraph_results?.some((r) => r.subgraph === id))
 }
 
-function filterEdges(nodes: GraphNodeState[]) {
+function filterEdges(nodes: GraphNodeState[], edges: ReturnType<typeof buildGraphDef>['edges']) {
   const ids = new Set(nodes.map((n) => n.id))
-  return GRAPH_EDGES.filter((e) => ids.has(e.source) && ids.has(e.target))
+  return edges.filter((e) => ids.has(e.source) && ids.has(e.target))
 }

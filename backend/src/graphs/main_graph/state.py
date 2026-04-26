@@ -43,3 +43,4 @@ class MainState(TypedDict):
     summary: NotRequired[str]
     review: NotRequired[str]
     recommendation: NotRequired[str]
+    cancelled: NotRequired[bool]

@@ -1,12 +1,23 @@
 export type LockFileName = 'package-lock.json' | 'yarn.lock' | 'pnpm-lock.yaml'
 
-export type JobStatus = 'pending' | 'running' | 'awaiting_approval' | 'done' | 'failed'
+export type JobStatus =
+  | 'pending'
+  | 'running'
+  | 'processing'
+  | 'awaiting_approval'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
 
-export interface AnalysisRequest {
+export interface JobMetadata {
   package_json: string
   lock_file: string
   lock_file_name: LockFileName
   concern: string
+}
+
+export interface AnalysisRequest {
+  metadata: JobMetadata
 }
 
 export interface AnalysisResponse {
@@ -59,26 +70,57 @@ export interface AnalysisResult {
   discovery?: DiscoveryResult
   plan?: string[]
   subgraph_results?: SubgraphResult[]
-  final_report?: string
+  summary?: string
+  review?: string
+  recommendation?: string
+}
+
+export interface GraphNodeInfo {
+  id: string
+  type: 'terminal' | 'backbone' | 'subgraph'
+  order: number
+}
+
+export interface GraphEdgeInfo {
+  source: string
+  target: string
+}
+
+export interface GraphInfo {
+  nodes: GraphNodeInfo[]
+  edges: GraphEdgeInfo[]
+}
+
+export interface Proposal {
+  created_at: string
+  plan: string[]
+  assistant_message: string
+  user_response: string
+  user_intended_action: 'approve' | 'change' | 'cancel'
 }
 
 export interface ArtifactInfo {
   node: string
-  status: 'running' | 'done' | 'failed'
+  status: 'running' | 'done' | 'failed' | 'cancelled'
   started_at: string
   completed_at: string | null
+  // Orchestrator-specific
+  proposals?: Proposal[]
+  // Subgraph-specific
+  result?: Record<string, unknown>
+  // Terminal node-specific
+  output?: string
 }
 
 export interface StatusResponse {
   trace_id: string
   status: JobStatus
-  concern: string
-  package_json: string | null
-  lock_file_name: string | null
+  metadata: JobMetadata
   completed_at: string | null
   results?: AnalysisResult
   artifacts?: ArtifactInfo[]
   assistant_message?: string
+  graph?: GraphInfo
 }
 
 export interface JobListItem {

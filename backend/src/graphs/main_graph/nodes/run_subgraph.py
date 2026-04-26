@@ -47,6 +47,7 @@ async def run_subgraph(state: MainState) -> dict:
             }
         )
         if job_id:
+            await dao.update_artifact_data(job_id, name, {"result": result})
             await dao.complete_artifact(job_id, name, "done")
         logger.info("run_subgraph: %s completed", name)
         return {"subgraph_results": [{"subgraph": name, "data": result}]}

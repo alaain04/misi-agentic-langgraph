@@ -26,7 +26,13 @@ export default function JobDetailPage() {
   }, [traceId])
 
   const shouldStop = useCallback((data: StatusResponse): boolean => {
-    return data.status === 'done' || data.status === 'failed' || data.status === 'awaiting_approval'
+    return (
+      data.status === 'done' ||
+      data.status === 'failed' ||
+      data.status === 'cancelled' ||
+      data.status === 'awaiting_approval' ||
+      data.status === 'processing'
+    )
   }, [])
 
   const { data, error, isPolling, startPolling } = usePolling<StatusResponse>(
@@ -40,9 +46,9 @@ export default function JobDetailPage() {
     startPolling()
   }, [startPolling])
 
-  // If job is still awaiting plan approval, send user to the plan page
+  // If job is still in the chat loop, send user to the plan page
   useEffect(() => {
-    if (data?.status === 'awaiting_approval') {
+    if (data?.status === 'awaiting_approval' || data?.status === 'processing') {
       navigate(`/jobs/${traceId}/plan`, { replace: true })
     }
   }, [data, navigate, traceId])
@@ -95,7 +101,7 @@ export default function JobDetailPage() {
                 </dd>
 
                 <dt className="tracking-widest text-[--color-muted] uppercase">Concern</dt>
-                <dd className="text-[--color-text]">{data.concern}</dd>
+                <dd className="text-[--color-text]">{data.metadata?.concern}</dd>
 
                 <dt className="tracking-widest text-[--color-muted] uppercase">Processed</dt>
                 <dd className="text-[--color-text]">{formatDate(data.completed_at)}</dd>
@@ -167,11 +173,13 @@ export default function JobDetailPage() {
             renderData={renderData}
             selectedNodeId={selectedNodeId}
             onNodeClick={setSelectedNodeId}
+            isRunning={data?.status === 'running'}
           />
 
           <NodeDetailPanel
             nodeId={selectedNodeId}
             results={data.results}
+            artifacts={data.artifacts}
             onClose={() => setSelectedNodeId(null)}
           />
         </>

@@ -1,7 +1,10 @@
+import logging
 from datetime import UTC, datetime
 
 from src.db.connection import get_db
 from src.models.job import Job, JobStatus
+
+logger = logging.getLogger(__name__)
 
 
 class JobDAO:
@@ -59,6 +62,17 @@ class JobDAO:
             },
         )
 
+    async def mark_cancelled(self, job_id: str) -> None:
+        await self._col.update_one(
+            {"_id": job_id},
+            {
+                "$set": {
+                    "status": JobStatus.cancelled,
+                    "completed_at": datetime.now(UTC),
+                }
+            },
+        )
+
     async def start_artifact(self, job_id: str, node: str) -> None:
         """Insert or update an artifact entry as 'running'."""
         now = datetime.now(UTC)
@@ -105,6 +119,23 @@ class JobDAO:
                     }
                 },
             )
+
+    async def push_proposal(self, job_id: str, proposal: dict) -> None:
+        """Append a proposal entry to the orchestrator artifact's proposals array."""
+        result = await self._col.update_one(
+            {"_id": job_id, "artifacts.node": "orchestrator"},
+            {"$push": {"artifacts.$.proposals": proposal}},
+        )
+        if result.matched_count == 0:
+            logger.warning("push_proposal: orchestrator artifact not found for job=%s", job_id)
+
+    async def update_artifact_data(self, job_id: str, node: str, data: dict) -> None:
+        """Merge extra fields into an existing artifact entry."""
+        update_fields = {f"artifacts.$.{k}": v for k, v in data.items()}
+        await self._col.update_one(
+            {"_id": job_id, "artifacts.node": node},
+            {"$set": update_fields},
+        )
 
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})

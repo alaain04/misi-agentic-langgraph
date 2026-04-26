@@ -1,14 +1,15 @@
-import type { AnalysisResult } from '../../api/types'
+import type { ArtifactInfo, AnalysisResult } from '../../api/types'
 import type { NodeId } from './graphDefinition'
 import { getPanelComponent } from './nodeRegistry'
 
 interface NodeDetailPanelProps {
   nodeId: NodeId | null
   results: AnalysisResult | undefined
+  artifacts: ArtifactInfo[] | undefined
   onClose: () => void
 }
 
-export function NodeDetailPanel({ nodeId, results, onClose }: NodeDetailPanelProps) {
+export function NodeDetailPanel({ nodeId, results, artifacts, onClose }: NodeDetailPanelProps) {
   if (!nodeId) return null
 
   const Panel = getPanelComponent(nodeId)
@@ -35,7 +36,7 @@ export function NodeDetailPanel({ nodeId, results, onClose }: NodeDetailPanelPro
 
       {/* Panel content */}
       {Panel ? (
-        <Panel nodeId={nodeId} results={results} />
+        <Panel nodeId={nodeId} results={results} artifacts={artifacts} />
       ) : (
         <p className="font-mono text-xs text-[--color-muted]">No detail available for this node.</p>
       )}

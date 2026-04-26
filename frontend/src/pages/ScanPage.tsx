@@ -1,5 +1,7 @@
-import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
 import { SAMPLES } from '../data/samples'
+import { ScanModal } from '../components/analysis/ScanModal'
+import type { JobMetadata } from '../api/types'
 
 const SAMPLE_ICONS: Record<string, string> = {
   'supply-chain': '⛓',
@@ -9,7 +11,15 @@ const SAMPLE_ICONS: Record<string, string> = {
 }
 
 export default function ScanPage() {
-  const navigate = useNavigate()
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalInitial, setModalInitial] = useState<Partial<JobMetadata> | undefined>()
+  const [modalTitle, setModalTitle] = useState<string | undefined>()
+
+  function openBlank() {
+    setModalInitial(undefined)
+    setModalTitle(undefined)
+    setModalOpen(true)
+  }
 
   return (
     <main className="space-y-8">
@@ -25,7 +35,7 @@ export default function ScanPage() {
       <div>
         <p className="mb-4 font-mono text-xs text-[--color-muted]">Start from scratch</p>
         <button
-          onClick={() => navigate('/scan/new')}
+          onClick={openBlank}
           className="group w-full rounded-xl border border-dashed border-[--color-border] bg-[--color-surface] p-8 text-left transition-all duration-200 hover:border-[--color-accent]/50 hover:bg-[--color-surface-raised]"
         >
           <div className="flex items-center gap-5">
@@ -37,7 +47,7 @@ export default function ScanPage() {
                 New scan
               </div>
               <div className="font-mono text-xs text-[--color-muted]">
-                Paste your own package.json and lock file to begin a custom analysis
+                Paste or drag your package.json and lock file to begin a custom analysis
               </div>
             </div>
             <div className="ml-auto font-mono text-lg text-[--color-muted] transition-colors duration-200 group-hover:text-[--color-accent]">
@@ -63,7 +73,11 @@ export default function ScanPage() {
           {SAMPLES.map((sample) => (
             <button
               key={sample.id}
-              onClick={() => navigate('/scan/new', { state: { sample } })}
+              onClick={() => {
+                setModalInitial(sample.request.metadata)
+                setModalTitle(sample.label)
+                setModalOpen(true)
+              }}
               className="group rounded-xl border border-[--color-border] bg-[--color-surface] p-6 text-left transition-all duration-200 hover:border-[--color-accent]/40 hover:bg-[--color-surface-raised]"
             >
               <div className="mb-3 flex items-start justify-between gap-2">
@@ -82,6 +96,13 @@ export default function ScanPage() {
           ))}
         </div>
       </div>
+
+      <ScanModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        initialRequest={modalInitial}
+        title={modalTitle}
+      />
     </main>
   )
 }
