@@ -131,11 +131,7 @@ async def run_analysis(
         )
 
         if interrupt_payload is not None:
-            await dao.save_pending_chat(
-                job_id,
-                assistant_message=interrupt_payload.get("assistant_message", ""),
-                plan=interrupt_payload.get("plan", []),
-            )
+            await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
 
         snapshot = await main_graph.aget_state(config)
@@ -169,11 +165,7 @@ async def resume_analysis(job_id: str, user_message: str) -> None:
 
         if interrupt_payload is not None:
             # Orchestrator looped and interrupted again (user requested changes)
-            await dao.save_pending_chat(
-                job_id,
-                assistant_message=interrupt_payload.get("assistant_message", ""),
-                plan=interrupt_payload.get("plan", []),
-            )
+            await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
 
         snapshot = await main_graph.aget_state(config)

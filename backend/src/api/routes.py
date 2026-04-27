@@ -45,6 +45,12 @@ class GraphInfo(BaseModel):
 def build_graph_info(job: Job) -> GraphInfo:
     result = job.result or {}
     plan: list[str] = result.get("plan") or []
+    if not plan:
+        orch = next((a for a in (job.artifacts or []) if a["node"] == "orchestrator"), None)
+        if orch:
+            proposals = orch.get("proposals") or []
+            if proposals:
+                plan = proposals[-1].get("plan") or []
     artifact_nodes: list[str] = [a["node"] for a in (job.artifacts or [])]
 
     seen: set[str] = set()
@@ -106,7 +112,6 @@ class AnalysisStatusResponse(BaseModel):
     completed_at: datetime | None = None
     results: dict | None = None
     artifacts: list[dict] = []
-    assistant_message: str | None = None
     graph: GraphInfo
 
 
@@ -165,7 +170,6 @@ async def get_analysis_status(trace_id: str):
         completed_at=job.completed_at,
         results=job.result,
         artifacts=job.artifacts,
-        assistant_message=job.assistant_message,
         graph=build_graph_info(job),
     )
 

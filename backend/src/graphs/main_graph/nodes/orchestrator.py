@@ -114,7 +114,19 @@ async def orchestrator(state: MainState) -> dict | Command:
         # Generate assistant message presenting the plan
         assistant_msg = await _present_plan(plan, state, context)
 
-        # Pause — the interrupt payload is surfaced to the API and stored in MongoDB
+        # Push partial proposal now so PlanPage can read it during awaiting_approval
+        proposal_created_at = datetime.now(UTC).isoformat()
+        dao = JobDAO()
+        await dao.push_proposal(
+            job_id,
+            {
+                "created_at": proposal_created_at,
+                "plan": plan,
+                "assistant_message": assistant_msg,
+            },
+        )
+
+        # Pause — graph suspends here until the user responds
         user_input: str = interrupt(
             {
                 "plan": plan,
@@ -136,15 +148,8 @@ async def orchestrator(state: MainState) -> dict | Command:
         intent = await _classify_intent(plan, user_input)
         logger.info("orchestrator: job=%s intent=%r plan=%s", job_id, intent, plan)
 
-        # Record this conversation turn in the artifact
-        proposal = {
-            "created_at": datetime.now(UTC).isoformat(),
-            "plan": plan,
-            "assistant_message": assistant_msg,
-            "user_response": user_input,
-            "user_intended_action": intent,
-        }
-        await JobDAO().push_proposal(job_id, proposal)
+        # Complete the proposal with the user's response and classified intent
+        await dao.update_proposal(job_id, created_at=proposal_created_at, user_response=user_input, intent=intent)
 
         new_messages = [
             AIMessage(content=assistant_msg),

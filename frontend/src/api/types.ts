@@ -95,8 +95,8 @@ export interface Proposal {
   created_at: string
   plan: string[]
   assistant_message: string
-  user_response: string
-  user_intended_action: 'approve' | 'change' | 'cancel'
+  user_response?: string
+  user_intended_action?: 'approve' | 'change' | 'cancel'
 }
 
 export interface ArtifactInfo {
@@ -119,7 +119,6 @@ export interface StatusResponse {
   completed_at: string | null
   results?: AnalysisResult
   artifacts?: ArtifactInfo[]
-  assistant_message?: string
   graph?: GraphInfo
 }
 

@@ -37,20 +37,6 @@ class JobDAO:
             },
         )
 
-    async def save_pending_chat(
-        self, job_id: str, assistant_message: str, plan: list[str]
-    ) -> None:
-        await self._col.update_one(
-            {"_id": job_id},
-            {
-                "$set": {
-                    "status": JobStatus.awaiting_approval,
-                    "assistant_message": assistant_message,
-                    "result": {"plan": plan},
-                }
-            },
-        )
-
     async def mark_failed(self, job_id: str) -> None:
         await self._col.update_one(
             {"_id": job_id},
@@ -128,6 +114,21 @@ class JobDAO:
         )
         if result.matched_count == 0:
             logger.warning("push_proposal: orchestrator artifact not found for job=%s", job_id)
+
+    async def update_proposal(
+        self, job_id: str, created_at: str, user_response: str, intent: str
+    ) -> None:
+        """Set user_response and user_intended_action on a specific orchestrator proposal."""
+        await self._col.update_one(
+            {"_id": job_id},
+            {
+                "$set": {
+                    "artifacts.$[orch].proposals.$[prop].user_response": user_response,
+                    "artifacts.$[orch].proposals.$[prop].user_intended_action": intent,
+                }
+            },
+            array_filters=[{"orch.node": "orchestrator"}, {"prop.created_at": created_at}],
+        )
 
     async def update_artifact_data(self, job_id: str, node: str, data: dict) -> None:
         """Merge extra fields into an existing artifact entry."""

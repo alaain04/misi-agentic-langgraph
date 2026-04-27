@@ -78,7 +78,9 @@ export default function PlanPage() {
   // When awaiting_approval, push AI message (deduplicated by assistant_message content)
   useEffect(() => {
     if (!data || data.status !== 'awaiting_approval') return
-    const assistantMessage = data.assistant_message ?? ''
+    const orchArtifact = data.artifacts?.find((a) => a.node === 'orchestrator')
+    const lastProposal = orchArtifact?.proposals?.at(-1)
+    const assistantMessage = lastProposal?.assistant_message ?? ''
     if (!assistantMessage) return
     if (assistantMessage === lastAssistantMessageRef.current) return
     lastAssistantMessageRef.current = assistantMessage
@@ -87,7 +89,7 @@ export default function PlanPage() {
       {
         role: 'ai',
         text: assistantMessage,
-        plan: data.results?.plan,
+        plan: lastProposal?.plan,
       },
     ])
   }, [data])
