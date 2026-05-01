@@ -4,9 +4,9 @@ See [architecture.md](architecture.md) for the high-level system overview and re
 
 ---
 
-## Implemented: ProjectDiscovery subgraph
+## Implemented: Discovery subgraph
 
-**Location:** `src/graphs/project_discovery/`
+**Location:** `src/graphs/discovery/`
 
 **Purpose:** Clone-free inspection of a GitHub repository to identify JavaScript package manager files, parse direct dependencies, and build an initial dependency summary for downstream planner agents.
 
@@ -17,7 +17,7 @@ See [architecture.md](architecture.md) for the high-level system overview and re
 | `state.py` | `DiscoveryState` TypedDict, `ProjectMetadata`, `DependencyEntry` |
 | `constants.py` | Node name string constants |
 | `routes.py` | Routing functions (pure, importable, testable) |
-| `graph.py` | `StateGraph` wiring + `build_project_discovery_subgraph()` |
+| `graph.py` | `StateGraph` wiring + `build_discovery_subgraph()` |
 | `nodes/fetch_repository.py` | Resolve GitHub URL → REST API for repo metadata |
 | `nodes/detect_manifest_files.py` | Walk repo tree via GitHub Trees API, filter manifest files |
 | `nodes/parse_package_files.py` | Fetch + parse each manifest via GitHub Contents API |
@@ -103,7 +103,7 @@ The root `StateGraph` (not yet implemented) orchestrates the complete analysis. 
 
 ```
 START
-  └─► project_discovery
+  └─► discovery
         └─► planner              (LLM: reads DiscoveryResult + concern → list[Task])
               └─► task_dispatcher (Send fan-out: one Send per Task)
                     ├─► registry_subgraph
@@ -136,8 +136,6 @@ START
 | `registry_subgraph` | `graphs/subgraphs/registry.py` | npm/PyPI vulnerability checks, outdated deps |
 | `repo_subgraph` | `graphs/subgraphs/repo.py` | Static analysis: secrets, misconfigs, code smells |
 | `runtime_subgraph` | `graphs/subgraphs/runtime.py` | Dockerfile/k8s config, env var usage, exposed ports |
-| `risk_score_subgraph` | `graphs/subgraphs/risk_score.py` | Aggregates signals → structured risk score |
-| `recommendation_subgraph` | `graphs/subgraphs/recommendation.py` | Prioritised, actionable remediation steps |
 | `final_report` | `graphs/nodes/report.py` | Merges results → Markdown report → MongoDB |
 
 ### Planned file layout
@@ -154,9 +152,7 @@ src/graphs/
 │   ├── registry.py
 │   ├── repo.py
 │   ├── runtime.py
-│   ├── risk_score.py
-│   └── recommendation.py
-└── project_discovery/             # Implemented ✓
+└── discovery/                     # Implemented ✓
     └── ...
 ```
 

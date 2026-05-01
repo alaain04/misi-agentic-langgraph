@@ -4,7 +4,7 @@ import type { GraphInfo } from '../../api/types'
 
 export type NodeId =
   | 'START'
-  | 'project_discovery'
+  | 'discovery'
   | 'orchestrator'
   | 'registry'
   | 'repo'
@@ -54,7 +54,7 @@ export interface GraphRenderData {
 
 export const GRAPH_NODES: GraphNodeDef[] = [
   { id: 'START', label: 'START', layer: 0, isSubgraph: false },
-  { id: 'project_discovery', label: 'discovery', layer: 1, isSubgraph: false },
+  { id: 'discovery', label: 'discovery', layer: 1, isSubgraph: false },
   { id: 'orchestrator', label: 'orchestrator', layer: 2, isSubgraph: false },
   { id: 'registry', label: 'registry', layer: 3, isSubgraph: true, laneIndex: 0 },
   { id: 'repo', label: 'repo', layer: 3, isSubgraph: true, laneIndex: 1 },
@@ -68,8 +68,8 @@ export const GRAPH_NODES: GraphNodeDef[] = [
 ]
 
 export const GRAPH_EDGES: GraphEdgeDef[] = [
-  { source: 'START', target: 'project_discovery' },
-  { source: 'project_discovery', target: 'orchestrator' },
+  { source: 'START', target: 'discovery' },
+  { source: 'discovery', target: 'orchestrator' },
   { source: 'orchestrator', target: 'registry' },
   { source: 'orchestrator', target: 'repo' },
   { source: 'orchestrator', target: 'runtime' },
@@ -88,9 +88,7 @@ export const GRAPH_EDGES: GraphEdgeDef[] = [
 // ── Dynamic graph builder ──────────────────────────────────────────────────────
 
 // Human-readable overrides for node IDs whose label should differ from the id
-const NODE_LABEL_OVERRIDE: Partial<Record<NodeId, string>> = {
-  project_discovery: 'discovery',
-}
+const NODE_LABEL_OVERRIDE: Partial<Record<NodeId, string>> = {}
 
 export function buildGraphDef(graph: GraphInfo): { nodes: GraphNodeDef[]; edges: GraphEdgeDef[] } {
   let subIdx = 0

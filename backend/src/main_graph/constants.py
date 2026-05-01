@@ -1,0 +1,6 @@
+DISCOVERY = "discovery"
+ORCHESTRATOR = "orchestrator"
+EXECUTE_PLAN = "execute_plan"
+SUMMARIZER = "summarizer"
+REVIEWER = "reviewer"
+RECOMMENDER = "recommender"

@@ -57,7 +57,7 @@ Poll the status of a previously submitted job. When the job is done, `result` is
   "result": { ... } | null,
   "artifacts": [
     {
-      "node": "project_discovery",
+      "node": "discovery",
       "status": "running" | "done" | "failed",
       "started_at": "2026-04-25T12:00:01Z",
       "completed_at": "2026-04-25T12:00:03Z" | null
@@ -78,7 +78,7 @@ Poll the status of a previously submitted job. When the job is done, `result` is
 
 | Field | Type | Description |
 |---|---|---|
-| `node` | `string` | Graph node or subgraph name (e.g. `"project_discovery"`, `"registry"`) |
+| `node` | `string` | Graph node or subgraph name (e.g. `"discovery"`, `"registry"`) |
 | `status` | `"running" \| "done" \| "failed"` | Current execution status of this node |
 | `started_at` | `string (ISO 8601)` | When the node started executing |
 | `completed_at` | `string (ISO 8601) \| null` | When the node finished; null while still running |

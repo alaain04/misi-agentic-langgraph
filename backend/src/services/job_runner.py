@@ -4,8 +4,8 @@ import logging
 
 from langgraph.types import Command
 
-from src.graphs.main_graph import main_graph
-from src.graphs.main_graph.constants import (
+from src.main_graph import main_graph
+from src.main_graph.constants import (
     ORCHESTRATOR,
     RECOMMENDER,
     REVIEWER,
@@ -73,28 +73,36 @@ async def _stream_graph(
                 interrupt_payload = node_update[0].value
                 continue
 
-            if node_name == "project_discovery":
-                await dao.complete_artifact(job_id, "project_discovery", "done")
+            if node_name == "discovery":
+                await dao.complete_artifact(job_id, "discovery", "done")
                 await dao.start_artifact(job_id, ORCHESTRATOR)
             elif node_name == ORCHESTRATOR:
-                artifact_status = "cancelled" if node_update.get("cancelled") else "done"
+                artifact_status = (
+                    "cancelled" if node_update.get("cancelled") else "done"
+                )
                 await dao.complete_artifact(job_id, ORCHESTRATOR, artifact_status)
                 if on_orchestrator_complete and not node_update.get("cancelled"):
                     await on_orchestrator_complete()
             elif node_name == SUMMARIZER:
                 await dao.start_artifact(job_id, SUMMARIZER)
                 if "summary" in node_update:
-                    await dao.update_artifact_data(job_id, SUMMARIZER, {"output": node_update["summary"]})
+                    await dao.update_artifact_data(
+                        job_id, SUMMARIZER, {"output": node_update["summary"]}
+                    )
                 await dao.complete_artifact(job_id, SUMMARIZER, "done")
             elif node_name == REVIEWER:
                 await dao.start_artifact(job_id, REVIEWER)
                 if "review" in node_update:
-                    await dao.update_artifact_data(job_id, REVIEWER, {"output": node_update["review"]})
+                    await dao.update_artifact_data(
+                        job_id, REVIEWER, {"output": node_update["review"]}
+                    )
                 await dao.complete_artifact(job_id, REVIEWER, "done")
             elif node_name == RECOMMENDER:
                 await dao.start_artifact(job_id, RECOMMENDER)
                 if "recommendation" in node_update:
-                    await dao.update_artifact_data(job_id, RECOMMENDER, {"output": node_update["recommendation"]})
+                    await dao.update_artifact_data(
+                        job_id, RECOMMENDER, {"output": node_update["recommendation"]}
+                    )
                 await dao.complete_artifact(job_id, RECOMMENDER, "done")
 
     return interrupt_payload
@@ -109,7 +117,7 @@ async def run_analysis(
 ) -> None:
     dao = JobDAO()
     await dao.update_status(job_id, JobStatus.running)
-    await dao.start_artifact(job_id, "project_discovery")
+    await dao.start_artifact(job_id, "discovery")
 
     config = {"configurable": {"thread_id": job_id}}
 

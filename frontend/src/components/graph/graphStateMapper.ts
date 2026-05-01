@@ -70,7 +70,7 @@ function deriveStatus(
 
   // Fallback: derive from job-level status
   if (jobStatus === 'awaiting_approval') {
-    if (id === 'project_discovery') return 'done'
+    if (id === 'discovery') return 'done'
     if (id === 'orchestrator') return 'done'
     return 'idle'
   }
@@ -78,7 +78,7 @@ function deriveStatus(
   if (jobStatus === 'running') return 'idle' // node hasn't started yet (no artifact)
   if (jobStatus === 'done') return 'done'
   // failed job: nodes without artifacts/results are failed
-  if (id === 'project_discovery') return results?.discovery ? 'done' : 'failed'
+  if (id === 'discovery') return results?.discovery ? 'done' : 'failed'
   if (id === 'orchestrator') return 'failed'
   if (id === 'summarizer') return results?.summary ? 'done' : 'failed'
   if (id === 'reviewer') return results?.review ? 'done' : 'failed'
@@ -92,7 +92,7 @@ function hasDetail(
   results: StatusResponse['results'],
   artifactMap: Map<NodeId, ArtifactInfo>,
 ): boolean {
-  if (id === 'project_discovery') return !!results?.discovery
+  if (id === 'discovery') return !!results?.discovery
   if (id === 'orchestrator') return !!artifactMap.get('orchestrator')?.proposals?.length
   if (id === 'summarizer') return !!(artifactMap.get('summarizer')?.output ?? results?.summary)
   if (id === 'reviewer') return !!(artifactMap.get('reviewer')?.output ?? results?.review)

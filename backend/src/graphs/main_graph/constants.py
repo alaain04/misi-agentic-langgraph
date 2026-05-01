@@ -1,6 +1,0 @@
-PROJECT_DISCOVERY = "project_discovery"
-ORCHESTRATOR = "orchestrator"
-RUN_SUBGRAPH = "run_subgraph"
-SUMMARIZER = "summarizer"
-REVIEWER = "reviewer"
-RECOMMENDER = "recommender"

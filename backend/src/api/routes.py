@@ -6,9 +6,9 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from src.graphs.main_graph.constants import (
+from src.main_graph.constants import (
+    DISCOVERY,
     ORCHESTRATOR,
-    PROJECT_DISCOVERY,
     RECOMMENDER,
     REVIEWER,
     SUMMARIZER,
@@ -46,7 +46,9 @@ def build_graph_info(job: Job) -> GraphInfo:
     result = job.result or {}
     plan: list[str] = result.get("plan") or []
     if not plan:
-        orch = next((a for a in (job.artifacts or []) if a["node"] == "orchestrator"), None)
+        orch = next(
+            (a for a in (job.artifacts or []) if a["node"] == "orchestrator"), None
+        )
         if orch:
             proposals = orch.get("proposals") or []
             if proposals:
@@ -66,7 +68,7 @@ def build_graph_info(job: Job) -> GraphInfo:
 
     nodes: list[GraphNodeInfo] = [
         GraphNodeInfo(id="START", type="terminal", order=0),
-        GraphNodeInfo(id=PROJECT_DISCOVERY, type="backbone", order=1),
+        GraphNodeInfo(id=DISCOVERY, type="backbone", order=1),
         GraphNodeInfo(id=ORCHESTRATOR, type="backbone", order=2),
         *[GraphNodeInfo(id=s, type="subgraph", order=3) for s in subgraph_nodes],
         GraphNodeInfo(id=SUMMARIZER, type="backbone", order=4),
@@ -76,8 +78,8 @@ def build_graph_info(job: Job) -> GraphInfo:
     ]
 
     edges: list[GraphEdgeInfo] = [
-        GraphEdgeInfo(source="START", target=PROJECT_DISCOVERY),
-        GraphEdgeInfo(source=PROJECT_DISCOVERY, target=ORCHESTRATOR),
+        GraphEdgeInfo(source="START", target=DISCOVERY),
+        GraphEdgeInfo(source=DISCOVERY, target=ORCHESTRATOR),
     ]
     if subgraph_nodes:
         for s in subgraph_nodes:

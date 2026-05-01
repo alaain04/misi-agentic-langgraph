@@ -20,7 +20,7 @@ POST /analyze  { repo_url, concern, token? }
 
 Background: run_discovery
   ├─ JobDAO.update_status → running
-  ├─ project_discovery_subgraph.ainvoke(...)
+  ├─ discovery_subgraph.ainvoke(...)
   └─ JobDAO.save_result | update_status(failed)
 
 GET /analyze/{trace_id}
@@ -68,11 +68,11 @@ Jobs are stored in MongoDB collection `jobs`. The `_id` field is an `ObjectId` s
 
 ## Full pipeline (planned)
 
-The current implementation runs only the **ProjectDiscovery** subgraph. The planned full pipeline adds a planner agent and parallel specialized subgraphs:
+The current implementation runs only the **Discovery** subgraph. The planned full pipeline adds a planner agent and parallel specialized subgraphs:
 
 ```
 POST /analyze
-  └─ ProjectDiscovery subgraph     (implemented ✓)
+  └─ Discovery subgraph            (implemented ✓)
        └─ Planner agent            (planned)
             └─ Task Dispatcher     (parallel fan-out via Send)
                  ├─ Registry subgraph      (npm/PyPI vulnerability checks)
