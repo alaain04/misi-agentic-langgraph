@@ -32,6 +32,7 @@ async def execute_plan(state: MainState) -> dict:
                 "transitive_dependencies": state.get("transitive_dependencies", []),
                 "discovery_summary": state.get("discovery_summary", ""),
                 "concern": state.get("concern", ""),
+                "upstream_results": state.get("upstream_results", {}),
             }
         )
         if job_id:

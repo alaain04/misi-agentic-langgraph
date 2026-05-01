@@ -1,4 +1,6 @@
-"""Task dispatcher — conditional edge function that fans out via Send."""
+"""Task dispatcher — conditional edge that fans out the current stage via Send."""
+
+from typing import Any
 
 from langgraph.types import Send
 
@@ -7,7 +9,17 @@ from src.main_graph.state import MainState
 
 
 def task_dispatcher(state: MainState) -> list[Send]:
-    """Return one Send per planned subgraph, carrying discovery context."""
+    """Return one Send per subgraph in the current execution stage."""
+    stages = state.get("execution_stages", [])
+    idx = state.get("current_stage_index", 0)
+    current_stage = stages[idx] if idx < len(stages) else []
+
+    upstream_results: dict[str, Any] = {
+        entry["subgraph"]: entry["data"]
+        for entry in state.get("subgraph_results", [])
+        if "data" in entry
+    }
+
     return [
         Send(
             EXECUTE_PLAN,
@@ -18,8 +30,9 @@ def task_dispatcher(state: MainState) -> list[Send]:
                 "transitive_dependencies": state.get("transitive_dependencies", []),
                 "discovery_summary": state.get("discovery_summary", ""),
                 "concern": state.get("concern", ""),
+                "upstream_results": upstream_results,
                 "subgraph_results": [],
             },
         )
-        for name in state.get("plan", [])
+        for name in current_stage
     ]

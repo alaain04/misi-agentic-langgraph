@@ -1,6 +1,8 @@
 DISCOVERY = "discovery"
 ORCHESTRATOR = "orchestrator"
+EXECUTION_PLANNER = "execution_planner"
 EXECUTE_PLAN = "execute_plan"
+STAGE_ADVANCE = "stage_advance"
 SUMMARIZER = "summarizer"
 REVIEWER = "reviewer"
 RECOMMENDER = "recommender"

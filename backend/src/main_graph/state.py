@@ -33,11 +33,16 @@ class MainState(TypedDict):
     # ── Orchestrator: approved plan ──────────────────────────────────────────
     plan: NotRequired[list[str]]
 
+    # ── Staged execution (resolved from dependency declarations) ─────────────
+    execution_stages: NotRequired[list[list[str]]]
+    current_stage_index: NotRequired[int]
+
     # ── Parallel reducer: each Send-spawned execute_plan appends one item ────
     subgraph_results: Annotated[list[dict], operator.add]
 
-    # ── Temp field set by task_dispatcher via Send ───────────────────────────
+    # ── Temp fields set by task_dispatcher via Send ──────────────────────────
     subgraph_name: NotRequired[str]
+    upstream_results: NotRequired[dict]
 
     # ── Terminal node outputs ─────────────────────────────────────────────────
     summary: NotRequired[str]

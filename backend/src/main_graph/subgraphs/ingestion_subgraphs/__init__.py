@@ -1,9 +1,11 @@
-from src.main_graph.subgraphs.ingestion_subgraphs.registry import registry_subgraph
-from src.main_graph.subgraphs.ingestion_subgraphs.repo import repo_subgraph
-from src.main_graph.subgraphs.ingestion_subgraphs.runtime import runtime_subgraph
+from src.main_graph.subgraphs.ingestion_subgraphs import registry, repo, runtime
 
-__all__ = [
-    "registry_subgraph",
-    "repo_subgraph",
-    "runtime_subgraph",
-]
+_MODULES = [registry, repo, runtime]
+
+SUBGRAPH_REGISTRY = {mod.GRAPH_NAME: mod.subgraph for mod in _MODULES}
+SUBGRAPH_DESCRIPTIONS = [mod.describe() for mod in _MODULES]
+SUBGRAPH_DEPENDENCIES: dict[str, list[str]] = {
+    mod.GRAPH_NAME: mod.DEPENDS_ON for mod in _MODULES
+}
+
+__all__ = ["SUBGRAPH_REGISTRY", "SUBGRAPH_DESCRIPTIONS", "SUBGRAPH_DEPENDENCIES"]

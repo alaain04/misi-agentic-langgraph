@@ -3,6 +3,7 @@
 import json
 import logging
 
+from src.main_graph.subgraph_registry import SUBGRAPH_DESCRIPTIONS, SUBGRAPH_REGISTRY
 from src.main_graph.subgraphs.orchestrator.state import OrchestratorState
 from src.utils.llm import Model, get_llm
 
@@ -10,25 +11,31 @@ logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
-VALID_SUBGRAPHS = {"registry", "repo", "runtime"}
+VALID_SUBGRAPHS: set[str] = set(SUBGRAPH_REGISTRY.keys())
 
-_FALLBACK_PLAN = ["registry", "runtime"]
+_FALLBACK_PLAN: list[str] = list(SUBGRAPH_REGISTRY.keys())[:2]
 
-_SYSTEM_PROMPT = """\
-You are a dependency analysis planner. Given a project's dependency discovery
-summary, its direct and transitive dependencies, and a user concern, decide
-which analysis subgraphs to run. Available subgraphs:
 
-- registry: checks npm registry for outdated versions and vulnerability advisories
-- repo: analyzes the GitHub repository for stars, issues, last commit,
-maintenance status
-- runtime: checks runtime compatibility and environment configuration
+def _build_system_prompt() -> str:
+    subgraph_lines = "\n".join(
+        f"- {name}: {desc}"
+        for entry in SUBGRAPH_DESCRIPTIONS
+        for name, desc in [entry.split(":", 1)]
+    )
+    example = json.dumps(list(SUBGRAPH_REGISTRY.keys())[:2])
+    return (
+        "You are a dependency analysis planner. Given a project's dependency"
+        " discovery\nsummary, its direct and transitive dependencies, and a user"
+        " concern, decide\nwhich analysis subgraphs to run. Available subgraphs:\n"
+        f"{subgraph_lines}\n"
+        f"Return ONLY a valid JSON array of subgraph names, e.g.: {example}\n"
+        "Choose only the subgraphs relevant to the user's concern.\n"
+        "If additional instructions are provided, honor them —\n"
+        "they reflect updated user preferences."
+    )
 
-Return ONLY a valid JSON array of subgraph names, e.g.: ["registry", "runtime"]
-Choose only the subgraphs relevant to the user's concern.
-If additional instructions are provided, honor them —
-they reflect updated user preferences.\
-"""
+
+_SYSTEM_PROMPT = _build_system_prompt()
 
 
 async def run_planner(

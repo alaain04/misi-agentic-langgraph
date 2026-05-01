@@ -4,34 +4,57 @@ import json
 import logging
 
 from src.main_graph.state import MainState
+from src.main_graph.subgraph_registry import SUBGRAPH_DESCRIPTIONS, SUBGRAPH_REGISTRY
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
-VALID_SUBGRAPHS = {"registry", "repo", "runtime", "risk_score", "recommendation"}
+# Non-ingestion subgraphs that are always part of the main pipeline.
+_PIPELINE_SUBGRAPHS: list[tuple[str, str]] = [
+    (
+        "risk_score",
+        "Computes a composite risk score from all available analysis signals",
+    ),
+    (
+        "recommendation",
+        "Generates actionable remediation recommendations based on identified risks",
+    ),
+]
 
-_FALLBACK_PLAN = ["registry", "risk_score", "recommendation"]
+VALID_SUBGRAPHS: set[str] = set(SUBGRAPH_REGISTRY.keys()) | {
+    name for name, _ in _PIPELINE_SUBGRAPHS
+}
 
-_SYSTEM_PROMPT = """\
-You are a dependency analysis planner. Given a project's dependency discovery
-summary, its direct and transitive dependencies, and a user concern, decide
-which analysis subgraphs to run. Available subgraphs:
+_FALLBACK_PLAN: list[str] = ["registry", "risk_score", "recommendation"]
 
-- registry: checks npm registry for outdated versions and vulnerability advisories
-- repo: analyzes the GitHub repository for stars, issues, last commit,
-maintenance status
-- runtime: checks runtime compatibility and environment configuration
-- risk_score: computes a composite risk score from all available signals
-- recommendation: generates actionable remediation recommendations
 
-Return ONLY a valid JSON array of subgraph names, e.g.: ["registry", "risk_score"]
-Choose only the subgraphs relevant to the user's concern. Always include
-"risk_score" and "recommendation" when there are dependencies to analyze.
-If additional instructions are provided, honor them — 
-they reflect updated user preferences.\
-"""
+def _build_system_prompt() -> str:
+    ingestion_lines = "\n".join(
+        f"- {name}: {desc}"
+        for entry in SUBGRAPH_DESCRIPTIONS
+        for name, desc in [entry.split(":", 1)]
+    )
+    pipeline_lines = "\n".join(
+        f"- {name}: {desc}" for name, desc in _PIPELINE_SUBGRAPHS
+    )
+    subgraph_lines = f"{ingestion_lines}\n{pipeline_lines}"
+    example = json.dumps(["registry", "risk_score", "recommendation"])
+    return (
+        "You are a dependency analysis planner. Given a project's dependency"
+        " discovery\nsummary, its direct and transitive dependencies, and a user"
+        " concern, decide\nwhich analysis subgraphs to run. Available subgraphs:\n\n"
+        f"{subgraph_lines}\n\n"
+        f"Return ONLY a valid JSON array of subgraph names, e.g.: {example}\n"
+        "Choose only the subgraphs relevant to the user's concern. Always include\n"
+        '"risk_score" and "recommendation" when there are dependencies to analyze.\n'
+        "If additional instructions are provided, honor them —\n"
+        "they reflect updated user preferences."
+    )
+
+
+_SYSTEM_PROMPT = _build_system_prompt()
 
 
 async def run_planner(state: MainState, extra_instructions: str = "") -> list[str]:
