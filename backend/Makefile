@@ -8,6 +8,9 @@ sync:
 dev:
 	uv run dev
 
+qa:
+	uv run format && uv run lint && uv run test
+	
 lint:
 	uv run format && uv run lint
 

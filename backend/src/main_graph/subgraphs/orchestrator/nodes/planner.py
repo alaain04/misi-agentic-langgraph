@@ -3,7 +3,10 @@
 import json
 import logging
 
-from src.main_graph.subgraph_registry import SUBGRAPH_DESCRIPTIONS, SUBGRAPH_REGISTRY
+from src.main_graph.subgraphs.ingestion_subgraphs import (
+    SUBGRAPH_DESCRIPTIONS,
+    SUBGRAPH_REGISTRY,
+)
 from src.main_graph.subgraphs.orchestrator.state import OrchestratorState
 from src.utils.llm import Model, get_llm
 

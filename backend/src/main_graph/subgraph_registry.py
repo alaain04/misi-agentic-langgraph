@@ -1,7 +1,0 @@
-from src.main_graph.subgraphs.ingestion_subgraphs import (
-    SUBGRAPH_DEPENDENCIES,
-    SUBGRAPH_DESCRIPTIONS,
-    SUBGRAPH_REGISTRY,
-)
-
-__all__ = ["SUBGRAPH_REGISTRY", "SUBGRAPH_DESCRIPTIONS", "SUBGRAPH_DEPENDENCIES"]

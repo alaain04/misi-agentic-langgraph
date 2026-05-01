@@ -1,7 +1,7 @@
 """Execution planner node — resolves dependency-aware execution stages once."""
 
 from src.main_graph.state import MainState
-from src.main_graph.subgraph_registry import SUBGRAPH_DEPENDENCIES
+from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DEPENDENCIES
 from src.main_graph.utils.dependency_resolver import resolve_execution_stages
 
 

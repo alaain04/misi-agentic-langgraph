@@ -3,7 +3,7 @@
 import logging
 
 from src.main_graph.state import MainState
-from src.main_graph.subgraph_registry import SUBGRAPH_REGISTRY
+from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_REGISTRY
 from src.services.job_dao import JobDAO
 
 logger = logging.getLogger(__name__)

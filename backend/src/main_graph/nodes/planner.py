@@ -4,7 +4,10 @@ import json
 import logging
 
 from src.main_graph.state import MainState
-from src.main_graph.subgraph_registry import SUBGRAPH_DESCRIPTIONS, SUBGRAPH_REGISTRY
+from src.main_graph.subgraphs.ingestion_subgraphs import (
+    SUBGRAPH_DESCRIPTIONS,
+    SUBGRAPH_REGISTRY,
+)
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
