@@ -1,0 +1,42 @@
+### List jobs — first page (default)
+GET {{base_url}}/jobs
+
+###
+
+### List jobs — page 2, 20 per page
+GET {{base_url}}/jobs?page=2&limit=20
+
+###
+
+### List jobs — filter by status: pending
+GET {{base_url}}/jobs?status=pending
+
+###
+
+### List jobs — filter by status: running
+GET {{base_url}}/jobs?status=running
+
+###
+
+### List jobs — filter by status: awaiting_approval
+GET {{base_url}}/jobs?status=awaiting_approval
+
+###
+
+### List jobs — filter by status: done
+GET {{base_url}}/jobs?status=done
+
+###
+
+### List jobs — filter by status: failed
+GET {{base_url}}/jobs?status=failed
+
+###
+
+### List jobs — search by trace_id
+GET {{base_url}}/jobs?trace_id={{trace_id}}
+
+###
+
+### List jobs — combined filters
+GET {{base_url}}/jobs?status=done&page=1&limit=5

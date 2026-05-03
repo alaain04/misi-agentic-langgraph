@@ -8,7 +8,7 @@ from src.main_graph.subgraphs.ingestion_subgraphs import (
     SUBGRAPH_DESCRIPTIONS,
     SUBGRAPH_REGISTRY,
 )
-from src.utils.llm import Model, get_llm
+from src.utils.llm import Model, get_llm, parse_llm_json
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +103,7 @@ async def run_planner(state: MainState, extra_instructions: str = "") -> list[st
     )
 
     try:
-        raw = response.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        plan = json.loads(raw.strip())
+        plan = parse_llm_json(response.content or "")
         plan = [s for s in plan if s in VALID_SUBGRAPHS]
         if not plan:
             plan = _FALLBACK_PLAN

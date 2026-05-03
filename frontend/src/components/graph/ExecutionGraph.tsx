@@ -12,18 +12,6 @@ import { getPanelComponent } from './nodeRegistry'
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
-/** Center Y coordinate for each layer (top → bottom). */
-const LAYER_Y: Record<number, number> = {
-  0: 44, // START
-  1: 128, // discovery
-  2: 216, // orchestrator
-  3: 316, // subgraphs (spread horizontally)
-  4: 416, // summarizer
-  5: 502, // reviewer
-  6: 588, // recommender
-  7: 660, // END
-}
-
 const NODE_W = 132
 const NODE_H = 36
 const NODE_RX = 5
@@ -31,6 +19,8 @@ const CIRCLE_R = 22 // radius for terminal (START / END) nodes
 const SUBGRAPH_GAP = 12 // horizontal gap between adjacent subgraph rects
 const SVG_HEIGHT = 720
 const V_MARGIN = 24 // bottom padding below last node
+const LAYER_START_Y = 44
+const LAYER_SPACING = 100
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -45,21 +35,47 @@ interface NodePos {
 
 function computePositions(nodes: GraphNodeState[], containerWidth: number): Map<NodeId, NodePos> {
   const positions = new Map<NodeId, NodePos>()
-  const subgraphs = nodes
-    .filter((n) => n.def.isSubgraph)
-    .sort((a, b) => (a.def.laneIndex ?? 0) - (b.def.laneIndex ?? 0))
 
-  const numSub = subgraphs.length
-  const totalSubW = numSub * NODE_W + Math.max(0, numSub - 1) * SUBGRAPH_GAP
-  // leftmost subgraph center X
-  const subX0 = (containerWidth - totalSubW) / 2 + NODE_W / 2
+  const uniqueLayers = [...new Set(nodes.map((n) => n.def.layer))].sort((a, b) => a - b)
+  const layerY = new Map<number, number>()
+  uniqueLayers.forEach((layer, idx) => {
+    layerY.set(layer, LAYER_START_Y + idx * LAYER_SPACING)
+  })
 
-  let subIdx = 0
+  const subgraphsByLayer = new Map<number, GraphNodeState[]>()
   for (const node of nodes) {
-    const y = LAYER_Y[node.def.layer] ?? 0
-    const x = node.def.isSubgraph ? subX0 + subIdx++ * (NODE_W + SUBGRAPH_GAP) : containerWidth / 2
+    if (node.def.isSubgraph) {
+      const group = subgraphsByLayer.get(node.def.layer) ?? []
+      group.push(node)
+      subgraphsByLayer.set(node.def.layer, group)
+    }
+  }
+  for (const [layer, group] of subgraphsByLayer) {
+    subgraphsByLayer.set(
+      layer,
+      [...group].sort((a, b) => (a.def.laneIndex ?? 0) - (b.def.laneIndex ?? 0)),
+    )
+  }
+
+  const layerSubX0 = new Map<number, number>()
+  for (const [layer, group] of subgraphsByLayer) {
+    const totalW = group.length * NODE_W + Math.max(0, group.length - 1) * SUBGRAPH_GAP
+    layerSubX0.set(layer, (containerWidth - totalW) / 2 + NODE_W / 2)
+  }
+
+  for (const node of nodes) {
+    const y = layerY.get(node.def.layer) ?? LAYER_START_Y
+    let x: number
+    if (node.def.isSubgraph) {
+      const group = subgraphsByLayer.get(node.def.layer)!
+      const idxInGroup = group.findIndex((n) => n.id === node.id)
+      x = layerSubX0.get(node.def.layer)! + idxInGroup * (NODE_W + SUBGRAPH_GAP)
+    } else {
+      x = containerWidth / 2
+    }
     positions.set(node.id, { x, y })
   }
+
   return positions
 }
 
@@ -201,8 +217,11 @@ export function ExecutionGraph({
     svg.call(zoom)
 
     // Fit graph vertically; re-center horizontally after scale
-    const maxLayer = Math.max(...renderData.nodes.map((n) => n.def.layer))
-    const graphHeight = (LAYER_Y[maxLayer] ?? 660) + CIRCLE_R + V_MARGIN
+    const uniqueLayersSorted = [...new Set(renderData.nodes.map((n) => n.def.layer))].sort(
+      (a, b) => a - b,
+    )
+    const maxLayerY = LAYER_START_Y + (uniqueLayersSorted.length - 1) * LAYER_SPACING
+    const graphHeight = maxLayerY + CIRCLE_R + V_MARGIN
     const initialScale = Math.min(0.98, SVG_HEIGHT / graphHeight)
     const xOffset = (width * (1 - initialScale)) / 2
     const yOffset = (SVG_HEIGHT - graphHeight * initialScale) / 2

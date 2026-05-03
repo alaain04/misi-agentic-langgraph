@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: Debug",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["src.main:app", "--host", "0.0.0.0", "--port", "8000"],
+      "jinja": true,
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "python": "${workspaceFolder}/backend/.venv/bin/python"
+    },
+    {
+      "name": "Registry ingestion: debug",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/scripts/debug_subgraphs.py",
+      "args": ["registry"],
+      "jinja": true,
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "python": "${workspaceFolder}/backend/.venv/bin/python"
+    }
+  ]
+}

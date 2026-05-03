@@ -91,14 +91,25 @@ export const GRAPH_EDGES: GraphEdgeDef[] = [
 const NODE_LABEL_OVERRIDE: Partial<Record<NodeId, string>> = {}
 
 export function buildGraphDef(graph: GraphInfo): { nodes: GraphNodeDef[]; edges: GraphEdgeDef[] } {
-  let subIdx = 0
-  const nodes: GraphNodeDef[] = graph.nodes.map((n) => ({
-    id: n.id as NodeId,
-    label: NODE_LABEL_OVERRIDE[n.id as NodeId] ?? n.id,
-    layer: n.order,
-    isSubgraph: n.type === 'subgraph',
-    laneIndex: n.type === 'subgraph' ? subIdx++ : undefined,
-  }))
+  const layerCounter = new Map<number, number>()
+
+  const nodes: GraphNodeDef[] = graph.nodes.map((n) => {
+    const layer = n.order
+    let laneIndex: number | undefined
+    if (n.type === 'subgraph') {
+      const current = layerCounter.get(layer) ?? 0
+      laneIndex = current
+      layerCounter.set(layer, current + 1)
+    }
+    return {
+      id: n.id as NodeId,
+      label: NODE_LABEL_OVERRIDE[n.id as NodeId] ?? n.id,
+      layer,
+      isSubgraph: n.type === 'subgraph',
+      laneIndex,
+    }
+  })
+
   const edges: GraphEdgeDef[] = graph.edges.map((e) => ({
     source: e.source as NodeId,
     target: e.target as NodeId,
