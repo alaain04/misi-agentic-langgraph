@@ -11,8 +11,18 @@ _SAMPLE_SBOM = {
         "component": {"name": "my-app", "version": "1.0.0", "bom-ref": "my-app"}
     },
     "components": [
-        {"bom-ref": "pkg:npm/express@4.18.2", "name": "express", "version": "4.18.2", "purl": "pkg:npm/express@4.18.2"},
-        {"bom-ref": "pkg:npm/accepts@1.3.8", "name": "accepts", "version": "1.3.8", "purl": "pkg:npm/accepts@1.3.8"},
+        {
+            "bom-ref": "pkg:npm/express@4.18.2",
+            "name": "express",
+            "version": "4.18.2",
+            "purl": "pkg:npm/express@4.18.2",
+        },
+        {
+            "bom-ref": "pkg:npm/accepts@1.3.8",
+            "name": "accepts",
+            "version": "1.3.8",
+            "purl": "pkg:npm/accepts@1.3.8",
+        },
     ],
 }
 

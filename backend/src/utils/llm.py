@@ -40,7 +40,6 @@ def get_llm(model: Model = Model.GPT_4O_MINI) -> BaseChatModel:
     return ChatOpenAI(model=model.value, api_key=settings.openai_api_key, temperature=0)
 
 
-
 def parse_llm_json(text: str) -> Any:
     """Strip markdown code fences from an LLM response and parse as JSON."""
     text = text.strip()

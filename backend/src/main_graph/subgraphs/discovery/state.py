@@ -1,6 +1,7 @@
 """State schema for the ProjectDiscovery subgraph."""
 
 from typing import Any, NotRequired
+
 from typing_extensions import TypedDict
 
 
@@ -21,10 +22,10 @@ class DiscoveryState(TypedDict):
 
     # set by inspector_agent
     manifest_files: NotRequired[list[str]]
-    detected_package_manager: NotRequired[str]   # "npm" | "yarn" | "pnpm"
+    detected_package_manager: NotRequired[str]  # "npm" | "yarn" | "pnpm"
     lock_file_missing: NotRequired[bool]
-    docker_image: NotRequired[str]               # e.g. "node:22-alpine"
-    install_command: NotRequired[str]            # e.g. "npm install"
+    docker_image: NotRequired[str]  # e.g. "node:22-alpine"
+    install_command: NotRequired[str]  # e.g. "npm install"
 
     # set by lock_generator_agent
     lock_generation_attempts: NotRequired[int]

@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.main_graph.subgraphs.discovery.nodes.inspector_agent import (
+    inspector_agent,
     list_dir,
     read_file,
-    inspector_agent,
 )
 
-
 # --- Tool unit tests (real filesystem) ---
+
 
 def test_list_dir_returns_entries():
     with tempfile.TemporaryDirectory() as tmp:
@@ -45,6 +45,7 @@ def test_read_file_missing_file():
 
 # --- Node integration test (mocked agent) ---
 
+
 @pytest.mark.asyncio
 async def test_inspector_agent_maps_structured_response_to_state():
     from src.main_graph.subgraphs.discovery.nodes.inspector_agent import InspectorResult
@@ -61,10 +62,17 @@ async def test_inspector_agent_maps_structured_response_to_state():
         "src.main_graph.subgraphs.discovery.nodes.inspector_agent.create_agent"
     ) as mock_factory:
         mock_agent = MagicMock()
-        mock_agent.ainvoke = AsyncMock(return_value={"structured_response": mock_output})
+        mock_agent.ainvoke = AsyncMock(
+            return_value={"structured_response": mock_output}
+        )
         mock_factory.return_value = mock_agent
         result = await inspector_agent(
-            {"repo_url": "https://github.com/x/y", "concern": "security", "job_id": "1", "repo_path": "/tmp/repo"}
+            {
+                "repo_url": "https://github.com/x/y",
+                "concern": "security",
+                "job_id": "1",
+                "repo_path": "/tmp/repo",
+            }
         )
 
     assert result["detected_package_manager"] == "yarn"
@@ -89,7 +97,12 @@ async def test_inspector_agent_returns_error_on_agent_exception():
     ) as mock_factory:
         mock_factory.side_effect = RuntimeError("LLM unavailable")
         result = await inspector_agent(
-            {"repo_url": "https://github.com/x/y", "concern": "security", "job_id": "1", "repo_path": "/tmp/repo"}
+            {
+                "repo_url": "https://github.com/x/y",
+                "concern": "security",
+                "job_id": "1",
+                "repo_path": "/tmp/repo",
+            }
         )
 
     assert "discovery_error" in result

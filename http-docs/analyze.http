@@ -1,69 +1,21 @@
 ### Start analysis
-# @name startAnalysis
+# @name analyze
 POST {{base_url}}/analyze
 Content-Type: application/json
 
 {
-  "metadata": {
-    "package_json": "{\"name\":\"my-app\",\"version\":\"1.0.0\",\"dependencies\":{\"express\":\"^4.18.2\",\"lodash\":\"^4.17.21\",\"axios\":\"^1.4.0\"}}",
-    "lock_file": "# yarn.lock\n\nexpress@^4.18.2:\n  version \"4.18.2\"\n  resolved \"https://registry.yarnpkg.com/express/-/express-4.18.2.tgz\"\n  integrity sha512-...",
-    "lock_file_name": "yarn.lock",
-    "concern": "Check for known vulnerabilities and outdated dependencies in production packages"
-  }
+  "repo_url": "https://github.com/jsynowiec/node-typescript-boilerplate",
+  "concern": "Are there vulnerable dependencies in this project? If so, which ones and how severe are they?"
 }
 
-@trace_id = {{startAnalysis.response.body.trace_id}}
-
-###
-
-### Start analysis — package-lock.json
-POST {{base_url}}/analyze
-Content-Type: application/json
-
-{
-  "metadata": {
-    "package_json": "{\"name\":\"my-app\",\"version\":\"1.0.0\",\"dependencies\":{\"react\":\"^18.2.0\",\"next\":\"^13.5.0\",\"typescript\":\"^5.0.0\"}}",
-    "lock_file": "{\n  \"name\": \"my-app\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {}\n}",
-    "lock_file_name": "package-lock.json",
-    "concern": "Are there any supply-chain risks in the Next.js dependency tree?"
-  }
-}
-
-@trace_id = {{startAnalysis.response.body.trace_id}}
-
-
-###
-
-### Start analysis — pnpm-lock.yaml
-POST {{base_url}}/analyze
-Content-Type: application/json
-
-{
-  "metadata": {
-    "package_json": "{\"name\":\"my-app\",\"version\":\"1.0.0\",\"dependencies\":{\"vite\":\"^5.0.0\",\"vitest\":\"^1.0.0\"}}",
-    "lock_file": "lockfileVersion: '6.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n",
-    "lock_file_name": "pnpm-lock.yaml",
-    "concern": "Verify that dev tooling dependencies don't introduce security issues in CI"
-  }
-}
-@trace_id = {{startAnalysis.response.body.trace_id}}
-
-
-###
 
 ### Get analysis status
-GET {{base_url}}/analyze/69f4c715b56b805430a8547a
+GET {{base_url}}/analyze/{{analyze.trace_id}}
 
-###
-
-### Get analysis status — hardcoded trace_id
-GET {{base_url}}/analyze/replace-with-real-trace-id
-
-###
 
 ### Resume analysis (chat — awaiting_approval state)
 # Only valid when the job status is "awaiting_approval"
-POST {{base_url}}/analyze/69f4c715b56b805430a8547a/chat
+POST {{base_url}}/analyze/{{analyze.trace_id}}/chat
 Content-Type: application/json
 
 {
@@ -73,9 +25,9 @@ Content-Type: application/json
 ###
 
 ### Reject / redirect analysis (chat — awaiting_approval state)
-POST {{base_url}}/analyze/{{trace_id}}/chat
+POST {{base_url}}/analyze/{{analyze.trace_id}}/chat
 Content-Type: application/json
 
 {
-  "message": "No, skip the deep scan. Only report direct dependencies with critical CVEs."
+  "message": "Cancel the analysis."
 }

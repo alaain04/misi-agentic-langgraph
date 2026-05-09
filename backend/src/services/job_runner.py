@@ -19,12 +19,11 @@ logger = logging.getLogger(__name__)
 
 _DISCOVERY_OUTPUT_KEYS = {
     "project_metadata",
-    "direct_dependencies",
-    "transitive_dependencies",
-    "dependency_tree",
     "manifest_files",
     "discovery_summary",
     "discovery_error",
+    "sbom_result_id",
+    "sbom_error",
 }
 
 

@@ -3,9 +3,9 @@
 import logging
 import os
 
+from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain.agents import create_agent
 from pydantic import BaseModel
 
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
@@ -43,7 +43,7 @@ class InspectorResult(BaseModel):
     detected_package_manager: str  # "npm" | "yarn" | "pnpm"
     lock_file_missing: bool
     manifest_files: list[str]
-    docker_image: str   # e.g. "node:22-alpine"
+    docker_image: str  # e.g. "node:22-alpine"
     install_command: str  # e.g. "npm install"
 
 
@@ -53,14 +53,20 @@ You are inspecting a cloned Node.js repository at {repo_path}.
 Steps:
 1. Call list_dir("{repo_path}") to see root contents.
 2. Call read_file("{repo_path}/package.json") to read the manifest.
-3. Determine the package manager by lock file presence (pnpm-lock.yaml → pnpm, yarn.lock → yarn, package-lock.json → npm; default npm).
+3. Determine the package manager by lock file presence:
+   pnpm-lock.yaml → pnpm, yarn.lock → yarn, package-lock.json → npm; default npm.
 4. Set lock_file_missing=true if none of those three files exist in the root.
-5. Read engines.node from package.json to pick the Docker image (e.g. "22" → "node:22-alpine"); default "node:lts-alpine".
-6. Set install_command to the appropriate command (npm install / yarn install / pnpm install).
+5. Read engines.node from package.json to pick the Docker image
+   (e.g. "22" → "node:22-alpine"); default "node:lts-alpine".
+6. Set install_command to the appropriate command
+   (npm install / yarn install / pnpm install).
 7. Return structured output.
 
-If package.json is missing, return: detected_package_manager="npm", lock_file_missing=true, manifest_files=[], docker_image="node:lts-alpine", install_command="npm install".
+If package.json is missing, return:
+  detected_package_manager="npm", lock_file_missing=true, manifest_files=[],
+  docker_image="node:lts-alpine", install_command="npm install".
 """
+
 
 async def inspector_agent(state: DiscoveryState) -> dict:
     repo_path = state.get("repo_path", "")
@@ -73,7 +79,7 @@ async def inspector_agent(state: DiscoveryState) -> dict:
             tools=[list_dir, read_file],
             response_format=InspectorResult,
         )
-        
+
         result = await _agent.ainvoke(
             {
                 "messages": [

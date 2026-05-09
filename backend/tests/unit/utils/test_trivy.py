@@ -35,14 +35,15 @@ async def test_run_trivy_raises_on_nonzero_exit():
 
 @pytest.mark.asyncio
 async def test_run_trivy_raises_on_timeout():
-    import asyncio as _asyncio
 
     mock_proc = MagicMock()
     mock_proc.kill = MagicMock()
     mock_proc.wait = AsyncMock()
-    mock_proc.communicate = AsyncMock(side_effect=_asyncio.TimeoutError())
+    mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-         patch("asyncio.wait_for", side_effect=TimeoutError()):
+    with (
+        patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        patch("asyncio.wait_for", side_effect=TimeoutError()),
+    ):
         with pytest.raises(RuntimeError, match="timed out"):
             await run_trivy("/tmp/repo", "--format", "cyclonedx")

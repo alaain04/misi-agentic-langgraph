@@ -216,9 +216,14 @@ async def analyze(state: RegistryState) -> dict:
                 cache_doc = {
                     k: info.get(k)
                     for k in NpmPackageCache.model_fields
-                    if k not in (
-                        "name", "fetched_at", "author",
-                        "contributors", "maintainers", "dist",
+                    if k
+                    not in (
+                        "name",
+                        "fetched_at",
+                        "author",
+                        "contributors",
+                        "maintainers",
+                        "dist",
                     )
                 }
                 cache_entry = NpmPackageCache(

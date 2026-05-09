@@ -2,9 +2,11 @@ from datetime import UTC, datetime
 
 from src.models.job import Job, JobMetadata, JobStatus
 
+_REPO_URL = "https://github.com/example/repo"
+
 
 def test_job_defaults():
-    job = Job(metadata=JobMetadata(concern="security"))
+    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="security"))
     assert job.status == JobStatus.pending
     assert isinstance(job.id, str) and len(job.id) == 24
     assert isinstance(job.created_at, datetime)
@@ -12,7 +14,7 @@ def test_job_defaults():
 
 
 def test_job_to_doc_renames_id():
-    job = Job(metadata=JobMetadata(concern="perf"))
+    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="perf"))
     doc = job.to_doc()
     assert "_id" in doc
     assert "id" not in doc
@@ -20,13 +22,13 @@ def test_job_to_doc_renames_id():
 
 
 def test_job_to_doc_contains_all_fields():
-    job = Job(metadata=JobMetadata(concern="bugs"))
+    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="bugs"))
     doc = job.to_doc()
     assert doc["metadata"]["concern"] == "bugs"
     assert doc["status"] == JobStatus.pending
 
 
 def test_job_unique_ids():
-    a = Job(metadata=JobMetadata(concern="x"))
-    b = Job(metadata=JobMetadata(concern="x"))
+    a = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="x"))
+    b = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="x"))
     assert a.id != b.id

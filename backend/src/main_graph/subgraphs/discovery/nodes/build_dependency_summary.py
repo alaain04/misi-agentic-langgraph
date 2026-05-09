@@ -58,12 +58,14 @@ def _build_prompt(
     lock_note: str = "",
 ) -> str:
     shown = len(components)
-    truncation_note = f" (showing {shown} of {total_count})" if total_count > shown else ""
+    truncation_note = (
+        f" (showing {shown} of {total_count})" if total_count > shown else ""
+    )
     component_list = "\n".join(f"  - {c}" for c in components) or "  (none)"
     version_label = f" v{project_version}" if project_version else ""
 
     return f"""\
-You are analyzing the software bill of materials (SBOM) for a JavaScript/Node.js project.
+You are analyzing the Node.js project's software bill of materials (SBOM).
 
 Project: {project_name}{version_label}
 Analysis concern: {concern}
@@ -74,8 +76,10 @@ Packages in SBOM{truncation_note}:
 Write a concise summary (2-5 sentences / no more than 150 words) that:
 - Identifies packages from the SBOM that are most relevant to the concern: "{concern}"
 - Explains the potential impact those packages have on this specific project
-- Flags any notable risks, compatibility issues, or dependencies that stand out given the concern
-- Avoids generic ecosystem commentary; focus on what these specific packages mean for this project
+- Flags any notable risks, compatibility issues, or dependencies that
+  stand out given the concern
+- Avoids generic ecosystem commentary; focus on what these specific
+  packages mean for this project
 
 Output only the summary text.\
 """
@@ -111,9 +115,14 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
 
     lock_note = ""
     if state.get("lock_generation_error"):
-        lock_note = f"\nNote: lock file generation failed ({state['lock_generation_error']}); SBOM may be incomplete."
+        err = state["lock_generation_error"]
+        lock_note = (
+            f"\nNote: lock file generation failed ({err}); SBOM may be incomplete."
+        )
 
-    prompt = _build_prompt(project_name, project_version, concern, components, total_count, lock_note)
+    prompt = _build_prompt(
+        project_name, project_version, concern, components, total_count, lock_note
+    )
     response = await _llm.ainvoke(prompt)
 
     return {

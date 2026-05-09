@@ -7,7 +7,9 @@ from pathlib import Path
 
 from src.main_graph.subgraphs.discovery.dao import sbom_dao
 from src.main_graph.subgraphs.discovery.models import SbomEntry
-from src.main_graph.subgraphs.discovery.nodes.lock_generator_agent import run_docker_command
+from src.main_graph.subgraphs.discovery.nodes.lock_generator_agent import (
+    run_docker_command,
+)
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
 
 logger = logging.getLogger(__name__)
@@ -27,20 +29,28 @@ def _detect_manifest_files(repo_path: str) -> list[str]:
     return [name for name in _MANIFESTS if (root / name).exists()]
 
 
-async def _run_sbom(pm: str, docker_image: str, repo_path: str) -> tuple[dict, str | None]:
-    """Run {pm} sbom --package-lock-only and return (sbom_data, error). error is None on success."""
+async def _run_sbom(
+    pm: str, docker_image: str, repo_path: str
+) -> tuple[dict, str | None]:
+    """Run `{pm} sbom --package-lock-only` and return (sbom_data, error)."""
     version = _node_version(docker_image)
     if version is not None and version < _MIN_NODE_VERSION:
-        return {}, f"Node.js {version} does not support '{pm} sbom' (requires node:{_MIN_NODE_VERSION}+)"
+        return (
+            {},
+            f"Node.js {version} does not support '{pm} sbom'"
+            f" (requires node:{_MIN_NODE_VERSION}+)",
+        )
 
     command = f"{pm} sbom --sbom-format=cyclonedx --package-lock-only"
     logger.info("generate_sbom: running '%s' in %s", command, docker_image)
 
-    raw = await run_docker_command.ainvoke({
-        "image": docker_image,
-        "command": command,
-        "workspace": repo_path,
-    })
+    raw = await run_docker_command.ainvoke(
+        {
+            "image": docker_image,
+            "command": command,
+            "workspace": repo_path,
+        }
+    )
     output = json.loads(raw)
 
     if output["returncode"] != 0:
@@ -60,7 +70,12 @@ async def generate_sbom(state: DiscoveryState) -> dict:
         logger.error("generate_sbom: no repo_path in state")
         entry = SbomEntry(repo_url=repo_url, scan_error="repo_path not available")
         result_id = await sbom_dao.save(entry)
-        return {"sbom_cyclonedx": {}, "sbom_result_id": result_id, "manifest_files": [], "sbom_error": "repo_path not available"}
+        return {
+            "sbom_cyclonedx": {},
+            "sbom_result_id": result_id,
+            "manifest_files": [],
+            "sbom_error": "repo_path not available",
+        }
 
     pm = state.get("detected_package_manager", "npm")
     docker_image = state.get("docker_image", "node:lts-alpine")
@@ -70,11 +85,17 @@ async def generate_sbom(state: DiscoveryState) -> dict:
         logger.error("generate_sbom: %s", sbom_error)
 
     manifest_files = _detect_manifest_files(repo_path)
-    entry = SbomEntry(repo_url=repo_url, sbom_cyclonedx=sbom_data, scan_error=sbom_error)
+    entry = SbomEntry(
+        repo_url=repo_url, sbom_cyclonedx=sbom_data, scan_error=sbom_error
+    )
     result_id = await sbom_dao.save(entry)
     logger.info("generate_sbom: saved — result_id=%s error=%s", result_id, sbom_error)
 
-    result: dict = {"sbom_cyclonedx": sbom_data, "sbom_result_id": result_id, "manifest_files": manifest_files}
+    result: dict = {
+        "sbom_cyclonedx": sbom_data,
+        "sbom_result_id": result_id,
+        "manifest_files": manifest_files,
+    }
     if sbom_error:
         result["sbom_error"] = sbom_error
     return result

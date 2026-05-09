@@ -33,18 +33,26 @@ def _docker_fail(stderr: str) -> str:
 
 @pytest.mark.asyncio
 async def test_generate_sbom_npm_success():
-    with patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command") as mock_cmd, \
-         patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao") as mock_dao, \
-         patch("pathlib.Path.exists", return_value=True):
+    with (
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
+        ) as mock_cmd,
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
+        ) as mock_dao,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
         mock_cmd.ainvoke = AsyncMock(return_value=_docker_ok())
         mock_dao.save = AsyncMock(return_value="abc123")
         result = await generate_sbom(_BASE_STATE)
 
-    mock_cmd.ainvoke.assert_awaited_once_with({
-        "image": "node:22-alpine",
-        "command": "npm sbom --sbom-format=cyclonedx --package-lock-only",
-        "workspace": "/tmp/repo",
-    })
+    mock_cmd.ainvoke.assert_awaited_once_with(
+        {
+            "image": "node:22-alpine",
+            "command": "npm sbom --sbom-format=cyclonedx --package-lock-only",
+            "workspace": "/tmp/repo",
+        }
+    )
     assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
     assert result["sbom_result_id"] == "abc123"
     assert "sbom_error" not in result
@@ -52,20 +60,32 @@ async def test_generate_sbom_npm_success():
 
 @pytest.mark.asyncio
 async def test_generate_sbom_pnpm_success():
-    state = {**_BASE_STATE, "detected_package_manager": "pnpm", "docker_image": "node:20-alpine"}
+    state = {
+        **_BASE_STATE,
+        "detected_package_manager": "pnpm",
+        "docker_image": "node:20-alpine",
+    }
 
-    with patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command") as mock_cmd, \
-         patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao") as mock_dao, \
-         patch("pathlib.Path.exists", return_value=True):
+    with (
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
+        ) as mock_cmd,
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
+        ) as mock_dao,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
         mock_cmd.ainvoke = AsyncMock(return_value=_docker_ok())
         mock_dao.save = AsyncMock(return_value="abc123")
         result = await generate_sbom(state)
 
-    mock_cmd.ainvoke.assert_awaited_once_with({
-        "image": "node:20-alpine",
-        "command": "pnpm sbom --sbom-format=cyclonedx --package-lock-only",
-        "workspace": "/tmp/repo",
-    })
+    mock_cmd.ainvoke.assert_awaited_once_with(
+        {
+            "image": "node:20-alpine",
+            "command": "pnpm sbom --sbom-format=cyclonedx --package-lock-only",
+            "workspace": "/tmp/repo",
+        }
+    )
     assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
 
 
@@ -73,9 +93,15 @@ async def test_generate_sbom_pnpm_success():
 async def test_generate_sbom_lts_image_is_allowed():
     state = {**_BASE_STATE, "docker_image": "node:lts-alpine"}
 
-    with patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command") as mock_cmd, \
-         patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao") as mock_dao, \
-         patch("pathlib.Path.exists", return_value=True):
+    with (
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
+        ) as mock_cmd,
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
+        ) as mock_dao,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
         mock_cmd.ainvoke = AsyncMock(return_value=_docker_ok())
         mock_dao.save = AsyncMock(return_value="abc123")
         result = await generate_sbom(state)
@@ -88,8 +114,12 @@ async def test_generate_sbom_lts_image_is_allowed():
 async def test_generate_sbom_rejects_node18():
     state = {**_BASE_STATE, "docker_image": "node:18-alpine"}
 
-    with patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao") as mock_dao, \
-         patch("pathlib.Path.exists", return_value=False):
+    with (
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
+        ) as mock_dao,
+        patch("pathlib.Path.exists", return_value=False),
+    ):
         mock_dao.save = AsyncMock(return_value="err123")
         result = await generate_sbom(state)
 
@@ -100,10 +130,18 @@ async def test_generate_sbom_rejects_node18():
 
 @pytest.mark.asyncio
 async def test_generate_sbom_command_failure_saves_error():
-    with patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command") as mock_cmd, \
-         patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao") as mock_dao, \
-         patch("pathlib.Path.exists", return_value=True):
-        mock_cmd.ainvoke = AsyncMock(return_value=_docker_fail("npm: unknown command: sbom"))
+    with (
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
+        ) as mock_cmd,
+        patch(
+            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
+        ) as mock_dao,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        mock_cmd.ainvoke = AsyncMock(
+            return_value=_docker_fail("npm: unknown command: sbom")
+        )
         mock_dao.save = AsyncMock(return_value="err456")
         result = await generate_sbom(_BASE_STATE)
 
@@ -116,7 +154,9 @@ async def test_generate_sbom_command_failure_saves_error():
 async def test_generate_sbom_no_repo_path():
     state = {"repo_url": "", "concern": "", "repo_path": ""}
 
-    with patch("src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao") as mock_dao:
+    with patch(
+        "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
+    ) as mock_dao:
         mock_dao.save = AsyncMock(return_value="no-path-id")
         result = await generate_sbom(state)
 

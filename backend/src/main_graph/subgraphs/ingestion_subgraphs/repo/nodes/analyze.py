@@ -13,13 +13,16 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from src.main_graph.subgraphs.ingestion_subgraphs.repo.dao import repo_cache_dao, repo_dao
+from src.main_graph.subgraphs.ingestion_subgraphs.repo.dao import (
+    repo_cache_dao,
+    repo_dao,
+)
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.models import (
     Commit,
     Issue,
     Release,
-    RepoEntry,
     RepoCacheEntry,
+    RepoEntry,
     Repository,
     Vulnerability,
 )
@@ -80,7 +83,9 @@ async def analyze(state: RepoState) -> dict:
     )
     if cached is not None:
         result_id = await repo_dao.save(cached.entry)
-        _log.info("repo.analyze: cache hit for %s/%s, result_id=%s", owner, name, result_id)
+        _log.info(
+            "repo.analyze: cache hit for %s/%s, result_id=%s", owner, name, result_id
+        )
         return {"result_id": result_id}
 
     since = _since_iso(settings.lookback_days)

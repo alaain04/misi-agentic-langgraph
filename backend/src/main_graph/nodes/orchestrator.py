@@ -7,8 +7,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
-from src.main_graph.nodes.planner import run_planner
+from src.main_graph.nodes.planner import _PIPELINE_SUBGRAPHS, run_planner
 from src.main_graph.state import MainState
+from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DESCRIPTIONS
 from src.services.job_dao import JobDAO
 from src.services.vector_store import get_or_create_store
 from src.utils.llm import Model, get_llm
@@ -17,14 +18,13 @@ logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
-_TOP_K = 4
-
-_PRESENT_SYSTEM_PROMPT = """\
-You are a dependency analysis assistant presenting an analysis plan to the user.
-Present the plan clearly and concisely, then ask for their approval or feedback.
-Format the selected subgraphs as a numbered list with a one-line description of each.
-End with: "Would you like to proceed with this plan, request changes, or cancel?"\
-"""
+# Build a name → description lookup from all known subgraphs.
+_SUBGRAPH_DESC: dict[str, str] = {}
+for _entry in SUBGRAPH_DESCRIPTIONS:
+    _name, _desc = _entry.split(":", 1)
+    _SUBGRAPH_DESC[_name.strip()] = _desc.strip()
+for _name, _desc in _PIPELINE_SUBGRAPHS:
+    _SUBGRAPH_DESC[_name] = _desc
 
 _INTENT_SYSTEM_PROMPT = """\
 You are classifying a user's response to a proposed dependency analysis plan.
@@ -35,28 +35,20 @@ Classify their intent as exactly one of:
   - change: user wants modifications, has concerns, or provides new instructions
   - cancel: user wants to abort the analysis entirely
 
-Return ONLY one word: approve, change, or cancel.\
+Return ONLY one word: approve, change, or cancel.
 """
 
 
-async def _present_plan(plan: list[str], state: MainState, context: str) -> str:
-    """Use LLM to generate a natural-language presentation of the plan."""
-    plan_str = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan))
-    user_content = (
-        f"Project concern: {state.get('concern', 'not specified')}\n"
-        f"Direct dependencies: {len(state.get('direct_dependencies', []))}\n"
+def _present_plan(plan: list[str]) -> str:
+    """Build a deterministic presentation of the plan from known descriptions."""
+    lines = ["**Proposed Analysis Plan:**\n"]
+    for i, name in enumerate(plan, 1):
+        desc = _SUBGRAPH_DESC.get(name, name)
+        lines.append(f"{i}. **{name}**: {desc}")
+    lines.append(
+        "\nWould you like to proceed with this plan, request changes, or cancel?"
     )
-    if context:
-        user_content += f"\nPrior conversation context:\n{context}\n"
-    user_content += f"\nProposed analysis plan:\n{plan_str}"
-
-    response = await _llm.ainvoke(
-        [
-            {"role": "system", "content": _PRESENT_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
-    )
-    return response.content
+    return "\n".join(lines)
 
 
 async def _classify_intent(plan: list[str], user_input: str) -> str:
@@ -87,8 +79,6 @@ async def orchestrator(state: MainState) -> dict | Command:
     On first entry, generates an initial plan via run_planner().
     On subsequent iterations (after a 'change' response), re-generates the plan
     with the user's instructions as extra context.
-
-    Stores conversation turns in a per-job vector store for semantic retrieval.
     """
     job_id = state["job_id"]
     store = get_or_create_store(job_id)
@@ -97,22 +87,8 @@ async def orchestrator(state: MainState) -> dict | Command:
     plan = await run_planner(state)
 
     while True:
-        # Retrieve relevant context from prior conversation turns
-        context = ""
-        try:
-            docs = await store.asimilarity_search(
-                query=f"analysis plan approval {state.get('concern', '')}",
-                k=_TOP_K,
-            )
-            if docs:
-                context = "\n---\n".join(d.page_content for d in docs)
-        except Exception:
-            logger.warning(
-                "orchestrator: vector store retrieval failed, skipping context"
-            )
-
         # Generate assistant message presenting the plan
-        assistant_msg = await _present_plan(plan, state, context)
+        assistant_msg = _present_plan(plan)
 
         # Push partial proposal now so PlanPage can read it during awaiting_approval
         proposal_created_at = datetime.now(UTC).isoformat()
@@ -132,7 +108,9 @@ async def orchestrator(state: MainState) -> dict | Command:
                 "plan": plan,
                 "assistant_message": assistant_msg,
                 "discovery_summary": state.get("discovery_summary", ""),
-                "direct_dependencies_count": len(state.get("direct_dependencies", [])),
+                "components_count": len(
+                    state.get("sbom_cyclonedx", {}).get("components", [])
+                ),
             }
         )
 

@@ -33,7 +33,7 @@ class RuntimeEntry(BaseModel):
 
 
 class RuntimeCacheEntry(BaseModel):
-    """One document per (package_name, package_version) in `runtime_cache` collection."""
+    """One document per (package_name, package_version) in `runtime_cache`."""
 
     package_name: str
     package_version: str

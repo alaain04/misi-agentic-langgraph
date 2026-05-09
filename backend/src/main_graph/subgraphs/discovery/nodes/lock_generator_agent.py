@@ -1,13 +1,13 @@
-"""Node: lock_generator_agent — ReAct agent that installs deps and generates a lock file."""
+"""Node: lock_generator_agent — ReAct agent that generates a lock file."""
 
 import asyncio
 import json
 import logging
 from pathlib import Path
 
+from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain.agents import create_agent
 from pydantic import BaseModel
 
 from src.main_graph.subgraphs.discovery.nodes.inspector_agent import read_file
@@ -28,23 +28,39 @@ async def run_docker_command(image: str, command: str, workspace: str) -> str:
     Returns JSON with keys: returncode (int), stdout (str), stderr (str).
     """
     proc = await asyncio.create_subprocess_exec(
-        "docker", "run", "--rm",
-        "-v", f"{workspace}:/workspace",
-        image, "sh", "-c", f"cd /workspace && {command}",
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{workspace}:/workspace",
+        image,
+        "sh",
+        "-c",
+        f"cd /workspace && {command}",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=_DOCKER_TIMEOUT)
+        stdout_b, stderr_b = await asyncio.wait_for(
+            proc.communicate(), timeout=_DOCKER_TIMEOUT
+        )
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        return json.dumps({"returncode": -1, "stdout": "", "stderr": f"timed out after {_DOCKER_TIMEOUT}s"})
-    return json.dumps({
-        "returncode": proc.returncode,
-        "stdout": stdout_b.decode(errors="replace"),
-        "stderr": stderr_b.decode(errors="replace")[:3000],
-    })
+        return json.dumps(
+            {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": f"timed out after {_DOCKER_TIMEOUT}s",
+            }
+        )
+    return json.dumps(
+        {
+            "returncode": proc.returncode,
+            "stdout": stdout_b.decode(errors="replace"),
+            "stderr": stderr_b.decode(errors="replace")[:3000],
+        }
+    )
 
 
 def _make_write_file_tool(repo_path: str):
@@ -52,7 +68,10 @@ def _make_write_file_tool(repo_path: str):
 
     @tool
     def write_file(relative_path: str, content: str) -> str:
-        """Write content to a file within the workspace. Path must be relative to workspace root."""
+        """Write content to a file within the workspace.
+
+        Path must be relative to workspace root.
+        """
         target = (workspace / relative_path).resolve()
         if not str(target).startswith(str(workspace)):
             return f"Error: path '{relative_path}' is outside the workspace"
@@ -83,16 +102,19 @@ Expected lock file:
 - pnpm -> pnpm-lock.yaml
 
 Steps:
-1. Run run_docker_command(image="{image}", command="{command}", workspace="{repo_path}").
+1. Run run_docker_command(
+   image="{image}", command="{command}", workspace="{repo_path}").
 2. If it fails (returncode != 0), read the stderr carefully.
 3. Apply one fix per retry:
-   - npm peer conflict        -> append --legacy-peer-deps to the command
-   - npm engine mismatch      -> switch to a different node image tag (e.g. node:18-alpine)
-   - optional dep failure     -> append --ignore-optional
-   - version range conflict   -> read_file("{repo_path}/package.json"), patch the conflicting range with write_file, then retry
+   - npm peer conflict      -> append --legacy-peer-deps to the command
+   - npm engine mismatch    -> switch to a different node image (e.g. node:18-alpine)
+   - optional dep failure   -> append --ignore-optional
+   - version range conflict -> read_file("{repo_path}/package.json"),
+     patch the conflicting range with write_file, then retry
 4. Repeat up to 6 total attempts.
-5. After each run, verify the lock file exists by calling read_file with its expected path.
-6. Report success=true if the lock file is readable, otherwise success=false with the last error.
+5. After each run, verify the lock file exists by calling read_file with its path.
+6. Report success=true if the lock file is readable,
+   otherwise success=false with the last error.
 """
 
 
@@ -113,9 +135,14 @@ async def lock_generator_agent(state: DiscoveryState) -> dict:
         result = await agent.ainvoke(
             {
                 "messages": [
-                    SystemMessage(content=_SYSTEM_TEMPLATE.format(
-                        repo_path=repo_path, pm=pm, image=image, command=command,
-                    )),
+                    SystemMessage(
+                        content=_SYSTEM_TEMPLATE.format(
+                            repo_path=repo_path,
+                            pm=pm,
+                            image=image,
+                            command=command,
+                        )
+                    ),
                     HumanMessage(content="Generate the lock file now."),
                 ]
             },

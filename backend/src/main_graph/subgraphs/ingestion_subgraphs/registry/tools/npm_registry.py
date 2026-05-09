@@ -121,9 +121,7 @@ async def fetch_registry_metadata(package_name: str) -> str:
             data.get("maintainers") or version_data.get("maintainers") or []
         )
         maintainers = [
-            _parse_person(m)
-            for m in raw_maintainers
-            if _parse_person(m) is not None
+            _parse_person(m) for m in raw_maintainers if _parse_person(m) is not None
         ]
 
         # Dependencies

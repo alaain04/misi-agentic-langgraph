@@ -1,178 +1,26 @@
 import asyncio
 import math
-from datetime import datetime
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 
-from src.main_graph.constants import (
-    CROSS_ANALYZER,
-    DISCOVERY,
-    ORCHESTRATOR,
-    REPORT_REVIEWER,
+from src.api.schemas import (
+    AnalysisRequest,
+    AnalysisStatusResponse,
+    ChatRequest,
+    JobListItem,
+    JobsListResponse,
 )
-from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DEPENDENCIES
-from src.main_graph.utils.dependency_resolver import resolve_execution_stages
+from src.api.service import build_graph_info
 from src.models.job import Job, JobMetadata, JobStatus
 from src.services.job_dao import JobDAO
 from src.services.job_runner import resume_analysis, run_analysis
 
 router = APIRouter()
 
-_KNOWN_SUBGRAPHS: frozenset[str] = frozenset(
-    ["sbom_gen", "vulnerabilities", "license_compliance", "supply_chain"]
-)
-
-
-class GraphNodeInfo(BaseModel):
-    id: str
-    type: Literal["terminal", "backbone", "subgraph"]
-    order: int
-
-
-class GraphEdgeInfo(BaseModel):
-    source: str
-    target: str
-
-
-class GraphInfo(BaseModel):
-    nodes: list[GraphNodeInfo]
-    edges: list[GraphEdgeInfo]
-
-
-def build_graph_info(job: Job) -> GraphInfo:
-    result = job.result or {}
-    plan: list[str] = result.get("plan") or []
-    if not plan:
-        orch = next(
-            (a for a in (job.artifacts or []) if a["node"] == "orchestrator"), None
-        )
-        if orch:
-            proposals = orch.get("proposals") or []
-            if proposals:
-                plan = proposals[-1].get("plan") or []
-    artifact_nodes: list[str] = [a["node"] for a in (job.artifacts or [])]
-
-    seen: set[str] = set()
-    subgraph_nodes: list[str] = []
-    for s in plan:
-        if s in _KNOWN_SUBGRAPHS and s not in seen:
-            seen.add(s)
-            subgraph_nodes.append(s)
-    for s in artifact_nodes:
-        if s in _KNOWN_SUBGRAPHS and s not in seen:
-            seen.add(s)
-            subgraph_nodes.append(s)
-
-    if subgraph_nodes:
-        ingestion_plan = [s for s in subgraph_nodes if s in SUBGRAPH_DEPENDENCIES]
-        other_nodes = [s for s in subgraph_nodes if s not in SUBGRAPH_DEPENDENCIES]
-        stages = (
-            resolve_execution_stages(ingestion_plan, SUBGRAPH_DEPENDENCIES)
-            if ingestion_plan
-            else []
-        )
-        if other_nodes:
-            stages.append(other_nodes)
-    else:
-        stages = []
-
-    num_stages = len(stages)
-
-    sg_order: dict[str, int] = {}
-    for stage_idx, stage in enumerate(stages):
-        for sg in stage:
-            sg_order[sg] = 3 + stage_idx
-
-    cross_analyzer_order = 3 + max(num_stages, 1)
-    report_reviewer_order = cross_analyzer_order + 1
-    end_order = cross_analyzer_order + 2
-
-    nodes: list[GraphNodeInfo] = [
-        GraphNodeInfo(id="START", type="terminal", order=0),
-        GraphNodeInfo(id=DISCOVERY, type="backbone", order=1),
-        GraphNodeInfo(id=ORCHESTRATOR, type="backbone", order=2),
-        *[
-            GraphNodeInfo(id=s, type="subgraph", order=sg_order[s])
-            for s in subgraph_nodes
-        ],
-        GraphNodeInfo(id=CROSS_ANALYZER, type="backbone", order=cross_analyzer_order),
-        GraphNodeInfo(id=REPORT_REVIEWER, type="backbone", order=report_reviewer_order),
-        GraphNodeInfo(id="END", type="terminal", order=end_order),
-    ]
-
-    plan_set = set(subgraph_nodes)
-    sg_deps_in_plan: dict[str, list[str]] = {
-        sg: [d for d in SUBGRAPH_DEPENDENCIES.get(sg, []) if d in plan_set]
-        for sg in subgraph_nodes
-    }
-
-    edges: list[GraphEdgeInfo] = [
-        GraphEdgeInfo(source="START", target=DISCOVERY),
-        GraphEdgeInfo(source=DISCOVERY, target=ORCHESTRATOR),
-    ]
-    if subgraph_nodes:
-        for s in subgraph_nodes:
-            deps = sg_deps_in_plan.get(s, [])
-            if deps:
-                for dep in deps:
-                    edges.append(GraphEdgeInfo(source=dep, target=s))
-            else:
-                edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=s))
-            edges.append(GraphEdgeInfo(source=s, target=CROSS_ANALYZER))
-    else:
-        edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=CROSS_ANALYZER))
-    edges += [
-        GraphEdgeInfo(source=CROSS_ANALYZER, target=REPORT_REVIEWER),
-        GraphEdgeInfo(source=REPORT_REVIEWER, target="END"),
-    ]
-
-    return GraphInfo(nodes=nodes, edges=edges)
-
-
-class AnalysisMetadata(BaseModel):
-    repo_url: str
-    concern: str
-
-
-class AnalysisRequest(BaseModel):
-    metadata: AnalysisMetadata
-
-
-class AnalysisStatusResponse(BaseModel):
-    trace_id: str
-    status: JobStatus
-    metadata: JobMetadata
-    completed_at: datetime | None = None
-    results: dict | None = None
-    artifacts: list[dict] = []
-    graph: GraphInfo
-
-
-class ChatRequest(BaseModel):
-    message: str
-
-
-class JobListItem(BaseModel):
-    trace_id: str
-    status: JobStatus
-    concern: str
-    created_at: datetime
-    completed_at: datetime | None = None
-
-
-class JobsListResponse(BaseModel):
-    items: list[JobListItem]
-    total: int
-    page: int
-    limit: int
-    pages: int
-
 
 @router.post("/analyze", status_code=202)
 async def analyze(request: AnalysisRequest):
-    job = Job(metadata=JobMetadata(**request.metadata.model_dump()))
+    job = Job(metadata=JobMetadata(repo_url=request.repo_url, concern=request.concern))
 
     dao = JobDAO()
     await dao.create(job)

@@ -1,12 +1,15 @@
 # tests/unit/nodes/test_planner.py
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.main_graph.nodes.planner import run_planner, _FALLBACK_PLAN
+from src.main_graph.nodes.planner import _FALLBACK_PLAN, run_planner
 
 
-def _make_state(components: list[dict], concern: str = "security", summary: str = "ok") -> dict:
+def _make_state(
+    components: list[dict], concern: str = "security", summary: str = "ok"
+) -> dict:
     return {
         "job_id": "j1",
         "concern": concern,
@@ -28,7 +31,7 @@ async def test_planner_uses_sbom_components():
 
     with patch("src.main_graph.nodes.planner._llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        plan = await run_planner(state)
+        await run_planner(state)
 
     call_args = mock_llm.ainvoke.call_args[0][0]
     user_msg = next(m["content"] for m in call_args if m["role"] == "user")
@@ -59,7 +62,7 @@ async def test_planner_passes_extra_instructions():
 
     with patch("src.main_graph.nodes.planner._llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        plan = await run_planner(state, extra_instructions="focus on licenses")
+        await run_planner(state, extra_instructions="focus on licenses")
 
     call_args = mock_llm.ainvoke.call_args[0][0]
     user_msg = next(m["content"] for m in call_args if m["role"] == "user")

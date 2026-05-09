@@ -45,10 +45,19 @@ async def clone_repository(state: DiscoveryState) -> dict:
 
     returncode, stderr = await _docker_run(
         [
-            "docker", "run", "--rm",
-            "--user", user,
-            "-v", volume,
-            "alpine/git", "clone", "--depth=1", "--single-branch", repo_url, "/workspace",
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            user,
+            "-v",
+            volume,
+            "alpine/git",
+            "clone",
+            "--depth=1",
+            "--single-branch",
+            repo_url,
+            "/workspace",
         ],
         timeout=_CLONE_TIMEOUT,
     )

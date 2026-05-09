@@ -10,10 +10,8 @@ os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017")
 
 from src.main import app  # noqa: E402
 
-_VALID_METADATA = {
-    "package_json": "{}",
-    "lock_file": "",
-    "lock_file_name": "package-lock.json",
+_VALID_PAYLOAD = {
+    "repo_url": "https://github.com/example/repo",
     "concern": "security",
 }
 
@@ -42,7 +40,7 @@ def client():
 @pytest.mark.asyncio
 async def test_analyze_returns_trace_id(mock_dao, client):
     async with client as c:
-        response = await c.post("/analyze", json={"metadata": _VALID_METADATA})
+        response = await c.post("/analyze", json=_VALID_PAYLOAD)
     assert response.status_code == 202
     body = response.json()
     assert "trace_id" in body
@@ -52,9 +50,9 @@ async def test_analyze_returns_trace_id(mock_dao, client):
 
 @pytest.mark.asyncio
 async def test_analyze_persists_job(mock_dao, client):
-    payload = {**_VALID_METADATA, "concern": "perf"}
+    payload = {**_VALID_PAYLOAD, "concern": "perf"}
     async with client as c:
-        await c.post("/analyze", json={"metadata": payload})
+        await c.post("/analyze", json=payload)
     mock_dao.create.assert_awaited_once()
     job = mock_dao.create.call_args[0][0]
     assert job.metadata.concern == "perf"
@@ -63,23 +61,23 @@ async def test_analyze_persists_job(mock_dao, client):
 
 @pytest.mark.asyncio
 async def test_analyze_with_concern(mock_dao, client):
-    payload = {**_VALID_METADATA, "concern": "auth"}
+    payload = {**_VALID_PAYLOAD, "concern": "auth"}
     async with client as c:
-        response = await c.post("/analyze", json={"metadata": payload})
+        response = await c.post("/analyze", json=payload)
     assert response.status_code == 202
 
 
 @pytest.mark.asyncio
-async def test_analyze_invalid_lock_file_name(mock_dao, client):
-    payload = {**_VALID_METADATA, "lock_file_name": "bad.lock"}
+async def test_analyze_missing_repo_url(mock_dao, client):
+    payload = {"concern": "security"}
     async with client as c:
-        response = await c.post("/analyze", json={"metadata": payload})
+        response = await c.post("/analyze", json=payload)
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_analyze_missing_concern(mock_dao, client):
-    payload = {k: v for k, v in _VALID_METADATA.items() if k != "concern"}
+    payload = {"repo_url": "https://github.com/example/repo"}
     async with client as c:
-        response = await c.post("/analyze", json={"metadata": payload})
+        response = await c.post("/analyze", json=payload)
     assert response.status_code == 422

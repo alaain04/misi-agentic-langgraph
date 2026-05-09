@@ -45,7 +45,9 @@ def _build_records(raw_vulns: list[dict]) -> list[VulnerabilityRecord]:
             name=pkg,
             version=versions[pkg],
             findings=findings,
-            risk_level=max(findings, key=lambda f: _severity_rank(f.severity)).severity.lower(),
+            risk_level=max(
+                findings, key=lambda f: _severity_rank(f.severity)
+            ).severity.lower(),
         )
         for pkg, findings in by_pkg.items()
     ]
@@ -64,7 +66,9 @@ async def analyze(state: VulnerabilitiesState) -> dict:
     scan_data: dict = {}
     try:
         logger.info("vulnerabilities: running Trivy vuln scan on %s", repo_path)
-        scan_data, _ = await run_trivy(repo_path, "--format", "json", "--scanners", "vuln")
+        scan_data, _ = await run_trivy(
+            repo_path, "--format", "json", "--scanners", "vuln"
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("vulnerabilities: Trivy scan failed: %s", exc)
 

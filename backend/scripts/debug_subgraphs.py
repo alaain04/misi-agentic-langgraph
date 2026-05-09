@@ -6,7 +6,7 @@ Usage (run from backend/):
     uv run python scripts/debug_subgraphs.py registry
     uv run python scripts/debug_subgraphs.py repo
     uv run python scripts/debug_subgraphs.py runtime
-    uv run python scripts/debug_subgraphs.py pipeline   # chains: registry → repo + runtime
+    uv run python scripts/debug_subgraphs.py pipeline  # registry -> repo + runtime
 
 Requires MongoDB running and API keys in .env.
 """
@@ -55,6 +55,7 @@ CANNED_REGISTRY_UPSTREAM = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _print_section(title: str) -> None:
     width = 60
     print(f"\n{'─' * width}")
@@ -81,6 +82,7 @@ def _base_state() -> dict:
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
 
+
 async def debug_discovery() -> dict | None:
     """Run the full discovery subgraph and return the final state."""
     _print_section("DISCOVERY subgraph")
@@ -97,6 +99,7 @@ async def debug_discovery() -> dict | None:
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
+
 
 async def debug_registry() -> dict | None:
     """Run the registry analyze node and return the persisted entry."""
@@ -124,6 +127,7 @@ async def debug_registry() -> dict | None:
 
 
 # ── Repo ──────────────────────────────────────────────────────────────────────
+
 
 async def debug_repo(registry_upstream: dict | None = None) -> dict | None:
     """Run the repo analyze node with real or canned registry upstream."""
@@ -153,6 +157,7 @@ async def debug_repo(registry_upstream: dict | None = None) -> dict | None:
 
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
+
 
 async def debug_runtime(registry_upstream: dict | None = None) -> dict | None:
     """Run the runtime analyze node with real or canned registry upstream."""
@@ -187,6 +192,7 @@ async def debug_runtime(registry_upstream: dict | None = None) -> dict | None:
 
 
 # ── Full pipeline ─────────────────────────────────────────────────────────────
+
 
 async def debug_pipeline() -> None:
     """Chain registry → repo + runtime using real results as upstream."""

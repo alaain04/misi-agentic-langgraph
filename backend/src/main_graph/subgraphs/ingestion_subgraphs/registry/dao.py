@@ -37,9 +37,7 @@ class NpmCacheDAO:
         self, name: str, max_age_days: int
     ) -> NpmPackageCache | None:
         cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
-        doc = await self._col.find_one(
-            {"name": name, "fetched_at": {"$gte": cutoff}}
-        )
+        doc = await self._col.find_one({"name": name, "fetched_at": {"$gte": cutoff}})
         if doc is None:
             return None
         doc.pop("_id", None)

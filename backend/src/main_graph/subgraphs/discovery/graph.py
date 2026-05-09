@@ -45,8 +45,9 @@ def build_discovery_subgraph() -> StateGraph:
         CLONE_REPOSITORY, _after_clone, [INSPECTOR_AGENT, BUILD_DEPENDENCY_SUMMARY]
     )
     builder.add_conditional_edges(
-        INSPECTOR_AGENT, _after_inspector,
-        [LOCK_GENERATOR_AGENT, GENERATE_SBOM, BUILD_DEPENDENCY_SUMMARY]
+        INSPECTOR_AGENT,
+        _after_inspector,
+        [LOCK_GENERATOR_AGENT, GENERATE_SBOM, BUILD_DEPENDENCY_SUMMARY],
     )
     builder.add_edge(LOCK_GENERATOR_AGENT, GENERATE_SBOM)
     builder.add_edge(GENERATE_SBOM, BUILD_DEPENDENCY_SUMMARY)

@@ -30,34 +30,29 @@ VALID_SUBGRAPHS: set[str] = set(SUBGRAPH_REGISTRY.keys()) | {
     name for name, _ in _PIPELINE_SUBGRAPHS
 }
 
-_FALLBACK_PLAN: list[str] = ["registry", "risk_score", "recommendation"]
+_FALLBACK_PLAN: list[str] = ["vulnerabilities", "risk_score", "recommendation"]
 
+_ingestion_lines = "\n".join(
+    f"- {name}: {desc}"
+    for entry in SUBGRAPH_DESCRIPTIONS
+    for name, desc in [entry.split(":", 1)]
+)
+_pipeline_lines = "\n".join(f"- {name}: {desc}" for name, desc in _PIPELINE_SUBGRAPHS)
+_example = json.dumps(_FALLBACK_PLAN)
 
-def _build_system_prompt() -> str:
-    ingestion_lines = "\n".join(
-        f"- {name}: {desc}"
-        for entry in SUBGRAPH_DESCRIPTIONS
-        for name, desc in [entry.split(":", 1)]
-    )
-    pipeline_lines = "\n".join(
-        f"- {name}: {desc}" for name, desc in _PIPELINE_SUBGRAPHS
-    )
-    subgraph_lines = f"{ingestion_lines}\n{pipeline_lines}"
-    example = json.dumps(["registry", "risk_score", "recommendation"])
-    return (
-        "You are a dependency analysis planner. Given a project's dependency"
-        " discovery\nsummary, its direct and transitive dependencies, and a user"
-        " concern, decide\nwhich analysis subgraphs to run. Available subgraphs:\n\n"
-        f"{subgraph_lines}\n\n"
-        f"Return ONLY a valid JSON array of subgraph names, e.g.: {example}\n"
-        "Choose only the subgraphs relevant to the user's concern. Always include\n"
-        '"risk_score" and "recommendation" when there are dependencies to analyze.\n'
-        "If additional instructions are provided, honor them —\n"
-        "they reflect updated user preferences."
-    )
+_SYSTEM_PROMPT = f"""\
+You are a dependency analysis planner. Given a project's dependency discovery
+summary, its components, and a user concern, decide which analysis subgraphs
+to run. Available subgraphs:
 
+{_ingestion_lines}
+{_pipeline_lines}
 
-_SYSTEM_PROMPT = _build_system_prompt()
+Return ONLY a valid JSON array of subgraph names, e.g.: {_example}
+Choose only the subgraphs relevant to the user's concern.
+If additional instructions are provided, honor them — they reflect updated
+user preferences.
+"""
 
 
 async def run_planner(state: MainState, extra_instructions: str = "") -> list[str]:
@@ -86,7 +81,9 @@ async def run_planner(state: MainState, extra_instructions: str = "") -> list[st
         f"Components ({len(components)}): {comp_list}"
     )
     if extra_instructions:
-        user_message += f"\n\nAdditional instructions from the user: {extra_instructions}"
+        user_message += (
+            f"\n\nAdditional instructions from the user: {extra_instructions}"
+        )
 
     response = await _llm.ainvoke(
         [

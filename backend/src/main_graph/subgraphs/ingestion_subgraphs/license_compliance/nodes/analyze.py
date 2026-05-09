@@ -46,7 +46,9 @@ async def analyze(state: LicenseComplianceState) -> dict:
     scan_data: dict = {}
     try:
         logger.info("license_compliance: running Trivy license scan on %s", repo_path)
-        scan_data, _ = await run_trivy(repo_path, "--format", "json", "--scanners", "license")
+        scan_data, _ = await run_trivy(
+            repo_path, "--format", "json", "--scanners", "license"
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("license_compliance: Trivy scan failed: %s", exc)
 
@@ -61,7 +63,9 @@ async def analyze(state: LicenseComplianceState) -> dict:
             name=lic.get("PkgName", ""),
             version="",
             license=lic.get("Name") or None,
-            is_compliant=_is_compliant(lic.get("Category", "unknown"), lic.get("Name", "")),
+            is_compliant=_is_compliant(
+                lic.get("Category", "unknown"), lic.get("Name", "")
+            ),
             risk_level=_risk_level(lic.get("Category", "unknown"), lic.get("Name", "")),
             notes=f"category={lic.get('Category', 'unknown')}",
         )
@@ -77,6 +81,8 @@ async def analyze(state: LicenseComplianceState) -> dict:
     result_id = await license_compliance_dao.save(entry)
     logger.info(
         "license_compliance: %d records, %d violations, result_id=%s",
-        len(records), entry.total_violations, result_id,
+        len(records),
+        entry.total_violations,
+        result_id,
     )
     return {"result_id": result_id}
