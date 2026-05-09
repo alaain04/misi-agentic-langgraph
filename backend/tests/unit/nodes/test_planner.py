@@ -3,7 +3,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.main_graph.nodes.planner import run_planner
+from src.main_graph.nodes.planner import run_planner, _FALLBACK_PLAN
 
 
 def _make_state(components: list[dict], concern: str = "security", summary: str = "ok") -> dict:
@@ -47,8 +47,7 @@ async def test_planner_falls_back_on_bad_json():
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
         plan = await run_planner(state)
 
-    assert isinstance(plan, list)
-    assert len(plan) > 0
+    assert plan == _FALLBACK_PLAN
 
 
 @pytest.mark.asyncio
