@@ -10,9 +10,9 @@
 The discovery subgraph and the `sbom_gen` ingestion subgraph both detect dependencies:
 
 - **Discovery** manually parses `package.json` and lock files (npm/yarn/pnpm) to produce `direct_dependencies`, `transitive_dependencies`, and `dependency_tree`.
-- **SBOM Gen** runs Trivy via Docker on the same cloned repo to produce a CycloneDX SBOM with all components, plus vulnerability and license data.
+- **SBOM Gen** runs Trivy via Docker on the same cloned repo to produce a CycloneDX SBOM with all components.
 
-This is duplication. Trivy's CycloneDX output is a complete, standardized bill of materials that already contains every component with resolved versions — the manual lock file parsers are a less-accurate reimplementation of what Trivy does natively.
+This is duplication. Trivy's CycloneDX output is a complete, standardized bill of materials that already contains every component with resolved versions — including the direct/transitive distinction via its `dependencies[].dependsOn` graph. The manual lock file parsers are a less-accurate reimplementation of what Trivy does natively.
 
 Additionally, SBOM Gen runs as an ingestion subgraph (after the orchestrator plans), but the orchestrator needs dependency data to make its plan. This creates a sequencing mismatch.
 
@@ -20,10 +20,11 @@ Additionally, SBOM Gen runs as an ingestion subgraph (after the orchestrator pla
 
 ## Goal
 
-- Make Trivy the single source of truth for dependency data.
-- Remove all manual lock file parsers.
-- Merge the Trivy scan into discovery so the orchestrator has full SBOM data before planning.
+- Make the CycloneDX SBOM the single canonical dependency representation.
+- Remove all manual lock file parsers and the separate `direct_dependencies` / `transitive_dependencies` / `dependency_tree` fields.
+- Merge Trivy into discovery so the orchestrator has the full SBOM before planning.
 - Delete the `sbom_gen` ingestion subgraph.
+- `generate_sbom` only generates the SBOM (CycloneDX). Vulnerability and license analysis remain the responsibility of other ingestion subgraphs.
 
 ---
 
@@ -31,20 +32,20 @@ Additionally, SBOM Gen runs as an ingestion subgraph (after the orchestrator pla
 
 ```
 START
-  └─► fetch_repository          (git clone → repo_path, package.json content)
+  └─► fetch_repository     (git clone → repo_path)
         │
-        ├─► [discovery_error] ──────────────────► build_dependency_summary
+        ├─► [discovery_error] ──────────────► build_dependency_summary
         │
-        └─► generate_sbom                         (Trivy: CycloneDX + vuln/license JSON)
+        └─► generate_sbom                    (Trivy: CycloneDX only)
               │
-              ├─► [sbom_error] ────────────────► build_dependency_summary
+              ├─► [sbom_error] ────────────► build_dependency_summary
               │
-              └─► build_dependency_summary      (LLM summary from SBOM data)
+              └─► build_dependency_summary  (LLM summary from SBOM data)
                         │
                        END
 ```
 
-`generate_sbom` is named after its output (an SBOM), not the tool. If Trivy is replaced in the future, only this node changes.
+`generate_sbom` is named after its output, not the tool. Swapping Trivy for another SBOM generator only changes this node.
 
 ---
 
@@ -52,34 +53,32 @@ START
 
 ### `DiscoveryState`
 
-**Removed fields** (manual parsing internals):
-- `package_json_content`
-- `lock_file_content`
-- `parsed_manifests`
+**Removed fields:**
+- `package_json_content`, `lock_file_content`, `lock_file_name` — no longer read; Trivy handles all manifest parsing
+- `parsed_manifests` — entire manual parsing pipeline gone
+- `direct_dependencies`, `transitive_dependencies`, `dependency_tree` — replaced by `sbom_cyclonedx`
 
-**Renamed/repurposed**:
-- `lock_file_name` → kept as `NotRequired[str]`; now set by `fetch_repository` via a quick `os.path.exists` check (no file read) for package manager detection. Not passed forward to Trivy.
-
-**Added fields**:
-- `direct_dep_names: list[str]` — direct dependency names extracted from `package.json` by `fetch_repository`; consumed by `build_dependency_summary` to split direct vs. transitive
-- `sbom_cyclonedx: dict` — raw CycloneDX output from `generate_sbom`
-- `vulnerabilities: list[TrivyVulnerability]` — parsed from Trivy JSON scan
-- `licenses: list[TrivyLicenseFinding]` — parsed from Trivy JSON scan
+**Added fields:**
+- `sbom_cyclonedx: dict` — raw CycloneDX output; the canonical dependency representation
 - `sbom_error: str | None` — set on Trivy failure; short-circuits to `build_dependency_summary`
 
-**Unchanged fields**:
+**Unchanged fields:**
 - `repo_url`, `concern`
 - `repo_path`
-- `project_metadata`, `direct_dependencies`, `transitive_dependencies`, `dependency_tree`, `manifest_files`
+- `project_metadata`, `manifest_files`
 - `discovery_summary`, `discovery_error`
 
 ### `MainState`
 
-Gains the same three new fields: `sbom_cyclonedx`, `vulnerabilities`, `licenses`.
+- Removes `direct_dependencies`, `transitive_dependencies`, `dependency_tree`, `parsed_manifests`
+- Adds `sbom_cyclonedx: dict`
 
 ### `AnalysisState` (`ingestion_subgraphs/_base.py`)
 
-Gains `vulnerabilities` and `licenses` so downstream ingestion subgraphs (e.g. `license_compliance`) can consume Trivy findings directly from state instead of re-running scans.
+- Removes `direct_dependencies`, `transitive_dependencies`
+- Adds `sbom_cyclonedx: dict`
+
+All ingestion subgraphs that previously read dep lists now read from `sbom_cyclonedx`.
 
 ---
 
@@ -87,30 +86,31 @@ Gains `vulnerabilities` and `licenses` so downstream ingestion subgraphs (e.g. `
 
 ### `fetch_repository.py`
 
-**Simplified.** Clones the repo (same as today), reads `package.json` (one `json.loads` call to extract `dependencies` + `devDependencies` key names into `direct_dep_names`), and does a quick `os.path.exists` check for lock files to detect `lock_file_name` (used only for `project_metadata.package_manager`). Lock file contents are not read — Trivy handles all lock file parsing.
-
-Output: `repo_path`, `direct_dep_names`, `lock_file_name`, or `discovery_error`.
+**Simplified to clone only.** No file reading. Outputs `repo_path` or `discovery_error`.
 
 ### `generate_sbom.py` (new — replaces `parse_package_files.py`)
 
-Runs two Trivy commands in parallel (same implementation as `sbom_gen/nodes/analyze.py` today):
-1. `fs --format json --scanners vuln,license` → vulnerability + license data
-2. `fs --format cyclonedx` → full SBOM
+Runs a single Trivy command:
 
-Parses vulnerabilities and licenses from the JSON scan. Populates `manifest_files` from the `Results[].Target` entries in the Trivy JSON output (the files Trivy actually scanned). Returns `sbom_cyclonedx`, `vulnerabilities`, `licenses`, `manifest_files`, or `sbom_error` on failure.
+```
+trivy fs --format cyclonedx /repo
+```
 
-Deletes the temp dir (`repo_path`) after both Trivy scans complete — same responsibility as `sbom_gen` today. The job runner's finalizer remains a safety-net fallback.
+Returns `sbom_cyclonedx` and `manifest_files` (from `Results[].Target` in the output), or `sbom_error` on failure.
+
+Does **not** run vuln or license scans — those belong to other ingestion subgraphs.  
+Does **not** delete `repo_path` — cleanup is the job runner's responsibility.
 
 ### `build_dependency_summary.py`
 
-**Rewritten** to consume CycloneDX components instead of `parsed_manifests`:
+**Rewritten** to consume `sbom_cyclonedx`:
 
-- All CycloneDX `components` → full dependency set with resolved versions
-- Cross-reference component names against direct dep names from `package.json` → split into `direct_dependencies` / `transitive_dependencies`
-- Dependency tree built from CycloneDX `dependencies` edges (BOM-ref relationships)
-- LLM summary prompt updated to include vuln count and license count as additional context
+- `project_metadata.name` — from CycloneDX `metadata.component.name`
+- `project_metadata.package_manager` — from CycloneDX `metadata.component.type` or lock file hint in `manifest_files`
+- `project_metadata.direct_dependencies_count` — from root component's `dependsOn` count in CycloneDX `dependencies`
+- LLM summary prompt uses total component count, direct dep count, and component names
 
-On `sbom_error` (same as existing `discovery_error` path): returns empty dep lists and a failure summary.
+On `sbom_error` or `discovery_error`: returns empty `project_metadata` and a failure summary.
 
 ### `parse_package_files.py`
 
@@ -121,23 +121,11 @@ On `sbom_error` (same as existing `discovery_error` path): returns empty dep lis
 ## Deleted: `sbom_gen` Ingestion Subgraph
 
 The entire `src/main_graph/subgraphs/ingestion_subgraphs/sbom_gen/` directory is removed:
-- `graph.py`, `state.py`, `constants.py`, `models.py`, `dao.py`
-- `nodes/analyze.py`
+- `graph.py`, `state.py`, `constants.py`, `models.py`, `dao.py`, `nodes/analyze.py`
 
-`TrivyVulnerability` and `TrivyLicenseFinding` models move to `discovery/models.py` (or a shared `models.py`) since they are now produced by discovery and consumed broadly.
+`TrivyVulnerability` and `TrivyLicenseFinding` models are also removed from the codebase — they are not produced by discovery. Vulnerability and license analysis remains in the `vulnerabilities` and `license_compliance` ingestion subgraphs.
 
-The MongoDB `sbom_gens` collection is no longer written to. SBOM data lives in state and is accessible to downstream subgraphs via `upstream_results`.
-
----
-
-## Direct vs. Transitive Extraction
-
-1. `fetch_repository` reads `package.json` → set of direct dep names.
-2. `generate_sbom` runs Trivy → CycloneDX `components` list (all resolved packages).
-3. `build_dependency_summary` splits:
-   - component name in direct dep names → `DependencyEntry` in `direct_dependencies`
-   - otherwise → `DependencyEntry` in `transitive_dependencies`
-4. Dependency tree uses CycloneDX `dependencies[].dependsOn` BOM-ref edges.
+The MongoDB `sbom_gens` collection is no longer written to. SBOM data lives in state.
 
 ---
 
@@ -145,10 +133,9 @@ The MongoDB `sbom_gens` collection is no longer written to. SBOM data lives in s
 
 | Scenario | Behaviour |
 |---|---|
-| Clone fails | `discovery_error` set in `fetch_repository`; short-circuits to summary |
-| No `package.json` | `discovery_error` set; short-circuits to summary |
-| Trivy fails / times out | `sbom_error` set in `generate_sbom`; short-circuits to summary with empty dep lists |
-| Trivy returns empty SBOM | Treated as zero components; summary reports no dependencies found |
+| Clone fails | `discovery_error` set; short-circuits to summary |
+| Trivy fails / times out | `sbom_error` set; short-circuits to summary with empty `project_metadata` |
+| Trivy returns empty SBOM | Zero components; summary reports no dependencies found |
 
 ---
 
@@ -163,7 +150,6 @@ The MongoDB `sbom_gens` collection is no longer written to. SBOM data lives in s
 | Updated | `subgraphs/discovery/state.py` |
 | Updated | `subgraphs/discovery/graph.py` |
 | Updated | `subgraphs/discovery/constants.py` |
-| New | `subgraphs/discovery/models.py` (TrivyVulnerability, TrivyLicenseFinding) |
-| Updated | `main_graph/state.py` (MainState) |
-| Updated | `ingestion_subgraphs/_base.py` (AnalysisState) |
+| Updated | `main_graph/state.py` |
+| Updated | `ingestion_subgraphs/_base.py` |
 | Deleted | `ingestion_subgraphs/sbom_gen/` (entire directory) |
