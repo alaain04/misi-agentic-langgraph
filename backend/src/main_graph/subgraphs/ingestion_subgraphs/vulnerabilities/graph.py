@@ -11,7 +11,7 @@ from src.main_graph.subgraphs.ingestion_subgraphs.vulnerabilities.state import (
 )
 
 GRAPH_NAME = "vulnerabilities"
-DEPENDS_ON: list[str] = ["sbom_gen"]
+DEPENDS_ON: list[str] = []
 
 
 def describe() -> str:
