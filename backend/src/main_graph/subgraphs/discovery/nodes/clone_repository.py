@@ -21,6 +21,7 @@ async def _docker_run(args: list[str], timeout: int) -> tuple[int, str]:
         _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
         proc.kill()
+        await proc.wait()
         return -1, f"timed out after {timeout}s"
     return proc.returncode, stderr_bytes.decode(errors="replace").strip()
 
