@@ -1,3 +1,4 @@
+# backend/src/main_graph/subgraphs/discovery/state.py
 """State schema for the ProjectDiscovery subgraph."""
 
 from typing import Any, NotRequired
@@ -11,31 +12,21 @@ class ProjectMetadata(TypedDict):
     direct_dependencies_count: int
 
 
-class DependencyEntry(TypedDict):
-    name: str
-    version_spec: str
-
-
 class DiscoveryState(TypedDict):
     # ── Inputs ──────────────────────────────────────────────────────────
     repo_url: str
     concern: str
 
-    # ── Internal: set by fetch_repository, consumed by parse_package_files ──
-    package_json_content: NotRequired[str]
-    lock_file_content: NotRequired[str]
-    lock_file_name: NotRequired[str]
-    repo_path: NotRequired[str]  # temp dir kept alive for trivy_scan
+    # ── Internal: set by fetch_repository ───────────────────────────────
+    repo_path: NotRequired[str]
 
-    # ── Internal: parse_package_files ───────────────────────────────────
-    # file name → structured parse result
-    parsed_manifests: dict[str, Any]
+    # ── Internal: set by generate_sbom ──────────────────────────────────
+    sbom_cyclonedx: NotRequired[dict[str, Any]]
+    sbom_result_id: NotRequired[str]
+    manifest_files: NotRequired[list[str]]
 
-    # ── Outputs ─────────────────────────────────────────────────────────
-    project_metadata: ProjectMetadata
-    direct_dependencies: list[DependencyEntry]
-    transitive_dependencies: list[DependencyEntry]
-    dependency_tree: dict[str, Any]
-    manifest_files: list[str]
-    discovery_summary: str
+    # ── Outputs: set by build_dependency_summary ─────────────────────────
+    project_metadata: NotRequired[ProjectMetadata]
+    discovery_summary: NotRequired[str]
     discovery_error: NotRequired[str | None]
+    sbom_error: NotRequired[str | None]
