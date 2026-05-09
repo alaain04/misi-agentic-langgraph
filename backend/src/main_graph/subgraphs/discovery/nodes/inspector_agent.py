@@ -5,7 +5,7 @@ import os
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from pydantic import BaseModel
 
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
@@ -13,7 +13,7 @@ from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_4O_MINI)
+_llm = get_llm(Model.GPT_5_4_MINI)
 
 
 @tool
@@ -62,19 +62,18 @@ Steps:
 If package.json is missing, return: detected_package_manager="npm", lock_file_missing=true, manifest_files=[], docker_image="node:lts-alpine", install_command="npm install".
 """
 
-_agent = create_react_agent(
-    model=_llm,
-    tools=[list_dir, read_file],
-    response_format=InspectorResult,
-)
-
-
 async def inspector_agent(state: DiscoveryState) -> dict:
     repo_path = state.get("repo_path", "")
     if not repo_path:
         return {"discovery_error": "No repo_path available for inspection"}
 
     try:
+        _agent = create_agent(
+            model=_llm,
+            tools=[list_dir, read_file],
+            response_format=InspectorResult,
+        )
+        
         result = await _agent.ainvoke(
             {
                 "messages": [

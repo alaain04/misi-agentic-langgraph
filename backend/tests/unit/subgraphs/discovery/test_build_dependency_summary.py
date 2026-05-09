@@ -8,15 +8,11 @@ from src.main_graph.subgraphs.discovery.nodes.build_dependency_summary import (
 
 _SAMPLE_SBOM = {
     "metadata": {
-        "component": {"name": "my-app", "bom-ref": "my-app"}
+        "component": {"name": "my-app", "version": "1.0.0", "bom-ref": "my-app"}
     },
     "components": [
-        {"bom-ref": "pkg:npm/express@4.18.2", "name": "express", "version": "4.18.2"},
-        {"bom-ref": "pkg:npm/accepts@1.3.8", "name": "accepts", "version": "1.3.8"},
-    ],
-    "dependencies": [
-        {"ref": "my-app", "dependsOn": ["pkg:npm/express@4.18.2"]},
-        {"ref": "pkg:npm/express@4.18.2", "dependsOn": ["pkg:npm/accepts@1.3.8"]},
+        {"bom-ref": "pkg:npm/express@4.18.2", "name": "express", "version": "4.18.2", "purl": "pkg:npm/express@4.18.2"},
+        {"bom-ref": "pkg:npm/accepts@1.3.8", "name": "accepts", "version": "1.3.8", "purl": "pkg:npm/accepts@1.3.8"},
     ],
 }
 
@@ -38,8 +34,35 @@ async def test_extracts_project_metadata_from_cyclonedx():
 
     assert result["project_metadata"]["name"] == "my-app"
     assert result["project_metadata"]["package_manager"] == "pnpm"
-    assert result["project_metadata"]["direct_dependencies_count"] == 1
+    assert result["project_metadata"]["direct_dependencies_count"] == 2
     assert result["discovery_summary"] == "A great summary"
+
+
+@pytest.mark.asyncio
+async def test_prompt_contains_sbom_components_and_concern():
+    state = {
+        "sbom_cyclonedx": _SAMPLE_SBOM,
+        "manifest_files": ["package.json"],
+        "concern": "license compliance",
+        "repo_url": "https://github.com/test/repo",
+    }
+    captured_prompt = {}
+
+    async def capture(prompt):
+        captured_prompt["value"] = prompt
+        return MagicMock(content="summary")
+
+    with patch(
+        "src.main_graph.subgraphs.discovery.nodes.build_dependency_summary._llm"
+    ) as mock_llm:
+        mock_llm.ainvoke = capture
+        await build_dependency_summary(state)
+
+    prompt = captured_prompt["value"]
+    assert "express@4.18.2" in prompt
+    assert "accepts@1.3.8" in prompt
+    assert "license compliance" in prompt
+    assert "my-app" in prompt
 
 
 @pytest.mark.asyncio

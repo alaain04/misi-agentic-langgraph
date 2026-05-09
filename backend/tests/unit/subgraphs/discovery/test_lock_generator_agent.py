@@ -74,7 +74,7 @@ async def test_lock_generator_agent_success():
     mock_output = LockGenResult(success=True, attempts=2, error=None)
 
     with patch(
-        "src.main_graph.subgraphs.discovery.nodes.lock_generator_agent.create_react_agent"
+        "src.main_graph.subgraphs.discovery.nodes.lock_generator_agent.create_agent"
     ) as mock_factory:
         mock_agent = MagicMock()
         mock_agent.ainvoke = AsyncMock(return_value={"structured_response": mock_output})
@@ -101,7 +101,7 @@ async def test_lock_generator_agent_records_error_on_exhaustion():
     mock_output = LockGenResult(success=False, attempts=6, error="peer conflict unresolved")
 
     with patch(
-        "src.main_graph.subgraphs.discovery.nodes.lock_generator_agent.create_react_agent"
+        "src.main_graph.subgraphs.discovery.nodes.lock_generator_agent.create_agent"
     ) as mock_factory:
         mock_agent = MagicMock()
         mock_agent.ainvoke = AsyncMock(return_value={"structured_response": mock_output})
