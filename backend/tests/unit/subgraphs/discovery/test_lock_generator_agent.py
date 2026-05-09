@@ -1,0 +1,121 @@
+import json
+import os
+import tempfile
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.main_graph.subgraphs.discovery.nodes.lock_generator_agent import (
+    run_docker_command,
+    _make_write_file_tool,
+    lock_generator_agent,
+)
+
+
+# --- Tool unit tests ---
+
+@pytest.mark.asyncio
+async def test_run_docker_command_returns_json_on_success():
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("asyncio.wait_for", new=AsyncMock(return_value=(b"ok", b""))):
+        result = await run_docker_command.ainvoke({
+            "image": "node:lts-alpine",
+            "command": "npm install",
+            "workspace": "/tmp/repo",
+        })
+
+    data = json.loads(result)
+    assert data["returncode"] == 0
+    assert "ok" in data["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_run_docker_command_returns_json_on_failure():
+    mock_proc = MagicMock()
+    mock_proc.returncode = 1
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("asyncio.wait_for", new=AsyncMock(return_value=(b"", b"peer conflict"))):
+        result = await run_docker_command.ainvoke({
+            "image": "node:lts-alpine",
+            "command": "npm install",
+            "workspace": "/tmp/repo",
+        })
+
+    data = json.loads(result)
+    assert data["returncode"] == 1
+    assert "peer conflict" in data["stderr"]
+
+
+def test_write_file_tool_writes_within_workspace():
+    with tempfile.TemporaryDirectory() as tmp:
+        write_file = _make_write_file_tool(tmp)
+        write_file.invoke({"relative_path": "package.json", "content": '{"name":"x"}'})
+        assert (Path(tmp) / "package.json").read_text() == '{"name":"x"}'
+
+
+def test_write_file_tool_rejects_path_traversal():
+    with tempfile.TemporaryDirectory() as tmp:
+        write_file = _make_write_file_tool(tmp)
+        result = write_file.invoke({"relative_path": "../../etc/passwd", "content": "bad"})
+        assert "outside" in result.lower() or "error" in result.lower()
+
+
+# --- Node integration test (mocked agent) ---
+
+@pytest.mark.asyncio
+async def test_lock_generator_agent_success():
+    from src.main_graph.subgraphs.discovery.nodes.lock_generator_agent import LockGenResult
+
+    mock_output = LockGenResult(success=True, attempts=2, error=None)
+
+    with patch(
+        "src.main_graph.subgraphs.discovery.nodes.lock_generator_agent.create_react_agent"
+    ) as mock_factory:
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value={"structured_response": mock_output})
+        mock_factory.return_value = mock_agent
+
+        result = await lock_generator_agent({
+            "repo_url": "https://github.com/x/y",
+            "concern": "security",
+            "job_id": "1",
+            "repo_path": "/tmp/repo",
+            "detected_package_manager": "npm",
+            "docker_image": "node:lts-alpine",
+            "install_command": "npm install",
+        })
+
+    assert result["lock_generation_attempts"] == 2
+    assert result.get("lock_generation_error") is None
+
+
+@pytest.mark.asyncio
+async def test_lock_generator_agent_records_error_on_exhaustion():
+    from src.main_graph.subgraphs.discovery.nodes.lock_generator_agent import LockGenResult
+
+    mock_output = LockGenResult(success=False, attempts=6, error="peer conflict unresolved")
+
+    with patch(
+        "src.main_graph.subgraphs.discovery.nodes.lock_generator_agent.create_react_agent"
+    ) as mock_factory:
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value={"structured_response": mock_output})
+        mock_factory.return_value = mock_agent
+
+        result = await lock_generator_agent({
+            "repo_url": "https://github.com/x/y",
+            "concern": "security",
+            "job_id": "1",
+            "repo_path": "/tmp/repo",
+            "detected_package_manager": "npm",
+            "docker_image": "node:lts-alpine",
+            "install_command": "npm install",
+        })
+
+    assert result["lock_generation_attempts"] == 6
+    assert result["lock_generation_error"] == "peer conflict unresolved"
