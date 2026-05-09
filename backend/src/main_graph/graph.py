@@ -16,13 +16,13 @@ from src.main_graph.state import MainState
 from src.main_graph.subgraphs import (
     cross_analyzer_subgraph,
     discovery_subgraph,
-    orchestrator_subgraph,
     report_reviewer_subgraph,
 )
 
 from .nodes import (
     execute_plan,
     execution_planner,
+    orchestrator,
     stage_advance,
     stage_router,
     task_dispatcher,
@@ -46,7 +46,7 @@ def build_main_graph():
     builder = StateGraph(MainState)
 
     builder.add_node(DISCOVERY, discovery_subgraph)
-    builder.add_node(ORCHESTRATOR, orchestrator_subgraph)
+    builder.add_node(ORCHESTRATOR, orchestrator)
     builder.add_node(EXECUTION_PLANNER, execution_planner)
     builder.add_node(EXECUTE_PLAN, execute_plan)
     builder.add_node(STAGE_ADVANCE, stage_advance)
