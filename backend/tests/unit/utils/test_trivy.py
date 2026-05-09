@@ -39,6 +39,7 @@ async def test_run_trivy_raises_on_timeout():
 
     mock_proc = MagicMock()
     mock_proc.kill = MagicMock()
+    mock_proc.wait = AsyncMock()
     mock_proc.communicate = AsyncMock(side_effect=_asyncio.TimeoutError())
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \

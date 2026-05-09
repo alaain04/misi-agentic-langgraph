@@ -31,6 +31,7 @@ async def run_trivy(repo_path: str, *trivy_args: str) -> tuple[dict, str]:
         )
     except TimeoutError:
         proc.kill()
+        await proc.wait()
         raise RuntimeError(f"Trivy timed out after {_TRIVY_TIMEOUT}s")
 
     stderr_str = stderr.decode(errors="replace")
