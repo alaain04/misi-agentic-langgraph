@@ -47,6 +47,7 @@ def _build_prompt(
     direct_count: int,
     total_count: int,
     transitive_count: int,
+    lock_note: str = "",
 ) -> str:
     def _fmt(names: list[str], limit: int = 20) -> str:
         items = names[:limit]
@@ -63,7 +64,7 @@ Package manager: {pm}
 Direct dependencies ({direct_count}): {_fmt(direct_names)}
 Transitive dependencies: {transitive_count}
 Total components: {total_count}
-Analysis concern: {concern}
+Analysis concern: {concern}{lock_note}
 
 Write a concise summary (3-5 sentences) that:
 - Describes the package management approach and overall dependency structure
@@ -109,9 +110,14 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
         direct_dependencies_count=len(direct_refs),
     )
 
+    lock_note = ""
+    if state.get("lock_generation_error"):
+        lock_note = f"\nNote: lock file generation failed ({state['lock_generation_error']}); transitive dependencies may be incomplete."
+
     prompt = _build_prompt(
         project_name, concern, pm, direct_names,
         len(direct_refs), len(components), transitive_count,
+        lock_note=lock_note,
     )
     response = await _llm.ainvoke(prompt)
 
