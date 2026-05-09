@@ -2,11 +2,17 @@
 
 from typing import Any
 
+from typing_extensions import TypedDict
+
 from src.main_graph.subgraphs.discovery.state import (
-    DependencyEntry,
     DiscoveryState,
     ProjectMetadata,
 )
+
+
+class DependencyEntry(TypedDict):
+    name: str
+    version_spec: str
 from src.utils.llm import Model, get_llm
 
 _llm = get_llm(Model.GPT_4O_MINI)
