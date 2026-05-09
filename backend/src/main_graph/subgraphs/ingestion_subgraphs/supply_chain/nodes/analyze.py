@@ -1,4 +1,4 @@
-"""Supply chain analysis node — mocked implementation."""
+"""Supply chain analysis node."""
 
 import logging
 
@@ -17,17 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 async def analyze(state: SupplyChainState) -> dict:
-    deps = state.get("direct_dependencies", [])
+    sbom = state.get("sbom_cyclonedx", {})
     concern = state.get("concern", "")
+    components = sbom.get("components", [])
 
     records = [
         SupplyChainRecord(
-            name=dep["name"],
-            version=dep.get("version_spec", "unknown"),
+            name=comp["name"],
+            version=comp.get("version", "unknown"),
             risk_score=0.1,
             flags=["mock-data"],
         )
-        for dep in deps[:10]
+        for comp in components[:10]
     ]
 
     entry = SupplyChainEntry(
