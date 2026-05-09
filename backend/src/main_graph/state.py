@@ -11,13 +11,12 @@ from src.main_graph.subgraphs.discovery.state import DependencyEntry, ProjectMet
 
 class MainState(TypedDict):
     # ── Inputs (provided by job_runner) ─────────────────────────────────────
-    package_json_content: str
-    lock_file_content: str
-    lock_file_name: str
+    repo_url: str
     concern: str
     job_id: str
 
     # ── Discovery outputs (superset of DiscoveryState) ───────────────────────
+    repo_path: NotRequired[str]  # cloned temp dir kept alive for trivy_scan
     parsed_manifests: dict[str, Any]
     project_metadata: ProjectMetadata
     direct_dependencies: list[DependencyEntry]
@@ -44,8 +43,9 @@ class MainState(TypedDict):
     subgraph_name: NotRequired[str]
     upstream_results: NotRequired[dict]
 
-    # ── Terminal node outputs ─────────────────────────────────────────────────
-    summary: NotRequired[str]
-    review: NotRequired[str]
-    recommendation: NotRequired[str]
+    # ── Cross-analyzer and report-reviewer outputs ────────────────────────────
+    analysis_report: NotRequired[dict[str, Any]]
+    reviewer_feedback: NotRequired[str]
+    review_approved: NotRequired[bool]
+    review_iterations: NotRequired[int]
     cancelled: NotRequired[bool]

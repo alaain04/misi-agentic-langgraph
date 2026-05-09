@@ -38,15 +38,17 @@ async def execute_plan(state: MainState) -> dict:
                 if data:
                     hydrated_upstream[sg] = data
 
-        result = await subgraph.ainvoke(
-            {
-                "direct_dependencies": state.get("direct_dependencies", []),
-                "transitive_dependencies": state.get("transitive_dependencies", []),
-                "discovery_summary": state.get("discovery_summary", ""),
-                "concern": state.get("concern", ""),
-                "upstream_results": hydrated_upstream,
-            }
-        )
+        invocation: dict = {
+            "direct_dependencies": state.get("direct_dependencies", []),
+            "transitive_dependencies": state.get("transitive_dependencies", []),
+            "discovery_summary": state.get("discovery_summary", ""),
+            "concern": state.get("concern", ""),
+            "upstream_results": hydrated_upstream,
+        }
+        if repo_path := state.get("repo_path"):
+            invocation["repo_path"] = repo_path
+
+        result = await subgraph.ainvoke(invocation)
 
         result_id = result.get("result_id")
         if job_id:

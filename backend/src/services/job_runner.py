@@ -1,15 +1,15 @@
 """Background task: run a job through the full analysis pipeline."""
 
 import logging
+import shutil
 
 from langgraph.types import Command
 
 from src.main_graph import main_graph
 from src.main_graph.constants import (
+    CROSS_ANALYZER,
     ORCHESTRATOR,
-    RECOMMENDER,
-    REVIEWER,
-    SUMMARIZER,
+    REPORT_REVIEWER,
 )
 from src.models.job import JobStatus
 from src.services.job_dao import JobDAO
@@ -30,6 +30,9 @@ _DISCOVERY_OUTPUT_KEYS = {
 
 async def _finalize(dao: JobDAO, job_id: str, result: dict) -> None:
     delete_store(job_id)
+    # Safety-net: delete cloned repo if trivy_scan didn't clean it up
+    if repo_path := result.get("repo_path"):
+        shutil.rmtree(repo_path, ignore_errors=True)
     if result.get("cancelled"):
         logger.info("job=%s cancelled by user", job_id)
         await dao.mark_cancelled(job_id)
@@ -50,9 +53,9 @@ async def _finalize(dao: JobDAO, job_id: str, result: dict) -> None:
                 },
                 "plan": result.get("plan", []),
                 "subgraph_results": result.get("subgraph_results", []),
-                "summary": result.get("summary", ""),
-                "review": result.get("review", ""),
-                "recommendation": result.get("recommendation", ""),
+                "analysis_report": result.get("analysis_report"),
+                "review_approved": result.get("review_approved"),
+                "review_iterations": result.get("review_iterations"),
             },
         )
 
@@ -83,36 +86,38 @@ async def _stream_graph(
                 await dao.complete_artifact(job_id, ORCHESTRATOR, artifact_status)
                 if on_orchestrator_complete and not node_update.get("cancelled"):
                     await on_orchestrator_complete()
-            elif node_name == SUMMARIZER:
-                await dao.start_artifact(job_id, SUMMARIZER)
-                if "summary" in node_update:
+            elif node_name == CROSS_ANALYZER:
+                await dao.start_artifact(job_id, CROSS_ANALYZER)
+                if "analysis_report" in node_update:
                     await dao.update_artifact_data(
-                        job_id, SUMMARIZER, {"output": node_update["summary"]}
+                        job_id,
+                        CROSS_ANALYZER,
+                        {"output": node_update["analysis_report"]},
                     )
-                await dao.complete_artifact(job_id, SUMMARIZER, "done")
-            elif node_name == REVIEWER:
-                await dao.start_artifact(job_id, REVIEWER)
-                if "review" in node_update:
+                await dao.complete_artifact(job_id, CROSS_ANALYZER, "done")
+            elif node_name == REPORT_REVIEWER:
+                await dao.start_artifact(job_id, REPORT_REVIEWER)
+                if "review_approved" in node_update:
                     await dao.update_artifact_data(
-                        job_id, REVIEWER, {"output": node_update["review"]}
+                        job_id,
+                        REPORT_REVIEWER,
+                        {
+                            "output": {
+                                "review_approved": node_update.get("review_approved"),
+                                "reviewer_feedback": node_update.get(
+                                    "reviewer_feedback"
+                                ),
+                            }
+                        },
                     )
-                await dao.complete_artifact(job_id, REVIEWER, "done")
-            elif node_name == RECOMMENDER:
-                await dao.start_artifact(job_id, RECOMMENDER)
-                if "recommendation" in node_update:
-                    await dao.update_artifact_data(
-                        job_id, RECOMMENDER, {"output": node_update["recommendation"]}
-                    )
-                await dao.complete_artifact(job_id, RECOMMENDER, "done")
+                await dao.complete_artifact(job_id, REPORT_REVIEWER, "done")
 
     return interrupt_payload
 
 
 async def run_analysis(
     job_id: str,
-    package_json: str,
-    lock_file: str,
-    lock_file_name: str,
+    repo_url: str,
     concern: str,
 ) -> None:
     dao = JobDAO()
@@ -125,9 +130,7 @@ async def run_analysis(
         interrupt_payload = await _stream_graph(
             main_graph,
             {
-                "package_json_content": package_json,
-                "lock_file_content": lock_file,
-                "lock_file_name": lock_file_name,
+                "repo_url": repo_url,
                 "concern": concern,
                 "job_id": job_id,
                 "subgraph_results": [],

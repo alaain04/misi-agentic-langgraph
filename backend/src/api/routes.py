@@ -7,11 +7,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from src.main_graph.constants import (
+    CROSS_ANALYZER,
     DISCOVERY,
     ORCHESTRATOR,
-    RECOMMENDER,
-    REVIEWER,
-    SUMMARIZER,
+    REPORT_REVIEWER,
 )
 from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DEPENDENCIES
 from src.main_graph.utils.dependency_resolver import resolve_execution_stages
@@ -21,10 +20,8 @@ from src.services.job_runner import resume_analysis, run_analysis
 
 router = APIRouter()
 
-LockFileName = Literal["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
-
 _KNOWN_SUBGRAPHS: frozenset[str] = frozenset(
-    ["registry", "repo", "runtime", "risk_score", "recommendation"]
+    ["sbom_gen", "vulnerabilities", "license_compliance", "supply_chain"]
 )
 
 
@@ -88,10 +85,9 @@ def build_graph_info(job: Job) -> GraphInfo:
         for sg in stage:
             sg_order[sg] = 3 + stage_idx
 
-    summarizer_order = 3 + max(num_stages, 1)
-    reviewer_order = summarizer_order + 1
-    recommender_order = summarizer_order + 2
-    end_order = summarizer_order + 3
+    cross_analyzer_order = 3 + max(num_stages, 1)
+    report_reviewer_order = cross_analyzer_order + 1
+    end_order = cross_analyzer_order + 2
 
     nodes: list[GraphNodeInfo] = [
         GraphNodeInfo(id="START", type="terminal", order=0),
@@ -101,9 +97,8 @@ def build_graph_info(job: Job) -> GraphInfo:
             GraphNodeInfo(id=s, type="subgraph", order=sg_order[s])
             for s in subgraph_nodes
         ],
-        GraphNodeInfo(id=SUMMARIZER, type="backbone", order=summarizer_order),
-        GraphNodeInfo(id=REVIEWER, type="backbone", order=reviewer_order),
-        GraphNodeInfo(id=RECOMMENDER, type="backbone", order=recommender_order),
+        GraphNodeInfo(id=CROSS_ANALYZER, type="backbone", order=cross_analyzer_order),
+        GraphNodeInfo(id=REPORT_REVIEWER, type="backbone", order=report_reviewer_order),
         GraphNodeInfo(id="END", type="terminal", order=end_order),
     ]
 
@@ -125,22 +120,19 @@ def build_graph_info(job: Job) -> GraphInfo:
                     edges.append(GraphEdgeInfo(source=dep, target=s))
             else:
                 edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=s))
-            edges.append(GraphEdgeInfo(source=s, target=SUMMARIZER))
+            edges.append(GraphEdgeInfo(source=s, target=CROSS_ANALYZER))
     else:
-        edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=SUMMARIZER))
+        edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=CROSS_ANALYZER))
     edges += [
-        GraphEdgeInfo(source=SUMMARIZER, target=REVIEWER),
-        GraphEdgeInfo(source=REVIEWER, target=RECOMMENDER),
-        GraphEdgeInfo(source=RECOMMENDER, target="END"),
+        GraphEdgeInfo(source=CROSS_ANALYZER, target=REPORT_REVIEWER),
+        GraphEdgeInfo(source=REPORT_REVIEWER, target="END"),
     ]
 
     return GraphInfo(nodes=nodes, edges=edges)
 
 
 class AnalysisMetadata(BaseModel):
-    package_json: str
-    lock_file: str
-    lock_file_name: LockFileName
+    repo_url: str
     concern: str
 
 
@@ -188,9 +180,7 @@ async def analyze(request: AnalysisRequest):
     asyncio.create_task(
         run_analysis(
             job_id=job.id,
-            package_json=job.metadata.package_json,
-            lock_file=job.metadata.lock_file,
-            lock_file_name=job.metadata.lock_file_name,
+            repo_url=job.metadata.repo_url,
             concern=job.metadata.concern,
         )
     )

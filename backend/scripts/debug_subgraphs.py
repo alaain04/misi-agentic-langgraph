@@ -51,6 +51,7 @@ CANNED_REGISTRY_UPSTREAM = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _print_section(title: str) -> None:
     width = 60
     print(f"\n{'─' * width}")
@@ -76,6 +77,7 @@ def _base_state() -> dict:
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
+
 
 async def debug_registry() -> dict | None:
     """Run the registry analyze node and return the persisted entry."""
@@ -103,6 +105,7 @@ async def debug_registry() -> dict | None:
 
 
 # ── Repo ──────────────────────────────────────────────────────────────────────
+
 
 async def debug_repo(registry_upstream: dict | None = None) -> dict | None:
     """Run the repo analyze node with real or canned registry upstream."""
@@ -132,6 +135,7 @@ async def debug_repo(registry_upstream: dict | None = None) -> dict | None:
 
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
+
 
 async def debug_runtime(registry_upstream: dict | None = None) -> dict | None:
     """Run the runtime analyze node with real or canned registry upstream."""
@@ -166,6 +170,7 @@ async def debug_runtime(registry_upstream: dict | None = None) -> dict | None:
 
 
 # ── Full pipeline ─────────────────────────────────────────────────────────────
+
 
 async def debug_pipeline() -> None:
     """Chain registry → repo + runtime using real results as upstream."""

@@ -11,3 +11,4 @@ class AnalysisState(TypedDict):
     discovery_summary: str
     concern: str
     upstream_results: NotRequired[dict[str, Any]]
+    repo_path: NotRequired[str]  # cloned repo temp dir, consumed by trivy_scan

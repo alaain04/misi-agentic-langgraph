@@ -16,9 +16,7 @@ class JobStatus(StrEnum):
 
 
 class JobMetadata(BaseModel):
-    package_json: str | None = None
-    lock_file: str | None = None
-    lock_file_name: str | None = None
+    repo_url: str
     concern: str
 
 
