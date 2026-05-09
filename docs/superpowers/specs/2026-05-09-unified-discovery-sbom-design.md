@@ -60,6 +60,7 @@ START
 
 **Added fields:**
 - `sbom_cyclonedx: dict` — raw CycloneDX output; the canonical dependency representation
+- `sbom_result_id: str | None` — MongoDB `_id` of the persisted SBOM document
 - `sbom_error: str | None` — set on Trivy failure; short-circuits to `build_dependency_summary`
 
 **Unchanged fields:**
@@ -96,7 +97,7 @@ Runs a single Trivy command:
 trivy fs --format cyclonedx /repo
 ```
 
-Returns `sbom_cyclonedx` and `manifest_files` (from `Results[].Target` in the output), or `sbom_error` on failure.
+Saves the CycloneDX document to MongoDB via a `SbomDAO` (moved from `sbom_gen/dao.py` to `discovery/dao.py`). Returns `sbom_cyclonedx`, `sbom_result_id` (the MongoDB `_id`), and `manifest_files` (from `Results[].Target` in the output), or `sbom_error` on failure.
 
 Does **not** run vuln or license scans — those belong to other ingestion subgraphs.  
 Does **not** delete `repo_path` — cleanup is the job runner's responsibility.
@@ -121,11 +122,13 @@ On `sbom_error` or `discovery_error`: returns empty `project_metadata` and a fai
 ## Deleted: `sbom_gen` Ingestion Subgraph
 
 The entire `src/main_graph/subgraphs/ingestion_subgraphs/sbom_gen/` directory is removed:
-- `graph.py`, `state.py`, `constants.py`, `models.py`, `dao.py`, `nodes/analyze.py`
+- `graph.py`, `state.py`, `constants.py`, `nodes/analyze.py`
 
-`TrivyVulnerability` and `TrivyLicenseFinding` models are also removed from the codebase — they are not produced by discovery. Vulnerability and license analysis remains in the `vulnerabilities` and `license_compliance` ingestion subgraphs.
+`models.py` and `dao.py` **move** to `subgraphs/discovery/`:
+- `discovery/models.py` — `SbomEntry` (renamed from `SbomGenEntry`; drops `vulnerabilities`/`licenses` fields since those are not produced here)
+- `discovery/dao.py` — `SbomDAO` (same logic, same `sbom_gens` collection)
 
-The MongoDB `sbom_gens` collection is no longer written to. SBOM data lives in state.
+The `sbom_gens` MongoDB collection continues to be written to, now from the discovery subgraph.
 
 ---
 
@@ -147,6 +150,8 @@ The MongoDB `sbom_gens` collection is no longer written to. SBOM data lives in s
 | New | `subgraphs/discovery/nodes/generate_sbom.py` |
 | Rewritten | `subgraphs/discovery/nodes/build_dependency_summary.py` |
 | Deleted | `subgraphs/discovery/nodes/parse_package_files.py` |
+| New | `subgraphs/discovery/models.py` (moved + simplified from `sbom_gen/models.py`) |
+| New | `subgraphs/discovery/dao.py` (moved from `sbom_gen/dao.py`) |
 | Updated | `subgraphs/discovery/state.py` |
 | Updated | `subgraphs/discovery/graph.py` |
 | Updated | `subgraphs/discovery/constants.py` |
