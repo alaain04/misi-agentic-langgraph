@@ -16,6 +16,7 @@ class DiscoveryState(TypedDict):
     # ── Inputs ──────────────────────────────────────────────────────────
     repo_url: str
     concern: str
+    job_id: str
 
     # ── Internal: set by fetch_repository ───────────────────────────────
     repo_path: NotRequired[str]

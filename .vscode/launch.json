@@ -18,7 +18,7 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/backend/scripts/debug_subgraphs.py",
-      "args": ["registry"],
+      "args": ["discovery"],
       "jinja": true,
       "justMyCode": false,
       "cwd": "${workspaceFolder}/backend",

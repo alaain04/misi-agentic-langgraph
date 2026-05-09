@@ -2,10 +2,11 @@
 """Debug individual ingestion subgraph nodes with controlled inputs.
 
 Usage (run from backend/):
-    uv run python src.debug_subgraphs.py registry
-    uv run python src.debug_subgraphs.py repo
-    uv run python src.debug_subgraphs.py runtime
-    uv run python src.debug_subgraphs.py pipeline   # chains: registry → repo + runtime
+    uv run python scripts/debug_subgraphs.py discovery
+    uv run python scripts/debug_subgraphs.py registry
+    uv run python scripts/debug_subgraphs.py repo
+    uv run python scripts/debug_subgraphs.py runtime
+    uv run python scripts/debug_subgraphs.py pipeline   # chains: registry → repo + runtime
 
 Requires MongoDB running and API keys in .env.
 """
@@ -18,6 +19,8 @@ import sys
 
 # ── Controlled inputs ─────────────────────────────────────────────────────────
 
+REPO_URL = "https://github.com/jsynowiec/node-typescript-boilerplate"
+
 DIRECT_DEPS = [
     {"name": "express", "version_spec": "^4.18.0"},
     {"name": "qs", "version_spec": "6.11.0"},
@@ -27,7 +30,7 @@ TRANSITIVE_DEPS = [
     {"name": "ms", "version_spec": "2.1.3"},
     {"name": "qs", "version_spec": "6.11.0"},
 ]
-
+JOB_ID = str(int(asyncio.get_event_loop().time()))
 CONCERN = "security"
 DISCOVERY_SUMMARY = "Project uses Express 4 as its primary dependency."
 
@@ -73,6 +76,23 @@ def _base_state() -> dict:
         "concern": CONCERN,
         "discovery_summary": DISCOVERY_SUMMARY,
     }
+
+
+# ── Discovery ─────────────────────────────────────────────────────────────────
+
+async def debug_discovery() -> dict | None:
+    """Run the full discovery subgraph and return the final state."""
+    _print_section("DISCOVERY subgraph")
+
+    from src.main_graph.subgraphs.discovery.graph import discovery_subgraph
+
+    state = {"repo_url": REPO_URL, "concern": CONCERN, "job_id": JOB_ID}
+    _dump("Input state", state)
+
+    print("\n→ invoking discovery subgraph ...")
+    result = await discovery_subgraph.ainvoke(state)
+    _dump("Output state", dict(result))
+    return dict(result)
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -185,6 +205,7 @@ async def debug_pipeline() -> None:
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 MODES = {
+    "discovery": lambda: debug_discovery(),
     "registry": lambda: debug_registry(),
     "repo": lambda: debug_repo(),
     "runtime": lambda: debug_runtime(),
