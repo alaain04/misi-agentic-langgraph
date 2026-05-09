@@ -4,12 +4,12 @@ from src.main_graph.subgraphs.discovery.nodes.build_dependency_summary import (
 from src.main_graph.subgraphs.discovery.nodes.fetch_repository import (
     fetch_repository,
 )
-from src.main_graph.subgraphs.discovery.nodes.parse_package_files import (
-    parse_package_files,
+from src.main_graph.subgraphs.discovery.nodes.generate_sbom import (
+    generate_sbom,
 )
 
 __all__ = [
     "fetch_repository",
-    "parse_package_files",
+    "generate_sbom",
     "build_dependency_summary",
 ]
