@@ -73,27 +73,20 @@ async def run_planner(state: MainState, extra_instructions: str = "") -> list[st
     """
     concern = state.get("concern", "")
     summary = state.get("discovery_summary", "")
-    deps = state.get("direct_dependencies", [])
-    transitive_deps = state.get("transitive_dependencies", [])
+    sbom = state.get("sbom_cyclonedx", {})
 
-    dep_list = ", ".join(d["name"] for d in deps[:20])
-    if len(deps) > 20:
-        dep_list += f", and {len(deps) - 20} more"
-
-    transitive_dep_list = ", ".join(d["name"] for d in transitive_deps[:20])
-    if len(transitive_deps) > 20:
-        transitive_dep_list += f", and {len(transitive_deps) - 20} more"
+    components = sbom.get("components", [])
+    comp_list = ", ".join(c["name"] for c in components[:30])
+    if len(components) > 30:
+        comp_list += f", and {len(components) - 30} more"
 
     user_message = (
         f"Concern: {concern}\n"
         f"Discovery summary: {summary}\n"
-        f"Direct dependencies ({len(deps)}): {dep_list}\n"
-        f"Transitive dependencies ({len(transitive_deps)}): {transitive_dep_list}"
+        f"Components ({len(components)}): {comp_list}"
     )
     if extra_instructions:
-        user_message += (
-            f"\n\nAdditional instructions from the user: {extra_instructions}"
-        )
+        user_message += f"\n\nAdditional instructions from the user: {extra_instructions}"
 
     response = await _llm.ainvoke(
         [
