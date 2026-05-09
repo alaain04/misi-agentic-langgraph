@@ -7,22 +7,21 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from src.main_graph.constants import (
+    CROSS_ANALYZER,
     DISCOVERY,
     ORCHESTRATOR,
-    RECOMMENDER,
-    REVIEWER,
-    SUMMARIZER,
+    REPORT_REVIEWER,
 )
+from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DEPENDENCIES
+from src.main_graph.utils.dependency_resolver import resolve_execution_stages
 from src.models.job import Job, JobMetadata, JobStatus
 from src.services.job_dao import JobDAO
 from src.services.job_runner import resume_analysis, run_analysis
 
 router = APIRouter()
 
-LockFileName = Literal["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
-
 _KNOWN_SUBGRAPHS: frozenset[str] = frozenset(
-    ["registry", "repo", "runtime", "risk_score", "recommendation"]
+    ["sbom_gen", "vulnerabilities", "license_compliance", "supply_chain"]
 )
 
 
@@ -66,16 +65,48 @@ def build_graph_info(job: Job) -> GraphInfo:
             seen.add(s)
             subgraph_nodes.append(s)
 
+    if subgraph_nodes:
+        ingestion_plan = [s for s in subgraph_nodes if s in SUBGRAPH_DEPENDENCIES]
+        other_nodes = [s for s in subgraph_nodes if s not in SUBGRAPH_DEPENDENCIES]
+        stages = (
+            resolve_execution_stages(ingestion_plan, SUBGRAPH_DEPENDENCIES)
+            if ingestion_plan
+            else []
+        )
+        if other_nodes:
+            stages.append(other_nodes)
+    else:
+        stages = []
+
+    num_stages = len(stages)
+
+    sg_order: dict[str, int] = {}
+    for stage_idx, stage in enumerate(stages):
+        for sg in stage:
+            sg_order[sg] = 3 + stage_idx
+
+    cross_analyzer_order = 3 + max(num_stages, 1)
+    report_reviewer_order = cross_analyzer_order + 1
+    end_order = cross_analyzer_order + 2
+
     nodes: list[GraphNodeInfo] = [
         GraphNodeInfo(id="START", type="terminal", order=0),
         GraphNodeInfo(id=DISCOVERY, type="backbone", order=1),
         GraphNodeInfo(id=ORCHESTRATOR, type="backbone", order=2),
-        *[GraphNodeInfo(id=s, type="subgraph", order=3) for s in subgraph_nodes],
-        GraphNodeInfo(id=SUMMARIZER, type="backbone", order=4),
-        GraphNodeInfo(id=REVIEWER, type="backbone", order=5),
-        GraphNodeInfo(id=RECOMMENDER, type="backbone", order=6),
-        GraphNodeInfo(id="END", type="terminal", order=7),
+        *[
+            GraphNodeInfo(id=s, type="subgraph", order=sg_order[s])
+            for s in subgraph_nodes
+        ],
+        GraphNodeInfo(id=CROSS_ANALYZER, type="backbone", order=cross_analyzer_order),
+        GraphNodeInfo(id=REPORT_REVIEWER, type="backbone", order=report_reviewer_order),
+        GraphNodeInfo(id="END", type="terminal", order=end_order),
     ]
+
+    plan_set = set(subgraph_nodes)
+    sg_deps_in_plan: dict[str, list[str]] = {
+        sg: [d for d in SUBGRAPH_DEPENDENCIES.get(sg, []) if d in plan_set]
+        for sg in subgraph_nodes
+    }
 
     edges: list[GraphEdgeInfo] = [
         GraphEdgeInfo(source="START", target=DISCOVERY),
@@ -83,23 +114,25 @@ def build_graph_info(job: Job) -> GraphInfo:
     ]
     if subgraph_nodes:
         for s in subgraph_nodes:
-            edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=s))
-            edges.append(GraphEdgeInfo(source=s, target=SUMMARIZER))
+            deps = sg_deps_in_plan.get(s, [])
+            if deps:
+                for dep in deps:
+                    edges.append(GraphEdgeInfo(source=dep, target=s))
+            else:
+                edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=s))
+            edges.append(GraphEdgeInfo(source=s, target=CROSS_ANALYZER))
     else:
-        edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=SUMMARIZER))
+        edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=CROSS_ANALYZER))
     edges += [
-        GraphEdgeInfo(source=SUMMARIZER, target=REVIEWER),
-        GraphEdgeInfo(source=REVIEWER, target=RECOMMENDER),
-        GraphEdgeInfo(source=RECOMMENDER, target="END"),
+        GraphEdgeInfo(source=CROSS_ANALYZER, target=REPORT_REVIEWER),
+        GraphEdgeInfo(source=REPORT_REVIEWER, target="END"),
     ]
 
     return GraphInfo(nodes=nodes, edges=edges)
 
 
 class AnalysisMetadata(BaseModel):
-    package_json: str
-    lock_file: str
-    lock_file_name: LockFileName
+    repo_url: str
     concern: str
 
 
@@ -147,9 +180,7 @@ async def analyze(request: AnalysisRequest):
     asyncio.create_task(
         run_analysis(
             job_id=job.id,
-            package_json=job.metadata.package_json,
-            lock_file=job.metadata.lock_file,
-            lock_file_name=job.metadata.lock_file_name,
+            repo_url=job.metadata.repo_url,
             concern=job.metadata.concern,
         )
     )

@@ -40,9 +40,10 @@ Return ONLY one word: approve, change, or cancel.\
 
 async def _present_plan(plan: list[str], state: OrchestratorState, context: str) -> str:
     plan_str = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan))
+    sbom = state.get("sbom_cyclonedx", {})
     user_content = (
         f"Project concern: {state.get('concern', 'not specified')}\n"
-        f"Direct dependencies: {len(state.get('direct_dependencies', []))}\n"
+        f"Total components: {len(sbom.get('components', []))}\n"
     )
     if context:
         user_content += f"\nPrior conversation context:\n{context}\n"
@@ -111,7 +112,7 @@ async def orchestrator(state: OrchestratorState) -> dict | Command:
             "plan": plan,
             "assistant_message": assistant_msg,
             "discovery_summary": state.get("discovery_summary", ""),
-            "direct_dependencies_count": len(state.get("direct_dependencies", [])),
+            "total_components": len(state.get("sbom_cyclonedx", {}).get("components", [])),
         }
     )
 

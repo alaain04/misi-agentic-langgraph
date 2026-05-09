@@ -15,9 +15,9 @@ def task_dispatcher(state: MainState) -> list[Send]:
     current_stage = stages[idx] if idx < len(stages) else []
 
     upstream_results: dict[str, Any] = {
-        entry["subgraph"]: entry["data"]
+        entry["subgraph"]: entry["result_id"]
         for entry in state.get("subgraph_results", [])
-        if "data" in entry
+        if "result_id" in entry
     }
 
     return [

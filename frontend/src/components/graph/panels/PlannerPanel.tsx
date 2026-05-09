@@ -20,7 +20,7 @@ const INTENT_STYLES: Record<
 }
 
 function ProposalCard({ proposal, index }: { proposal: Proposal; index: number }) {
-  const intent = INTENT_STYLES[proposal.user_intended_action]
+  const intent = proposal.user_intended_action ? INTENT_STYLES[proposal.user_intended_action] : null
   const date = new Date(proposal.created_at).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
@@ -70,13 +70,15 @@ function ProposalCard({ proposal, index }: { proposal: Proposal; index: number }
       </div>
 
       {/* Intent badge */}
-      <div className="flex justify-end">
-        <span
-          className={`rounded border px-2 py-0.5 font-mono text-[10px] tracking-widest uppercase ${intent.className}`}
-        >
-          {intent.label}
-        </span>
-      </div>
+      {intent && (
+        <div className="flex justify-end">
+          <span
+            className={`rounded border px-2 py-0.5 font-mono text-[10px] tracking-widest uppercase ${intent.className}`}
+          >
+            {intent.label}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

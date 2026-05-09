@@ -3,16 +3,18 @@
 import json
 import logging
 
-from src.main_graph.subgraph_registry import SUBGRAPH_DESCRIPTIONS, SUBGRAPH_REGISTRY
+from src.main_graph.subgraphs.ingestion_subgraphs import (
+    SUBGRAPH_DESCRIPTIONS,
+    SUBGRAPH_REGISTRY,
+)
 from src.main_graph.subgraphs.orchestrator.state import OrchestratorState
-from src.utils.llm import Model, get_llm
+from src.utils.llm import Model, get_llm, parse_llm_json
 
 logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
 VALID_SUBGRAPHS: set[str] = set(SUBGRAPH_REGISTRY.keys())
-
 _FALLBACK_PLAN: list[str] = list(SUBGRAPH_REGISTRY.keys())[:2]
 
 
@@ -25,8 +27,8 @@ def _build_system_prompt() -> str:
     example = json.dumps(list(SUBGRAPH_REGISTRY.keys())[:2])
     return (
         "You are a dependency analysis planner. Given a project's dependency"
-        " discovery\nsummary, its direct and transitive dependencies, and a user"
-        " concern, decide\nwhich analysis subgraphs to run. Available subgraphs:\n"
+        " discovery summary, its SBOM component list, and a user concern, decide"
+        " which analysis subgraphs to run. Available subgraphs:\n"
         f"{subgraph_lines}\n"
         f"Return ONLY a valid JSON array of subgraph names, e.g.: {example}\n"
         "Choose only the subgraphs relevant to the user's concern.\n"
@@ -43,22 +45,17 @@ async def run_planner(
 ) -> list[str]:
     concern = state.get("concern", "")
     summary = state.get("discovery_summary", "")
-    deps = state.get("direct_dependencies", [])
-    transitive_deps = state.get("transitive_dependencies", [])
+    sbom = state.get("sbom_cyclonedx", {})
 
-    dep_list = ", ".join(d["name"] for d in deps[:20])
-    if len(deps) > 20:
-        dep_list += f", and {len(deps) - 20} more"
-
-    transitive_dep_list = ", ".join(d["name"] for d in transitive_deps[:20])
-    if len(transitive_deps) > 20:
-        transitive_dep_list += f", and {len(transitive_deps) - 20} more"
+    components = sbom.get("components", [])
+    dep_list = ", ".join(c["name"] for c in components[:20])
+    if len(components) > 20:
+        dep_list += f", and {len(components) - 20} more"
 
     user_message = (
         f"Concern: {concern}\n"
         f"Discovery summary: {summary}\n"
-        f"Direct dependencies ({len(deps)}): {dep_list}\n"
-        f"Transitive dependencies ({len(transitive_deps)}): {transitive_dep_list}"
+        f"Total components ({len(components)}): {dep_list}"
     )
     if extra_instructions:
         user_message += (
@@ -73,12 +70,7 @@ async def run_planner(
     )
 
     try:
-        raw = response.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        plan = json.loads(raw.strip())
+        plan = parse_llm_json(response.content or "")
         plan = [s for s in plan if s in VALID_SUBGRAPHS]
         if not plan:
             plan = _FALLBACK_PLAN

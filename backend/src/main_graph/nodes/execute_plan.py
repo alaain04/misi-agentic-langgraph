@@ -3,7 +3,10 @@
 import logging
 
 from src.main_graph.state import MainState
-from src.main_graph.subgraph_registry import SUBGRAPH_REGISTRY
+from src.main_graph.subgraphs.ingestion_subgraphs import (
+    SUBGRAPH_DAOS,
+    SUBGRAPH_REGISTRY,
+)
 from src.services.job_dao import JobDAO
 
 logger = logging.getLogger(__name__)
@@ -26,20 +29,32 @@ async def execute_plan(state: MainState) -> dict:
         await dao.start_artifact(job_id, name)
 
     try:
-        result = await subgraph.ainvoke(
-            {
-                "direct_dependencies": state.get("direct_dependencies", []),
-                "transitive_dependencies": state.get("transitive_dependencies", []),
-                "discovery_summary": state.get("discovery_summary", ""),
-                "concern": state.get("concern", ""),
-                "upstream_results": state.get("upstream_results", {}),
-            }
-        )
+        # Hydrate upstream result IDs into actual domain data
+        hydrated_upstream = {}
+        for sg, result_id in state.get("upstream_results", {}).items():
+            output_dao = SUBGRAPH_DAOS.get(sg)
+            if output_dao and result_id:
+                data = await output_dao.get(result_id)
+                if data:
+                    hydrated_upstream[sg] = data
+
+        invocation: dict = {
+            "sbom_cyclonedx": state.get("sbom_cyclonedx", {}),
+            "discovery_summary": state.get("discovery_summary", ""),
+            "concern": state.get("concern", ""),
+            "upstream_results": hydrated_upstream,
+        }
+        if repo_path := state.get("repo_path"):
+            invocation["repo_path"] = repo_path
+
+        result = await subgraph.ainvoke(invocation)
+
+        result_id = result.get("result_id")
         if job_id:
-            await dao.update_artifact_data(job_id, name, {"result": result})
+            await dao.update_artifact_data(job_id, name, {"result_id": result_id})
             await dao.complete_artifact(job_id, name, "done")
-        logger.info("execute_plan: %s completed", name)
-        return {"subgraph_results": [{"subgraph": name, "data": result}]}
+        logger.info("execute_plan: %s completed, result_id=%s", name, result_id)
+        return {"subgraph_results": [{"subgraph": name, "result_id": result_id}]}
     except Exception:
         logger.exception("execute_plan: %s failed", name)
         if job_id:

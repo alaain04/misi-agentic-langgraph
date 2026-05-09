@@ -1,16 +1,14 @@
-from typing import Annotated, NotRequired
+# backend/src/main_graph/subgraphs/orchestrator/state.py
+from typing import Annotated, Any, NotRequired
 
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
-
-from src.main_graph.subgraphs.discovery.state import DependencyEntry
 
 
 class OrchestratorState(TypedDict):
     # ── Inputs from parent graph ─────────────────────────────────────────────
     concern: str
-    direct_dependencies: list[DependencyEntry]
-    transitive_dependencies: list[DependencyEntry]
+    sbom_cyclonedx: dict[str, Any]
     discovery_summary: str
     job_id: str
 

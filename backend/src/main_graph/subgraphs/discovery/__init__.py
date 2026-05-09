@@ -3,7 +3,6 @@ from src.main_graph.subgraphs.discovery.graph import (
     discovery_subgraph,
 )
 from src.main_graph.subgraphs.discovery.state import (
-    DependencyEntry,
     DiscoveryState,
     ProjectMetadata,
 )
@@ -13,5 +12,4 @@ __all__ = [
     "discovery_subgraph",
     "DiscoveryState",
     "ProjectMetadata",
-    "DependencyEntry",
 ]
