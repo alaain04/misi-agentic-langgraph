@@ -39,8 +39,7 @@ async def execute_plan(state: MainState) -> dict:
                     hydrated_upstream[sg] = data
 
         invocation: dict = {
-            "direct_dependencies": state.get("direct_dependencies", []),
-            "transitive_dependencies": state.get("transitive_dependencies", []),
+            "sbom_cyclonedx": state.get("sbom_cyclonedx", {}),
             "discovery_summary": state.get("discovery_summary", ""),
             "concern": state.get("concern", ""),
             "upstream_results": hydrated_upstream,
