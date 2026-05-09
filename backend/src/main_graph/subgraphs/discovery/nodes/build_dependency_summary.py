@@ -9,23 +9,15 @@ from src.main_graph.subgraphs.discovery.state import (
 )
 from src.utils.llm import Model, get_llm
 
-_llm = get_llm(Model.GPT_4O_MINI)
-
-
-def _get_root_ref(sbom: dict[str, Any]) -> str:
-    root = sbom.get("metadata", {}).get("component", {})
-    return root.get("bom-ref") or root.get("name", "")
-
-
-def _get_direct_dep_refs(sbom: dict[str, Any], root_ref: str) -> set[str]:
-    for entry in sbom.get("dependencies", []):
-        if entry.get("ref") == root_ref:
-            return set(entry.get("dependsOn", []))
-    return set()
+_llm = get_llm(Model.GPT_5_4)
 
 
 def _get_project_name(sbom: dict[str, Any]) -> str:
     return sbom.get("metadata", {}).get("component", {}).get("name", "unknown")
+
+
+def _get_project_version(sbom: dict[str, Any]) -> str:
+    return sbom.get("metadata", {}).get("component", {}).get("version", "")
 
 
 def _detect_package_manager(manifest_files: list[str]) -> str:
@@ -39,40 +31,52 @@ def _detect_package_manager(manifest_files: list[str]) -> str:
     return "npm"
 
 
+def _extract_components(sbom: dict[str, Any], limit: int = 80) -> tuple[list[str], int]:
+    """Return (component_strings, total_count) from SBOM components."""
+    components = sbom.get("components", [])
+    total = len(components)
+    entries = []
+    for c in components[:limit]:
+        name = c.get("name", "")
+        version = c.get("version", "")
+        purl = c.get("purl", "")
+        label = f"{name}@{version}" if version else name
+        if purl and purl.startswith("pkg:"):
+            ecosystem = purl.split(":")[1].split("/")[0]
+            if ecosystem not in ("npm",):
+                label += f" ({ecosystem})"
+        entries.append(label)
+    return entries, total
+
+
 def _build_prompt(
     project_name: str,
+    project_version: str,
     concern: str,
-    pm: str,
-    direct_names: list[str],
-    direct_count: int,
+    components: list[str],
     total_count: int,
-    transitive_count: int,
     lock_note: str = "",
 ) -> str:
-    def _fmt(names: list[str], limit: int = 20) -> str:
-        items = names[:limit]
-        result = ", ".join(items)
-        if len(names) > limit:
-            result += f", ... and {len(names) - limit} more"
-        return result or "none"
+    shown = len(components)
+    truncation_note = f" (showing {shown} of {total_count})" if total_count > shown else ""
+    component_list = "\n".join(f"  - {c}" for c in components) or "  (none)"
+    version_label = f" v{project_version}" if project_version else ""
 
     return f"""\
-You are analyzing the dependency structure of a JavaScript/Node.js project.
+You are analyzing the software bill of materials (SBOM) for a JavaScript/Node.js project.
 
-Project: {project_name}
-Package manager: {pm}
-Direct dependencies ({direct_count}): {_fmt(direct_names)}
-Transitive dependencies: {transitive_count}
-Total components: {total_count}
-Analysis concern: {concern}{lock_note}
+Project: {project_name}{version_label}
+Analysis concern: {concern}
 
-Write a concise summary (3-5 sentences) that:
-- Describes the package management approach and overall dependency structure
-- Characterizes the ecosystem (e.g., frontend-heavy, backend services, tooling, etc.)
-- Highlights notable dependencies relevant to the concern: "{concern}"
-- Explains why those dependencies matter in this context
+Packages in SBOM{truncation_note}:
+{component_list}{lock_note}
 
-Focus on interpretation over enumeration. Do not list all dependencies.
+Write a concise summary (2-5 sentences / no more than 150 words) that:
+- Identifies packages from the SBOM that are most relevant to the concern: "{concern}"
+- Explains the potential impact those packages have on this specific project
+- Flags any notable risks, compatibility issues, or dependencies that stand out given the concern
+- Avoids generic ecosystem commentary; focus on what these specific packages mean for this project
+
 Output only the summary text.\
 """
 
@@ -94,31 +98,22 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
     manifest_files: list[str] = state.get("manifest_files", [])
     concern: str = state.get("concern", "")
 
-    root_ref = _get_root_ref(sbom)
-    direct_refs = _get_direct_dep_refs(sbom, root_ref)
-    components = sbom.get("components", [])
-
-    direct_names = [c["name"] for c in components if c.get("bom-ref") in direct_refs]
-    transitive_count = len(components) - len(direct_refs)
-
     pm = _detect_package_manager(manifest_files)
     project_name = _get_project_name(sbom)
+    project_version = _get_project_version(sbom)
+    components, total_count = _extract_components(sbom)
 
     metadata = ProjectMetadata(
         name=project_name,
         package_manager=pm,
-        direct_dependencies_count=len(direct_refs),
+        direct_dependencies_count=total_count,
     )
 
     lock_note = ""
     if state.get("lock_generation_error"):
-        lock_note = f"\nNote: lock file generation failed ({state['lock_generation_error']}); transitive dependencies may be incomplete."
+        lock_note = f"\nNote: lock file generation failed ({state['lock_generation_error']}); SBOM may be incomplete."
 
-    prompt = _build_prompt(
-        project_name, concern, pm, direct_names,
-        len(direct_refs), len(components), transitive_count,
-        lock_note=lock_note,
-    )
+    prompt = _build_prompt(project_name, project_version, concern, components, total_count, lock_note)
     response = await _llm.ainvoke(prompt)
 
     return {

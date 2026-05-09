@@ -7,7 +7,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from pydantic import BaseModel
 
 from src.main_graph.subgraphs.discovery.nodes.inspector_agent import read_file
@@ -16,7 +16,7 @@ from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_4O_MINI)
+_llm = get_llm(Model.GPT_5_4_MINI)
 
 _DOCKER_TIMEOUT = 300
 
@@ -42,8 +42,8 @@ async def run_docker_command(image: str, command: str, workspace: str) -> str:
         return json.dumps({"returncode": -1, "stdout": "", "stderr": f"timed out after {_DOCKER_TIMEOUT}s"})
     return json.dumps({
         "returncode": proc.returncode,
-        "stdout": stdout_b.decode(errors="replace")[:2000],
-        "stderr": stderr_b.decode(errors="replace")[:2000],
+        "stdout": stdout_b.decode(errors="replace"),
+        "stderr": stderr_b.decode(errors="replace")[:3000],
     })
 
 
@@ -103,7 +103,7 @@ async def lock_generator_agent(state: DiscoveryState) -> dict:
     command = state.get("install_command", "npm install")
 
     write_file_tool = _make_write_file_tool(repo_path)
-    agent = create_react_agent(
+    agent = create_agent(
         model=_llm,
         tools=[run_docker_command, read_file, write_file_tool],
         response_format=LockGenResult,

@@ -23,6 +23,9 @@ class Model(StrEnum):
     # OpenAI
     GPT_4O_MINI = "gpt-4o-mini"
     GPT_4O = "gpt-4o"
+    GPT_5_4_NANO = "gpt-5.4-nano-2026-03-17"
+    GPT_5_4_MINI = "gpt-5.4-mini-2026-03-17"
+    GPT_5_4 = "gpt-5.5-2026-04-23"
 
 
 def get_llm(model: Model = Model.GPT_4O_MINI) -> BaseChatModel:
@@ -32,12 +35,10 @@ def get_llm(model: Model = Model.GPT_4O_MINI) -> BaseChatModel:
     Importing is deferred so missing packages only raise at call time, not at
     import time for callers that never use those models.
     """
-    if model in (Model.GPT_4O_MINI, Model.GPT_4O):
-        from langchain_openai import ChatOpenAI  # noqa: PLC0415
+    from langchain_openai import ChatOpenAI  # noqa: PLC0415
 
-        return ChatOpenAI(model=model, api_key=settings.openai_api_key, temperature=0)
+    return ChatOpenAI(model=model.value, api_key=settings.openai_api_key, temperature=0)
 
-    raise ValueError(f"No provider configured for model {model!r}")
 
 
 def parse_llm_json(text: str) -> Any:
