@@ -1,4 +1,4 @@
-"""License compliance analysis node — parses Trivy scan output."""
+"""License compliance analysis node — runs its own Trivy license scan."""
 
 import logging
 
@@ -12,6 +12,7 @@ from src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.models impo
 from src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.state import (
     LicenseComplianceState,
 )
+from src.utils.trivy import run_trivy
 
 logger = logging.getLogger(__name__)
 
@@ -33,29 +34,40 @@ def _is_compliant(category: str, license_name: str) -> bool:
 
 
 async def analyze(state: LicenseComplianceState) -> dict:
+    repo_path = state.get("repo_path", "")
     concern = state.get("concern", "")
-    upstream = state.get("upstream_results", {})
-    trivy_doc = upstream.get("sbom_gen", {})
 
-    raw_licenses: list[dict] = trivy_doc.get("licenses", [])
+    if not repo_path:
+        logger.error("license_compliance: no repo_path in state")
+        entry = LicenseComplianceEntry(records=[], total_violations=0, concern=concern)
+        result_id = await license_compliance_dao.save(entry)
+        return {"result_id": result_id}
 
-    records: list[LicenseRecord] = []
-    for lic in raw_licenses:
-        pkg = lic.get("pkg_name", "")
-        license_name = lic.get("license_name", "")
-        category = lic.get("category", "unknown")
-        if not pkg:
-            continue
-        records.append(
-            LicenseRecord(
-                name=pkg,
-                version="",
-                license=license_name or None,
-                is_compliant=_is_compliant(category, license_name),
-                risk_level=_risk_level(category, license_name),
-                notes=f"category={category}",
-            )
+    scan_data: dict = {}
+    try:
+        logger.info("license_compliance: running Trivy license scan on %s", repo_path)
+        scan_data, _ = await run_trivy(repo_path, "--format", "json", "--scanners", "license")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("license_compliance: Trivy scan failed: %s", exc)
+
+    raw_licenses = [
+        lic
+        for result in scan_data.get("Results", [])
+        for lic in (result.get("Licenses") or [])
+    ]
+
+    records = [
+        LicenseRecord(
+            name=lic.get("PkgName", ""),
+            version="",
+            license=lic.get("Name") or None,
+            is_compliant=_is_compliant(lic.get("Category", "unknown"), lic.get("Name", "")),
+            risk_level=_risk_level(lic.get("Category", "unknown"), lic.get("Name", "")),
+            notes=f"category={lic.get('Category', 'unknown')}",
         )
+        for lic in raw_licenses
+        if lic.get("PkgName")
+    ]
 
     entry = LicenseComplianceEntry(
         records=records,
@@ -65,8 +77,6 @@ async def analyze(state: LicenseComplianceState) -> dict:
     result_id = await license_compliance_dao.save(entry)
     logger.info(
         "license_compliance: %d records, %d violations, result_id=%s",
-        len(records),
-        entry.total_violations,
-        result_id,
+        len(records), entry.total_violations, result_id,
     )
     return {"result_id": result_id}
