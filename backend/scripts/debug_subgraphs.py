@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 
 # ── Controlled inputs ─────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ TRANSITIVE_DEPS = [
     {"name": "ms", "version_spec": "2.1.3"},
     {"name": "qs", "version_spec": "6.11.0"},
 ]
-JOB_ID = str(int(asyncio.get_event_loop().time()))
+JOB_ID = str(int(time.time()))
 CONCERN = "security"
 DISCOVERY_SUMMARY = "Project uses Express 4 as its primary dependency."
 
