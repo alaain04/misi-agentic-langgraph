@@ -6,11 +6,6 @@ from typing import Any, NotRequired
 from typing_extensions import TypedDict
 
 
-class DependencyEntry(TypedDict):
-    name: str
-    version_spec: str
-
-
 class ProjectMetadata(TypedDict):
     name: str
     package_manager: str
