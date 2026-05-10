@@ -27,40 +27,37 @@ async def create(job_id: str, packages: list[str]) -> None:
     )
 
 
-async def record_success(job_id: str) -> None:
-    doc = await _col().find_one_and_update(
+async def _record(job_id: str, field: str) -> None:
+    await _col().find_one_and_update(
         {"_id": job_id},
         {
-            "$inc": {"completed": 1},
+            "$inc": {field: 1},
             "$set": {"status": "running", "updated_at": datetime.now(UTC)},
         },
-        return_document=True,
     )
-    if doc and doc["completed"] + doc["failed"] >= doc["total"]:
-        await _col().update_one(
-            {"_id": job_id},
-            {"$set": {"status": "done", "updated_at": datetime.now(UTC)}},
-        )
+    # Atomic conditional flip: only sets done if completed+failed >= total
+    await _col().update_one(
+        {
+            "_id": job_id,
+            "$expr": {"$gte": [{"$add": ["$completed", "$failed"]}, "$total"]},
+        },
+        {"$set": {"status": "done", "updated_at": datetime.now(UTC)}},
+    )
+
+
+async def record_success(job_id: str) -> None:
+    await _record(job_id, "completed")
 
 
 async def record_failure(job_id: str) -> None:
-    doc = await _col().find_one_and_update(
-        {"_id": job_id},
-        {
-            "$inc": {"failed": 1},
-            "$set": {"status": "running", "updated_at": datetime.now(UTC)},
-        },
-        return_document=True,
-    )
-    if doc and doc["completed"] + doc["failed"] >= doc["total"]:
-        await _col().update_one(
-            {"_id": job_id},
-            {"$set": {"status": "done", "updated_at": datetime.now(UTC)}},
-        )
+    await _record(job_id, "failed")
 
 
 async def get_status(job_id: str) -> dict | None:
-    doc = await _col().find_one({"_id": job_id})
+    doc = await _col().find_one(
+        {"_id": job_id},
+        {"_id": 0, "status": 1, "total": 1, "completed": 1, "failed": 1},
+    )
     if not doc:
         return None
     return {

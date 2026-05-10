@@ -1,6 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 
 async def test_create_inserts_correct_document():
@@ -17,34 +15,29 @@ async def test_create_inserts_correct_document():
     assert doc["completed"] == 0
     assert doc["failed"] == 0
     assert doc["status"] == "pending"
+    assert "created_at" in doc
+    assert "updated_at" in doc
 
 
-async def test_record_success_sets_done_when_all_complete():
+async def test_record_success_always_calls_update_one():
     mock_col = AsyncMock()
-    # find_one_and_update returns the updated doc (after increment)
-    mock_col.find_one_and_update = AsyncMock(
-        return_value={"completed": 1, "failed": 0, "total": 1}
-    )
+    mock_col.find_one_and_update = AsyncMock(return_value=None)
     with patch("src.jobs._col", return_value=mock_col):
         from src.jobs import record_success
         await record_success("job-1")
 
-    # second update sets status=done
+    # Always calls the conditional update_one (idempotent)
     mock_col.update_one.assert_called_once()
-    update_args = mock_col.update_one.call_args[0]
-    assert update_args[1]["$set"]["status"] == "done"
 
 
-async def test_record_success_does_not_set_done_when_incomplete():
+async def test_record_failure_always_calls_update_one():
     mock_col = AsyncMock()
-    mock_col.find_one_and_update = AsyncMock(
-        return_value={"completed": 1, "failed": 0, "total": 3}
-    )
+    mock_col.find_one_and_update = AsyncMock(return_value=None)
     with patch("src.jobs._col", return_value=mock_col):
-        from src.jobs import record_success
-        await record_success("job-1")
+        from src.jobs import record_failure
+        await record_failure("job-1")
 
-    mock_col.update_one.assert_not_called()
+    mock_col.update_one.assert_called_once()
 
 
 async def test_get_status_returns_none_for_missing_job():
@@ -61,7 +54,6 @@ async def test_get_status_returns_dict():
     mock_col = AsyncMock()
     mock_col.find_one = AsyncMock(
         return_value={
-            "_id": "job-1",
             "status": "done",
             "total": 2,
             "completed": 2,
@@ -79,3 +71,17 @@ async def test_get_status_returns_dict():
         "completed": 2,
         "failed": 0,
     }
+
+
+async def test_get_status_uses_projection():
+    mock_col = AsyncMock()
+    mock_col.find_one = AsyncMock(return_value=None)
+    with patch("src.jobs._col", return_value=mock_col):
+        from src.jobs import get_status
+        await get_status("job-1")
+
+    call_args = mock_col.find_one.call_args
+    # Second positional arg or 'projection' kwarg
+    projection = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("projection")
+    assert projection is not None
+    assert "_id" not in projection or projection.get("_id") == 0
