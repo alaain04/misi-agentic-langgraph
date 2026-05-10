@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
     yield
     if _consumer_task:
         _consumer_task.cancel()
+        await asyncio.gather(_consumer_task, return_exceptions=True)
     await nats_close()
     logger.info("entity-worker stopped")
 

@@ -67,3 +67,7 @@ async def get_status(job_id: str) -> dict | None:
         "completed": doc["completed"],
         "failed": doc["failed"],
     }
+
+
+async def delete(job_id: str) -> None:
+    await _col().delete_one({"_id": job_id})

@@ -20,7 +20,7 @@ async def test_ingest_returns_job_id():
                 json={"entity_type": "npm", "items": ["react", "lodash"]},
             )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     body = resp.json()
     assert "job_id" in body
     assert isinstance(body["job_id"], str)

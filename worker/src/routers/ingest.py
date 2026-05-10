@@ -1,8 +1,9 @@
 import json
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src import jobs
 from src.nats_client import get_js, subject_for
@@ -12,7 +13,7 @@ router = APIRouter()
 
 class IngestRequest(BaseModel):
     entity_type: str
-    items: list[str]
+    items: Annotated[list[str], Field(min_length=1)]
 
 
 class IngestResponse(BaseModel):
@@ -27,17 +28,21 @@ class StatusResponse(BaseModel):
     failed: int
 
 
-@router.post("/ingest", response_model=IngestResponse)
+@router.post("/ingest", status_code=201, response_model=IngestResponse)
 async def ingest(body: IngestRequest) -> IngestResponse:
     job_id = str(uuid.uuid4())
     await jobs.create(job_id, body.items)
     js = get_js()
     subject = subject_for(body.entity_type)
-    for name in body.items:
-        payload = json.dumps(
-            {"job_id": job_id, "entity_type": body.entity_type, "name": name}
-        ).encode()
-        await js.publish(subject, payload)
+    try:
+        for name in body.items:
+            payload = json.dumps(
+                {"job_id": job_id, "entity_type": body.entity_type, "name": name}
+            ).encode()
+            await js.publish(subject, payload)
+    except Exception:
+        await jobs.delete(job_id)
+        raise HTTPException(status_code=503, detail="failed to enqueue job")
     return IngestResponse(job_id=job_id)
 
 
