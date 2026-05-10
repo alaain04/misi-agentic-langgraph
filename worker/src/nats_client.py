@@ -4,6 +4,7 @@ import nats
 from nats.aio.client import Client
 from nats.js import JetStreamContext
 from nats.js.api import RetentionPolicy, StreamConfig
+from nats.js.errors import BadRequestError
 
 from src.config import settings
 
@@ -23,6 +24,9 @@ _js: JetStreamContext | None = None
 
 async def connect() -> None:
     global _nc, _js
+    if _nc is not None:
+        return
+    logger.info("nats: connecting to %s", settings.nats_url)
     _nc = await nats.connect(settings.nats_url)
     _js = _nc.jetstream()
     try:
@@ -34,13 +38,16 @@ async def connect() -> None:
             )
         )
         logger.info("nats: stream %s created", STREAM_NAME)
-    except Exception:
-        logger.debug("nats: stream %s already exists", STREAM_NAME)
+    except BadRequestError:
+        logger.debug("nats: stream %s already exists, skipping", STREAM_NAME)
 
 
 async def close() -> None:
+    global _nc, _js
     if _nc:
         await _nc.drain()
+        _nc = None
+        _js = None
 
 
 def get_js() -> JetStreamContext:
