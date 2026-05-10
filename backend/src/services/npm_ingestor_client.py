@@ -27,9 +27,10 @@ async def ingest(entity_type: str, items: list[str]) -> str:
 
 async def wait(job_id: str, timeout: float = 300.0) -> None:
     """Poll /status until job is done or timeout expires."""
-    deadline = asyncio.get_event_loop().time() + timeout
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     async with httpx.AsyncClient() as client:
-        while asyncio.get_event_loop().time() < deadline:
+        while loop.time() < deadline:
             resp = await client.get(
                 f"{settings.npm_worker_url}/status/{job_id}",
                 timeout=_REQUEST_TIMEOUT,
