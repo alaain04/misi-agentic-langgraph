@@ -1,6 +1,6 @@
 """Registry mapping entity_type → (fetch_fn, cache_collection)."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -8,7 +8,7 @@ from src.fetchers.npm import fetch as npm_fetch
 from src.rate_limiter import TokenBucket
 
 type FetchFn = Callable[
-    [httpx.AsyncClient, str, TokenBucket, int], object
+    [httpx.AsyncClient, str, TokenBucket, int], Awaitable[dict]
 ]
 
 _REGISTRY: dict[str, tuple[FetchFn, str]] = {

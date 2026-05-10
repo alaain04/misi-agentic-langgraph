@@ -47,14 +47,19 @@ async def test_fetch_retries_on_429():
     registry = {"name": "lodash"}
     downloads = {"downloads": 1_000}
 
+    registry_calls = 0
+
+    async def dispatch_get(url, **kwargs):
+        nonlocal registry_calls
+        if "registry.npmjs.org" in url:
+            registry_calls += 1
+            if registry_calls == 1:
+                return _429()
+            return _resp(200, registry)
+        return _resp(200, downloads)
+
     client = AsyncMock(spec=httpx.AsyncClient)
-    client.get = AsyncMock(
-        side_effect=[
-            _429(),
-            _resp(200, registry),
-            _resp(200, downloads),
-        ]
-    )
+    client.get = dispatch_get
 
     with patch("src.fetchers.npm.asyncio.sleep", new_callable=AsyncMock):
         result = await fetch(client, "lodash", bucket, max_retries=2)

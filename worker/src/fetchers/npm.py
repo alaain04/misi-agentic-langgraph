@@ -25,7 +25,7 @@ async def _get(
     bucket: TokenBucket,
     max_retries: int,
 ) -> httpx.Response | None:
-    delay = 1.0
+    backoff = 1.0
     for _ in range(max_retries):
         await bucket.acquire()
         try:
@@ -33,16 +33,17 @@ async def _get(
             if resp.status_code == 200:
                 return resp
             if resp.status_code == 429:
-                wait = float(resp.headers.get("Retry-After", delay))
+                wait = float(resp.headers.get("Retry-After", backoff))
                 logger.debug("npm: 429 on %s, retry in %.1fs", url, wait)
                 await asyncio.sleep(wait)
-                delay = min(delay * 2, 60.0)
+                backoff = min(backoff * 2, 60.0)
                 continue
+            logger.warning("npm: unexpected status %d for %s", resp.status_code, url)
             return None
         except httpx.RequestError as exc:
             logger.debug("npm: request error %s: %s", url, exc)
-            await asyncio.sleep(delay)
-            delay *= 2
+            await asyncio.sleep(backoff)
+            backoff *= 2
     return None
 
 
