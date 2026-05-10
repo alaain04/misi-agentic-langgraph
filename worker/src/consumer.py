@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import httpx
 from nats.aio.msg import Msg
+from nats.js.errors import FetchTimeoutError
 
 from src import fetchers, jobs
 from src.config import settings
@@ -59,11 +60,17 @@ async def _worker(
                 await _process(msg, client, buckets)
         except asyncio.CancelledError:
             break
+        except FetchTimeoutError:
+            pass  # queue empty, just loop
         except Exception:
+            logger.warning("worker: fetch error", exc_info=True)
             await asyncio.sleep(0.1)
 
 
 async def run_consumer(buckets: dict[str, TokenBucket]) -> None:
+    missing = set(fetchers._REGISTRY.keys()) - set(buckets.keys())
+    if missing:
+        raise ValueError(f"run_consumer: missing buckets for entity types: {missing}")
     js = get_js()
     sub = await js.pull_subscribe(
         "entity.fetch.*", durable="entity-worker", stream=STREAM_NAME
@@ -78,3 +85,5 @@ async def run_consumer(buckets: dict[str, TokenBucket]) -> None:
         except asyncio.CancelledError:
             for t in tasks:
                 t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
