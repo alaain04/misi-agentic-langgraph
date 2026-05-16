@@ -7,11 +7,13 @@ from datetime import UTC, datetime
 
 import httpx
 from nats.aio.msg import Msg
+from nats.js.api import ConsumerConfig
 from nats.js.errors import FetchTimeoutError
 
 from src import fetchers, jobs
 from src.config import settings
 from src.db import get_db
+from src.fetchers.errors import PermanentFetchError, RateLimitError, TransientFetchError
 from src.nats_client import STREAM_NAME, get_js
 from src.rate_limiter import RateLimiter
 
@@ -26,6 +28,11 @@ async def _save(collection: str, name: str, doc: dict) -> None:
     )
 
 
+def _backoff(num_delivered: int) -> float:
+    delay = settings.nats_transient_backoff_base * (2 ** (num_delivered - 1))
+    return min(delay, settings.nats_transient_backoff_cap)
+
+
 async def _process(
     msg: Msg,
     client: httpx.AsyncClient,
@@ -35,16 +42,38 @@ async def _process(
     job_id: str = data["job_id"]
     entity_type: str = data["entity_type"]
     name: str = data["name"]
+    num_delivered: int = msg.metadata.num_delivered
+
     try:
         entry = fetchers.get(entity_type)
         doc = await entry.fetch_fn(client, name, rate_limiter, settings.max_retries)
         await _save(entry.collection, name, doc)
         await jobs.record_success(job_id)
         await msg.ack()
-    except Exception as exc:
-        logger.error("consumer: failed %s/%s: %s", entity_type, name, exc)
+
+    except RateLimitError as exc:
+        logger.warning("consumer: rate limited %s/%s, requeue in %.0fs", entity_type, name, exc.delay)
+        await msg.nak(delay=exc.delay)
+
+    except TransientFetchError as exc:
+        if num_delivered >= settings.nats_max_deliver:
+            logger.error("consumer: exhausted retries %s/%s: %s", entity_type, name, exc)
+            await msg.term()
+            await jobs.record_failure(job_id)
+        else:
+            delay = _backoff(num_delivered)
+            logger.warning("consumer: transient error %s/%s, requeue in %.0fs", entity_type, name, delay)
+            await msg.nak(delay=delay)
+
+    except PermanentFetchError as exc:
+        logger.error("consumer: permanent error %s/%s: %s", entity_type, name, exc)
+        await msg.term()
         await jobs.record_failure(job_id)
-        await msg.ack()
+
+    except Exception as exc:
+        logger.error("consumer: unexpected error %s/%s: %s", entity_type, name, exc)
+        await msg.term()
+        await jobs.record_failure(job_id)
 
 
 async def _worker(
@@ -60,7 +89,7 @@ async def _worker(
         except asyncio.CancelledError:
             break
         except FetchTimeoutError:
-            pass  # queue empty, just loop
+            pass
         except Exception:
             logger.warning("worker: fetch error", exc_info=True)
             await asyncio.sleep(0.1)
@@ -69,7 +98,10 @@ async def _worker(
 async def run_consumer(rate_limiter: RateLimiter) -> None:
     js = get_js()
     sub = await js.pull_subscribe(
-        "entity.fetch.*", durable="entity-worker", stream=STREAM_NAME
+        "entity.fetch.*",
+        durable="entity-worker",
+        stream=STREAM_NAME,
+        config=ConsumerConfig(max_deliver=settings.nats_max_deliver),
     )
     async with httpx.AsyncClient() as client:
         tasks = [
