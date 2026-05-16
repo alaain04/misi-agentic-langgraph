@@ -16,7 +16,7 @@ class IngestRequest(BaseModel):
     items: Annotated[list[str], Field(min_length=1)]
 
     def validate_entity_type(self) -> None:
-        known = set(fetchers._REGISTRY.keys())
+        known = set(fetchers.entity_types())
         if self.entity_type not in known:
             raise HTTPException(
                 status_code=422,
