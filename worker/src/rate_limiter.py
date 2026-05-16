@@ -45,11 +45,13 @@ class RateLimiter:
         self._windows = windows
         self._redis: aioredis.Redis | None = None
         self._sha: str | None = None
+        self._load_lock = asyncio.Lock()
 
     async def _ensure_loaded(self) -> None:
-        if self._sha is None:
-            self._redis = get_client()
-            self._sha = await self._redis.script_load(_LUA)
+        async with self._load_lock:
+            if self._sha is None:
+                self._redis = get_client()
+                self._sha = await self._redis.script_load(_LUA)
 
     async def acquire(self, rate_group: str) -> None:
         """Block until a request slot is available for rate_group."""
@@ -67,7 +69,7 @@ class RateLimiter:
             if result == 1:
                 return
 
-            # Find earliest slot opening across all saturated windows
+            # Wait until the most constrained window has capacity
             wait = 1.0
             for key, (window_secs, _) in zip(keys, windows):
                 oldest = await self._redis.zrange(key, 0, 0, withscores=True)
