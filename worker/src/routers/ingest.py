@@ -3,7 +3,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src import fetchers, jobs
 from src.nats_client import get_js, subject_for
@@ -15,14 +15,14 @@ class IngestRequest(BaseModel):
     entity_type: str
     items: Annotated[list[str], Field(min_length=1)]
 
-    def validate_entity_type(self) -> None:
-        known = set(fetchers.entity_types())
+    @model_validator(mode="after")
+    def check_entity_type(self) -> "IngestRequest":
+        known = fetchers.entity_types()
         if self.entity_type not in known:
-            raise HTTPException(
-                status_code=422,
-                detail=f"unknown entity_type {self.entity_type!r},"
-                f" must be one of {sorted(known)}",
+            raise ValueError(
+                f"unknown entity_type {self.entity_type!r}, must be one of {sorted(known)}"
             )
+        return self
 
 
 class IngestResponse(BaseModel):
@@ -39,7 +39,6 @@ class StatusResponse(BaseModel):
 
 @router.post("/ingest", status_code=201, response_model=IngestResponse)
 async def ingest(body: IngestRequest) -> IngestResponse:
-    body.validate_entity_type()
     job_id = str(uuid.uuid4())
     await jobs.create(job_id, body.items)
     js = get_js()
