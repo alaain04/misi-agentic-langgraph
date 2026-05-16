@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "entity-worker"
     APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: str = "local"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 
