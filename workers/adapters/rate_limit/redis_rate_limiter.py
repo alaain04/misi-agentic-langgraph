@@ -68,7 +68,7 @@ class RedisRateLimiter(RateLimitPort):
                 return
 
             wait = 1.0
-            for key, (window_secs, _) in zip(keys, windows):
+            for key, (window_secs, _) in zip(keys, windows, strict=True):
                 oldest = await self._client.zrange(key, 0, 0, withscores=True)
                 if oldest:
                     _, score = oldest[0]
