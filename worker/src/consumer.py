@@ -36,9 +36,9 @@ async def _process(
     entity_type: str = data["entity_type"]
     name: str = data["name"]
     try:
-        fetch_fn, collection = fetchers.get(entity_type)
-        doc = await fetch_fn(client, name, rate_limiter, settings.max_retries)
-        await _save(collection, name, doc)
+        entry = fetchers.get(entity_type)
+        doc = await entry.fetch_fn(client, name, rate_limiter, settings.max_retries)
+        await _save(entry.collection, name, doc)
         await jobs.record_success(job_id)
         await msg.ack()
     except Exception as exc:
