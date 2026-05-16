@@ -42,11 +42,23 @@ Expose three public functions and keep `_REGISTRY` private:
 
 Replace the manually-called `validate_entity_type()` method with a Pydantic v2 `@model_validator(mode='after')` on `IngestRequest`. Validation runs automatically on instantiation; no call site needed.
 
-### 3. Silent failure in npm fetcher (`fetchers/npm.py`)
+### 3. Typed fetch exceptions (`fetchers/errors.py`)
 
-`_get` currently returns `None` on non-200 or network error; callers silently produce empty dicts. Change `_get` to raise `RuntimeError` on exhausted retries. The consumer's existing `except Exception` handler will catch and record failure.
+Replace silent `None` returns with three typed exceptions used by all fetchers:
 
-Because `_get` no longer returns `None`, the `fetch` function must also remove its defensive conditionals: `reg_resp.json() if reg_resp else {}` becomes `reg_resp.json()`, and likewise for the downloads response.
+```python
+class RateLimitError(Exception):
+    """API responded 429. delay is the seconds to wait before retrying."""
+    def __init__(self, delay: float) -> None: ...
+
+class TransientFetchError(Exception):
+    """Temporary failure (5xx, network error). Safe to retry."""
+
+class PermanentFetchError(Exception):
+    """Unrecoverable failure (404, parse error). Do not retry."""
+```
+
+`_get` in both `npm.py` and `github.py` raises one of these instead of returning `None` or sleeping on 429. The retry-After sleep is removed from fetchers entirely — redelivery timing is now NATS's responsibility.
 
 ### 4. Ghost config (`main.py`)
 
@@ -147,7 +159,7 @@ async def _get(client, url, headers, rate_limiter, max_retries) -> list[dict]:
     """Fetch all pages from a GitHub paginated endpoint. Raises on exhausted retries."""
 ```
 
-Uses `Link: <url>; rel="next"` header for pagination. On 429, reads `Retry-After` and sleeps. On exhausted retries, raises `RuntimeError`.
+Uses `Link: <url>; rel="next"` header for pagination. On 429, raises `RateLimitError(delay)` immediately — no sleep. On 5xx or network error, raises `TransientFetchError`. On 404 or parse error, raises `PermanentFetchError`.
 
 Three exported fetch functions:
 
@@ -209,11 +221,12 @@ No application service — the worker runs locally via `uv run`.
 |---|---|---|
 | `src/rate_limiter.py` | modify | Redis sliding-window `RateLimiter` |
 | `src/redis_client.py` | new | async Redis connection |
+| `src/fetchers/errors.py` | new | `RateLimitError`, `TransientFetchError`, `PermanentFetchError` |
 | `src/fetchers/__init__.py` | modify | `FetcherEntry` dataclass, public API |
 | `src/fetchers/github.py` | new | 3 fetch functions + shared helper |
-| `src/fetchers/npm.py` | modify | raise instead of returning `None` |
+| `src/fetchers/npm.py` | modify | raise typed exceptions, remove inline sleep |
 | `src/config.py` | modify | new settings, remove old RPS settings |
-| `src/consumer.py` | modify | use `RateLimiter`, type `sub` |
+| `src/consumer.py` | modify | ack/nak/term dispatch, type `sub`, use `RateLimiter` |
 | `src/main.py` | modify | derive rate groups from registry, init Redis |
 | `src/routers/ingest.py` | modify | `@model_validator`, no private registry access |
 | `docker-compose.yml` | new | NATS + Redis |
@@ -221,9 +234,57 @@ No application service — the worker runs locally via `uv run`.
 
 ---
 
+## Message Acknowledgement & Retry Model
+
+### Problem with the current approach
+
+The consumer currently calls `msg.ack()` on **both** success and failure. On 429, the fetcher sleeps inline, blocking the worker task. After `max_retries`, the message is acked and the job recorded as failed — NATS never reschedules it.
+
+### New model: ACK / NAK / term per outcome
+
+| Fetcher raises | Consumer action | Job recorded |
+|---|---|---|
+| _(no exception)_ | `msg.ack()` | `record_success()` |
+| `RateLimitError(delay)` | `msg.nak(delay=delay)` | nothing — will retry |
+| `TransientFetchError` | `msg.nak(delay=backoff)` | nothing — will retry |
+| `PermanentFetchError` | `msg.term()` + `msg` consumed | `record_failure()` |
+
+`backoff` for transient errors starts at 5 s and doubles per redelivery attempt, capped at 300 s. The redelivery count is available via `msg.metadata.num_delivered`.
+
+### NATS consumer configuration
+
+The pull subscriber must be created with `MaxDeliver` to prevent infinite retries:
+
+```python
+await js.pull_subscribe(
+    "entity.fetch.*",
+    durable="entity-worker",
+    stream=STREAM_NAME,
+    config=ConsumerConfig(max_deliver=settings.max_retries + 1),
+)
+```
+
+When `MaxDeliver` is exhausted NATS delivers the message one final time with `num_delivered == max_deliver`. The consumer detects this and calls `msg.term()` + `record_failure()` regardless of exception type.
+
+### Interaction with the rate limiter
+
+The rate limiter (pre-emptive) and NAK on 429 (reactive) are complementary:
+- The rate limiter prevents 429s under normal conditions.
+- NAK handles 429s that slip through (other consumers, misconfigured windows, API quota resets).
+- Because 429 no longer causes an inline sleep, the worker task stays free to process other messages during the wait.
+
+### Config addition
+
+```python
+nats_max_deliver: int = 5  # max redelivery attempts per message
+nats_transient_backoff_base: float = 5.0  # seconds
+nats_transient_backoff_cap: float = 300.0  # seconds
+```
+
+---
+
 ## What Is Not Changing
 
-- NATS JetStream pull-consumer pattern — no changes to message flow
 - MongoDB job tracking (`jobs.py`) — two-step update is acceptable; `$expr` conditional flip is intentional
 - `db.py` lazy-init pattern — consistent with `nats_client.py`
 - Test strategy — unit tests with mocks remain; no new integration tests in this scope
