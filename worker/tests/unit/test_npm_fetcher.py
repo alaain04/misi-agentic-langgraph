@@ -65,5 +65,8 @@ async def test_fetch_raises_transient_error_on_500():
     client.get = AsyncMock(return_value=r)
     limiter = _make_limiter()
 
-    with pytest.raises(TransientFetchError):
-        await fetch(client, "react", limiter, max_retries=3)
+    with patch("src.fetchers.npm.asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(TransientFetchError):
+            await fetch(client, "react", limiter, max_retries=3)
+
+    assert client.get.call_count == 6
