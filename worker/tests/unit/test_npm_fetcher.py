@@ -1,79 +1,68 @@
-from unittest.mock import AsyncMock, patch
-
-import httpx
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from src.fetchers.errors import PermanentFetchError, RateLimitError, TransientFetchError
 from src.fetchers.npm import fetch
 from src.rate_limiter import TokenBucket
 
 
-def _resp(status: int, body: dict) -> httpx.Response:
-    return httpx.Response(status, json=body)
+def _make_limiter() -> TokenBucket:
+    limiter = MagicMock(spec=TokenBucket)
+    limiter.acquire = AsyncMock()
+    return limiter
 
 
-def _429(retry_after: str = "0") -> httpx.Response:
-    return httpx.Response(429, headers={"Retry-After": retry_after}, json={})
+def _resp(status: int, body: dict | None = None, headers: dict | None = None):
+    r = MagicMock()
+    r.status_code = status
+    r.json = MagicMock(return_value=body or {})
+    r.headers = headers or {}
+    return r
 
 
-async def test_fetch_returns_data_on_200():
-    bucket = TokenBucket(rate=100.0)
-    registry = {"name": "react", "dist-tags": {"latest": "18.0.0"}}
-    downloads = {"downloads": 5_000_000}
+@pytest.mark.asyncio
+async def test_fetch_returns_doc_on_200():
+    reg = _resp(200, {"name": "react"})
+    dl = _resp(200, {"downloads": 1000})
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=[reg, dl])
+    limiter = _make_limiter()
 
-    client = AsyncMock(spec=httpx.AsyncClient)
-    client.get = AsyncMock(
-        side_effect=[_resp(200, registry), _resp(200, downloads)]
-    )
+    doc = await fetch(client, "react", limiter, max_retries=3)
 
-    result = await fetch(client, "react", bucket)
-
-    assert result["registry_data"] == registry
-    assert result["weekly_downloads"] == 5_000_000
+    assert doc["registry_data"] == {"name": "react"}
+    assert doc["weekly_downloads"] == 1000
 
 
-async def test_fetch_returns_empty_on_404():
-    bucket = TokenBucket(rate=100.0)
-    client = AsyncMock(spec=httpx.AsyncClient)
-    client.get = AsyncMock(side_effect=[_resp(404, {}), _resp(404, {})])
+@pytest.mark.asyncio
+async def test_fetch_raises_rate_limit_error_on_429():
+    r = _resp(429, headers={"Retry-After": "60"})
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=r)
+    limiter = _make_limiter()
 
-    result = await fetch(client, "nonexistent-pkg-xyz", bucket)
-
-    assert result["registry_data"] == {}
-    assert result["weekly_downloads"] is None
-
-
-async def test_fetch_retries_on_429():
-    bucket = TokenBucket(rate=100.0)
-    registry = {"name": "lodash"}
-    downloads = {"downloads": 1_000}
-
-    registry_calls = 0
-
-    async def dispatch_get(url, **kwargs):
-        nonlocal registry_calls
-        if "registry.npmjs.org" in url:
-            registry_calls += 1
-            if registry_calls == 1:
-                return _429()
-            return _resp(200, registry)
-        return _resp(200, downloads)
-
-    client = AsyncMock(spec=httpx.AsyncClient)
-    client.get = dispatch_get
-
-    with patch("src.fetchers.npm.asyncio.sleep", new_callable=AsyncMock):
-        result = await fetch(client, "lodash", bucket, max_retries=2)
-
-    assert result["registry_data"] == registry
+    with pytest.raises(RateLimitError) as exc_info:
+        await fetch(client, "react", limiter, max_retries=1)
+    assert exc_info.value.delay == 60.0
 
 
-async def test_fetch_returns_empty_after_max_retries():
-    bucket = TokenBucket(rate=100.0)
-    client = AsyncMock(spec=httpx.AsyncClient)
-    client.get = AsyncMock(return_value=_429())
+@pytest.mark.asyncio
+async def test_fetch_raises_permanent_error_on_404():
+    r = _resp(404)
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=r)
+    limiter = _make_limiter()
 
-    with patch("src.fetchers.npm.asyncio.sleep", new_callable=AsyncMock):
-        result = await fetch(client, "react", bucket, max_retries=2)
+    with pytest.raises(PermanentFetchError):
+        await fetch(client, "no-such-package", limiter, max_retries=3)
 
-    assert result["registry_data"] == {}
-    assert result["weekly_downloads"] is None
+
+@pytest.mark.asyncio
+async def test_fetch_raises_transient_error_on_500():
+    r = _resp(500)
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=r)
+    limiter = _make_limiter()
+
+    with pytest.raises(TransientFetchError):
+        await fetch(client, "react", limiter, max_retries=3)
