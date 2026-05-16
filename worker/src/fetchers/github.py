@@ -66,8 +66,6 @@ async def _get_pages(
                     raise TransientFetchError(f"status {resp.status_code} for {next_url}")
                 continue
             raise PermanentFetchError(f"unexpected status {resp.status_code} for {next_url}")
-        else:
-            raise TransientFetchError(f"exhausted retries for {next_url}")
 
     return results
 

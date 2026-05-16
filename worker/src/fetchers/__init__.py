@@ -34,12 +34,12 @@ def _build_registry() -> dict[str, FetcherEntry]:
     }
 
 
-_REGISTRY: dict[str, FetcherEntry] = {}
+_REGISTRY: dict[str, FetcherEntry] | None = None
 
 
 def _registry() -> dict[str, FetcherEntry]:
     global _REGISTRY
-    if not _REGISTRY:
+    if _REGISTRY is None:
         _REGISTRY = _build_registry()
     return _REGISTRY
 
