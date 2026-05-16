@@ -5,10 +5,10 @@ from collections.abc import Awaitable, Callable
 import httpx
 
 from src.fetchers.npm import fetch as npm_fetch
-from src.rate_limiter import TokenBucket
+from src.rate_limiter import RateLimiter
 
 type FetchFn = Callable[
-    [httpx.AsyncClient, str, TokenBucket, int], Awaitable[dict]
+    [httpx.AsyncClient, str, RateLimiter, int], Awaitable[dict]
 ]
 
 _REGISTRY: dict[str, tuple[FetchFn, str]] = {

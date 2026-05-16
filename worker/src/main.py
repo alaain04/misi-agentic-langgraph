@@ -8,7 +8,7 @@ from src.config import settings
 from src.consumer import run_consumer
 from src.nats_client import close as nats_close
 from src.nats_client import connect as nats_connect
-from src.rate_limiter import TokenBucket
+from src.rate_limiter import RateLimiter
 from src.routers import ingest
 
 logger = logging.getLogger(__name__)
@@ -20,11 +20,11 @@ _consumer_task: asyncio.Task | None = None
 async def lifespan(app: FastAPI):
     global _consumer_task
     await nats_connect()
-    buckets = {
-        "npm": TokenBucket(settings.npm_rate_limit_rps),
-        "github": TokenBucket(settings.github_rate_limit_rps),
-    }
-    _consumer_task = asyncio.create_task(run_consumer(buckets))
+    rate_limiter = RateLimiter({
+        "npm": settings.npm_rate_windows,
+        "github": settings.github_rate_windows,
+    })
+    _consumer_task = asyncio.create_task(run_consumer(rate_limiter))
     logger.info("entity-worker started")
     yield
     if _consumer_task:
