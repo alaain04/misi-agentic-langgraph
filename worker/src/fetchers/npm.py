@@ -7,7 +7,7 @@ import urllib.parse
 import httpx
 
 from src.fetchers.errors import PermanentFetchError, RateLimitError, TransientFetchError
-from src.rate_limiter import TokenBucket
+from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ def _encode(name: str) -> str:
 async def _get(
     client: httpx.AsyncClient,
     url: str,
-    rate_limiter: TokenBucket,
+    rate_limiter: RateLimiter,
     max_retries: int,
 ) -> httpx.Response:
     """Fetch one URL, acquiring a rate-limit slot first. Raises on non-200."""
     for attempt in range(max_retries):
-        await rate_limiter.acquire()
+        await rate_limiter.acquire("npm")
         try:
             resp = await client.get(url, timeout=_TIMEOUT)
         except httpx.RequestError as exc:
@@ -57,7 +57,7 @@ async def _get(
 async def fetch(
     client: httpx.AsyncClient,
     name: str,
-    rate_limiter: TokenBucket,
+    rate_limiter: RateLimiter,
     max_retries: int = 3,
 ) -> dict:
     """Return cache document dict for one npm package."""

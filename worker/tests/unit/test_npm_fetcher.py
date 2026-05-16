@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.fetchers.errors import PermanentFetchError, RateLimitError, TransientFetchError
 from src.fetchers.npm import fetch
-from src.rate_limiter import TokenBucket
+from src.rate_limiter import RateLimiter
 
 
-def _make_limiter() -> TokenBucket:
-    limiter = MagicMock(spec=TokenBucket)
+def _make_limiter() -> RateLimiter:
+    limiter = MagicMock(spec=RateLimiter)
     limiter.acquire = AsyncMock()
     return limiter
 
@@ -32,6 +32,7 @@ async def test_fetch_returns_doc_on_200():
 
     assert doc["registry_data"] == {"name": "react"}
     assert doc["weekly_downloads"] == 1000
+    limiter.acquire.assert_called_with("npm")
 
 
 @pytest.mark.asyncio
