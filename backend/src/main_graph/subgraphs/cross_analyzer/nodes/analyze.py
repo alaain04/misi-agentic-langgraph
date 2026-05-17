@@ -16,7 +16,6 @@ def _group_by_domain(subgraph_results: list[dict]) -> dict:
     domains: dict[str, list] = {
         "vulnerabilities": [],
         "license_compliance": [],
-        "supply_chain": [],
     }
     for item in subgraph_results:
         name = item.get("subgraph", "")
