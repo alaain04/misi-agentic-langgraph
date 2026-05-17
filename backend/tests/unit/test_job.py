@@ -32,3 +32,9 @@ def test_job_unique_ids():
     a = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="x"))
     b = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="x"))
     assert a.id != b.id
+
+
+def test_job_dao_implements_port():
+    from src.domain.ports.job_repository_port import JobRepositoryPort
+    from src.services.job_dao import JobDAO
+    assert issubclass(JobDAO, JobRepositoryPort)
