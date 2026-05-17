@@ -24,7 +24,7 @@ from src.main_graph.subgraphs.ingestion_subgraphs.impact.tools.sbom_tools import
 from src.utils.llm import Model, get_llm
 
 _log = logging.getLogger(__name__)
-_llm = get_llm(Model.GPT_4O_MINI)
+_llm = get_llm(Model.GPT_5_4_MINI)
 
 _SYSTEM_PROMPT = """\
 You are an impact analysis agent for JavaScript/TypeScript projects.

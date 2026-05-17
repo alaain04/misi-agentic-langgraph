@@ -60,6 +60,7 @@ def test_compute_blast_radius_leaf_dep():
     result = compute_blast_radius("cookie", _SBOM)
     assert result["direct_dependents"] == 2  # express + myapp
     assert result["transitive_dependents"] == 2
+    assert result["max_depth"] == 1
 
 
 def test_compute_blast_radius_not_found():
