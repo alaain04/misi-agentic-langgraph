@@ -46,6 +46,8 @@ All three run once per dependency in scope. `runtime` is compute-intensive (Dock
 
 `repo` and `runtime` resolve the GitHub repository URL from `sbom_cyclonedx.components[dependency_name].externalReferences` (VCS type), not from `upstream_results["registry"]`. This keeps all Stage 1 subgraphs independent and fully parallel — no DEPENDS_ON chain needed within Stage 1.
 
+**`registry` and `repo` delegate raw data fetching to the workers service** (see Workers Integration section). They do not call npm or GitHub APIs directly.
+
 ### Per-high-risk-dep impact analysis (Stage 2 fan-out)
 
 | Subgraph | Status | What it analyzes |
@@ -198,7 +200,13 @@ dep_filter: NotRequired[list[str] | None]
 
 ### New subgraphs
 
-**`registry`** — wraps a single `analyze` node that calls the npm registry API for `dependency_name`, extracts: `last_publish`, `weekly_downloads`, `is_deprecated`, `maintainers_count`. Follows the same pattern as `vulnerabilities` (graph.py + __init__.py with GRAPH_NAME, DEPENDS_ON, describe()).
+**`registry`** — wraps a single `analyze` node that:
+1. Calls `POST /ingest` on the workers API with `entity_types: ["npm"]`, `items: [dependency_name]`
+2. Polls `GET /status/{job_id}` until `status == "done"` or `"failed"` (async polling with backoff)
+3. Reads result from the shared MongoDB `npm_package_cache` collection (keyed by package name)
+4. Extracts: `last_publish` (from `registry_data.time.modified`), `weekly_downloads`, `is_deprecated` (from `registry_data.deprecated`), `maintainers_count`
+
+Follows the same subgraph pattern as `vulnerabilities` (graph.py + __init__.py with GRAPH_NAME, DEPENDS_ON, describe()).
 
 **`impact`** — wraps a single `analyze` node that:
 1. Scans `repo_path` for `import … from 'dep'` and `require('dep')` patterns → usage count + file list
@@ -206,7 +214,17 @@ dep_filter: NotRequired[list[str] | None]
 
 ### Subgraphs to complete
 
-**`repo`** and **`runtime`** already have `analyze` nodes with full logic. Both need:
+**`repo`** already has `analyze` node logic but needs to be reworked to use workers for raw data fetching:
+1. Extracts `owner/repo` from `sbom_cyclonedx` `externalReferences` for `dependency_name`
+2. Calls `POST /ingest` with `entity_types: ["github_issues", "github_releases", "github_advisories"]`, `items: ["owner/repo"]`
+3. Polls each job until done
+4. Reads raw data from `github_issues_cache`, `github_releases_cache`, `github_advisories_cache` MongoDB collections
+5. Applies existing LLM curation agents (`curators/issues.py`, `curators/releases.py`, `curators/vulnerabilities.py`) to the raw data
+6. Maps to domain models and saves result
+
+Note: workers do not fetch commits. The `commits` signal is dropped from `repo` under this design. The existing `GitHubMCPClient` and `repo_cache` collection are removed.
+
+**`runtime`** already has `analyze` nodes with full logic (no workers integration needed — workers don't handle Docker execution). Both `repo` and `runtime` need:
 - `constants.py` (ANALYZE constant)
 - `graph.py` (StateGraph wrapping the analyze node, plus GRAPH_NAME, DEPENDS_ON, describe())
 - `__init__.py` (exports: subgraph, GRAPH_NAME, DEPENDS_ON, describe)
@@ -251,7 +269,37 @@ dep_filter: NotRequired[list[str] | None]
 
 ## Workers Integration
 
-The workers service (`http://localhost:8001`) already fetches npm and GitHub data with NATS JetStream + MongoDB caching. The `registry` and `repo` subgraphs currently fetch directly (npm API, GitHub MCP). Integration with workers is deferred — the subgraphs are designed to be self-contained for now. A future iteration could replace direct fetching with a `POST /ingest` call to the workers API.
+The workers service (`http://localhost:8001`) handles npm and GitHub raw data fetching with rate limiting, retries, and MongoDB caching. `registry` and `repo` subgraphs use it instead of owning their own API clients.
+
+**Interaction pattern (used by both `registry` and `repo`):**
+
+```
+1. POST /ingest  { entity_types, items }
+   → returns { job_ids: { entity_type: job_id } }
+
+2. Poll GET /status/{job_id}
+   → { status: "pending"|"running"|"done"|"failed", total, completed, failed }
+   → async sleep with backoff; max ~30s total wait
+
+3. Read result from shared MongoDB collection directly
+   (backend and workers share the same MongoDB instance)
+   → npm_package_cache        keyed by package name
+   → github_issues_cache      keyed by "owner/repo"
+   → github_releases_cache    keyed by "owner/repo"
+   → github_advisories_cache  keyed by "owner/repo"
+```
+
+**Coverage:**
+
+| Entity | Workers entity_type | Collection | Used by |
+|---|---|---|---|
+| npm metadata | `npm` | `npm_package_cache` | `registry` |
+| GitHub issues | `github_issues` | `github_issues_cache` | `repo` |
+| GitHub releases | `github_releases` | `github_releases_cache` | `repo` |
+| GitHub advisories | `github_advisories` | `github_advisories_cache` | `repo` |
+| GitHub commits | — (not supported) | — | dropped from `repo` |
+
+Workers provide **raw data only**. LLM curation of issues, releases, and advisories remains in the `repo` subgraph (existing `curators/` agents).
 
 ---
 
