@@ -263,7 +263,7 @@ async def analyze(state: RuntimeState) -> dict:
         try:
             await runtime_cache_dao.upsert_cached_entry(
                 RuntimeCacheEntry(
-                    dep_name=dep_name,
+                    package_name=dep_name,
                     package_version=version_spec,
                     fetched_at=datetime.now(UTC),
                     entry=entry,
