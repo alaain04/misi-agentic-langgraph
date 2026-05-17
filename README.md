@@ -11,9 +11,6 @@ LangGraph-powered dependency risk analysis tool. Given a GitHub repository URL a
 | workers | NATS JetStream consumer for npm/GitHub entity fetching | [apps/workers](apps/workers/README.md) |
 
 ## API Reference
-
-See [docs/api.md](docs/api.md) for the full REST API contract (endpoints, request/response schemas, TypeScript types).
-
 Runnable HTTP request files are in [http-docs/](http-docs/) (compatible with httpYac / REST Client):
 
 | File | Service |
