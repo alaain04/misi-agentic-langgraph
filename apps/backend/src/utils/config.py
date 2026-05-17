@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     docker_cpu_limit: float = 1.0
     script_timeout_seconds: int = 120
 
+    # Workers service
+    workers_url: str = "http://localhost:8001"
+
     # Analysis parameters
     lookback_days: int = 90
     reviewer_batch_size: int = 20
