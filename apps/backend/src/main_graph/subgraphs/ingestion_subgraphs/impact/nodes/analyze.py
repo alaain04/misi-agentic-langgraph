@@ -64,7 +64,7 @@ async def analyze(state: ImpactState) -> dict:
 
     @tool
     def get_blast_radius(target: str) -> str:
-        """Compute blast radius for target: {direct_dependents, transitive_dependents, max_depth}."""
+        """Compute blast radius for target. Returns JSON with keys: direct_dependents, transitive_dependents, max_depth."""
         return json.dumps(compute_blast_radius(target, sbom))
 
     tools = [

@@ -75,6 +75,8 @@ async def test_analyze_saves_empty_entry_when_no_dep_name():
             }
         )
     assert result["result_id"] == "empty123"
+    saved = mock_dao.save.call_args[0][0]
+    assert saved.dep_name == ""
 
 
 @pytest.mark.asyncio
@@ -93,6 +95,8 @@ async def test_analyze_saves_empty_entry_when_no_repo_path():
             }
         )
     assert result["result_id"] == "empty456"
+    saved = mock_dao.save.call_args[0][0]
+    assert saved.dep_name == "express"
 
 
 @pytest.mark.asyncio
@@ -110,3 +114,22 @@ async def test_analyze_falls_back_to_empty_entry_on_agent_exception(_base_state)
         result = await analyze(_base_state)
 
     assert result["result_id"] == "fallback789"
+
+
+@pytest.mark.asyncio
+async def test_analyze_falls_back_on_ainvoke_exception(_base_state):
+    with (
+        patch(
+            "src.main_graph.subgraphs.ingestion_subgraphs.impact.nodes.analyze.create_agent"
+        ) as mock_factory,
+        patch(
+            "src.main_graph.subgraphs.ingestion_subgraphs.impact.nodes.analyze.impact_dao"
+        ) as mock_dao,
+    ):
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("recursion limit"))
+        mock_factory.return_value = mock_agent
+        mock_dao.save = AsyncMock(return_value="fallback999")
+        result = await analyze(_base_state)
+
+    assert result["result_id"] == "fallback999"
