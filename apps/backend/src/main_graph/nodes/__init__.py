@@ -1,6 +1,9 @@
 from src.main_graph.nodes.execute_plan import execute_plan
 from src.main_graph.nodes.execution_planner import execution_planner
 from src.main_graph.nodes.orchestrator import orchestrator
+from src.main_graph.nodes.recommendation import recommendation
+from src.main_graph.nodes.risk_ranker import risk_ranker, risk_ranker_router
+from src.main_graph.nodes.risk_score import risk_score
 from src.main_graph.nodes.stage_advance import stage_advance, stage_router
 from src.main_graph.nodes.task_dispatcher import task_dispatcher
 
@@ -8,6 +11,10 @@ __all__ = [
     "execute_plan",
     "execution_planner",
     "orchestrator",
+    "recommendation",
+    "risk_ranker",
+    "risk_ranker_router",
+    "risk_score",
     "stage_advance",
     "stage_router",
     "task_dispatcher",
