@@ -67,9 +67,9 @@ async def test_search_npm_empty_results():
 
 @pytest.mark.asyncio
 async def test_get_npm_metadata_extracts_fields():
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status = MagicMock()
-    mock_resp.json.return_value = {
+    mock_registry_resp = MagicMock()
+    mock_registry_resp.raise_for_status = MagicMock()
+    mock_registry_resp.json.return_value = {
         "name": "express",
         "description": "Fast web framework",
         "dist-tags": {"latest": "4.18.2"},
@@ -78,10 +78,15 @@ async def test_get_npm_metadata_extracts_fields():
         "repository": {"url": "https://github.com/expressjs/express"},
         "maintainers": [{"name": "alice"}, {"name": "bob"}],
     }
+
+    mock_downloads_resp = MagicMock()
+    mock_downloads_resp.status_code = 200
+    mock_downloads_resp.json.return_value = {"downloads": 50000}
+
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.get = AsyncMock(side_effect=[mock_registry_resp, mock_downloads_resp])
 
     with patch(
         "src.main_graph.nodes.recommendation_tools.httpx.AsyncClient",
@@ -96,6 +101,7 @@ async def test_get_npm_metadata_extracts_fields():
     assert result["license"] == "MIT"
     assert result["maintainers"] == ["alice", "bob"]
     assert result["deprecated"] is None
+    assert result["weekly_downloads"] == 50000
 
 
 # ── _get_github_summary ──────────────────────────────────────────────────────

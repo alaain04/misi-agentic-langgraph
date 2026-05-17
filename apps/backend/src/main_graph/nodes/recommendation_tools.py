@@ -8,6 +8,7 @@ import httpx
 
 _NPM_REGISTRY = "https://registry.npmjs.org"
 _NPM_SEARCH = "https://registry.npmjs.org/-/v1/search"
+_NPM_DOWNLOADS = "https://api.npmjs.org/downloads/point/last-week"
 _GITHUB_API = "https://api.github.com"
 
 
@@ -41,6 +42,18 @@ async def _get_npm_metadata(package_name: str) -> dict:
         resp.raise_for_status()
         data = resp.json()
         dist_tags = data.get("dist-tags", {})
+
+        weekly_downloads: int | None = None
+        try:
+            dl_resp = await client.get(
+                f"{_NPM_DOWNLOADS}/{package_name}",
+                timeout=10.0,
+            )
+            if dl_resp.status_code == 200:
+                weekly_downloads = dl_resp.json().get("downloads")
+        except Exception:
+            pass
+
         return {
             "name": data.get("name", ""),
             "description": data.get("description", ""),
@@ -50,6 +63,7 @@ async def _get_npm_metadata(package_name: str) -> dict:
             "homepage": data.get("homepage"),
             "repository": data.get("repository", {}).get("url"),
             "maintainers": [m.get("name") for m in data.get("maintainers", [])],
+            "weekly_downloads": weekly_downloads,
         }
 
 
