@@ -75,7 +75,7 @@ async def _get_github_summary(owner: str, repo: str) -> dict:
                 "last_commit": data.get("pushed_at"),
                 "archived": data.get("archived", False),
             }
-        except httpx.HTTPStatusError:
+        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.RequestError):
             return {}
 
 

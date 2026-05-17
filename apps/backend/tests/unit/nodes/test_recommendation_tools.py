@@ -152,6 +152,28 @@ async def test_get_github_summary_returns_empty_dict_on_http_error():
     assert result == {}
 
 
+@pytest.mark.asyncio
+async def test_get_github_summary_returns_empty_dict_on_timeout():
+    import httpx
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.get = AsyncMock(
+        side_effect=httpx.TimeoutException("timeout")
+    )
+
+    with patch(
+        "src.main_graph.nodes.recommendation_tools.httpx.AsyncClient",
+        return_value=mock_client,
+    ):
+        from src.main_graph.nodes.recommendation_tools import _get_github_summary
+
+        result = await _get_github_summary("slow", "repo")
+
+    assert result == {}
+
+
 # ── _compare_packages ────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -177,3 +199,23 @@ async def test_compare_packages_returns_metadata_for_all():
     assert "express" in result
     assert "fastify" in result
     assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compare_packages_returns_fallback_on_failed_package():
+    async def fake_get_npm_metadata(name: str) -> dict:
+        if name == "broken":
+            raise RuntimeError("fetch failed")
+        return {"name": name, "latest_version": "1.0.0"}
+
+    with patch(
+        "src.main_graph.nodes.recommendation_tools._get_npm_metadata",
+        side_effect=fake_get_npm_metadata,
+    ):
+        from src.main_graph.nodes.recommendation_tools import _compare_packages
+
+        result = await _compare_packages("express", ["broken"])
+
+    assert "express" in result
+    assert result["express"]["latest_version"] == "1.0.0"
+    assert result["broken"] == {"name": "broken"}  # fallback stub
