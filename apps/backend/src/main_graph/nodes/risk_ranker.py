@@ -116,12 +116,9 @@ async def risk_ranker(state: MainState) -> dict:
         doc = await SUBGRAPH_DAOS["runtime"].get(result_id)
         return json.dumps(doc or {})
 
-    @tool(return_direct=True)
+    @tool
     def save_ranking(rankings: list[dict]) -> str:
-        """Save the final risk ranking for all deps.
-
-        rankings: list of {dep_name, preliminary_score, risk_signals, rationale}
-        """
+        """Save the final risk ranking. rankings: list of {dep_name, preliminary_score, risk_signals, rationale}."""
         _rankings.extend(rankings)
         return "ok"
 
@@ -152,18 +149,17 @@ async def risk_ranker(state: MainState) -> dict:
         _log.exception("risk_ranker: agent failed")
         _rankings.clear()
 
-    if not _rankings:
-        _rankings.extend(
-            [
+    ranked_deps = {r["dep_name"] for r in _rankings}
+    for dep in dep_scope:
+        if dep not in ranked_deps:
+            _rankings.append(
                 {
                     "dep_name": dep,
                     "preliminary_score": 5.0,
                     "risk_signals": [],
                     "rationale": "analysis unavailable",
                 }
-                for dep in dep_scope
-            ]
-        )
+            )
 
     high_risk_deps = _select_high_risk(_rankings)
     existing_stages = state.get("execution_stages") or []
