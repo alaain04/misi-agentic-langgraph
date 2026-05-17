@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 import nats
+import nats.errors
 from nats.aio.client import Client as NATSClient
 from nats.js import JetStreamContext
 from nats.js.api import ConsumerConfig, RetentionPolicy, StreamConfig
@@ -88,7 +89,7 @@ class NATSJetStreamAdapter(MessagingPort):
     ) -> list[Any]:
         try:
             return await subscription.fetch(batch, timeout=timeout)
-        except FetchTimeoutError:
+        except (FetchTimeoutError, nats.errors.TimeoutError):
             return []
 
     async def ack(self, msg: Any) -> None:

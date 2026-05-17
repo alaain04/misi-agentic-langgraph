@@ -14,16 +14,20 @@ async def ingest(
     ingest_service: IngestService = Depends(get_ingest_service),
     registry: dict[str, FetcherPort] = Depends(get_fetcher_registry),
 ) -> IngestResponse:
-    if body.entity_type not in registry:
+    unknown = [t for t in body.entity_types if t not in registry]
+    if unknown:
         raise HTTPException(
             status_code=422,
-            detail=f"unknown entity_type {body.entity_type!r}, must be one of {sorted(registry)}",
+            detail=f"unknown entity_type(s) {unknown}, must be one of {sorted(registry)}",
         )
     try:
-        job_id = await ingest_service.create_job(body.entity_type, body.items)
+        job_ids = {
+            entity_type: await ingest_service.create_job(entity_type, body.items)
+            for entity_type in body.entity_types
+        }
     except Exception:
         raise HTTPException(status_code=503, detail="failed to enqueue job")
-    return IngestResponse(job_id=job_id)
+    return IngestResponse(job_ids=job_ids)
 
 
 @router.get("/status/{job_id}", response_model=StatusResponse)

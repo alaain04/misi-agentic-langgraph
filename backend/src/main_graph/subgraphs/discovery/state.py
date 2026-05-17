@@ -13,9 +13,9 @@ class ProjectMetadata(TypedDict):
 
 class DiscoveryState(TypedDict):
     # Inputs
+    job_id: str
     repo_url: str
     concern: str
-    job_id: str
 
     # set by clone_repository
     repo_path: NotRequired[str]

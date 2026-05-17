@@ -4,12 +4,12 @@ from pydantic import BaseModel, Field
 
 
 class IngestRequest(BaseModel):
-    entity_type: str
+    entity_types: Annotated[list[str], Field(min_length=1)]
     items: Annotated[list[str], Field(min_length=1)]
 
 
 class IngestResponse(BaseModel):
-    job_id: str
+    job_ids: dict[str, str]
 
 
 class StatusResponse(BaseModel):
