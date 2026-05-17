@@ -2,17 +2,17 @@
 
 import logging
 
+from src.api.dependencies import get_job_repo
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph.state import MainState
 from src.main_graph.subgraphs.ingestion_subgraphs import (
     SUBGRAPH_DAOS,
     SUBGRAPH_REGISTRY,
 )
-from src.services.job_dao import JobDAO
 
 logger = logging.getLogger(__name__)
 
-_dao: JobRepositoryPort = JobDAO()
+_dao: JobRepositoryPort = get_job_repo()
 
 
 async def execute_plan(state: MainState) -> dict:
