@@ -4,8 +4,11 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
+clean: ## Remove build artifacts and caches
+	rm -rf dist node_modules/.cache .eslintcache
+
 install: ## Install dependencies
-	pnpm install
+	pnpm install --frozen-lockfile --ignore-scripts
 
 lint: ## Run ESLint
 	pnpm lint

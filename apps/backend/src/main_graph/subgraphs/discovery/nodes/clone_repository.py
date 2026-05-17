@@ -4,8 +4,8 @@ import json
 import logging
 import os
 
-from src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
+from src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,9 @@ async def clone_repository(state: DiscoveryState) -> dict:
     cmd = f"git clone --depth=1 --single-branch {repo_url} /workspace"
     logger.info("clone_repository: cloning %s into %s", repo_url, tmp_dir)
 
-    raw = await run_docker_command.ainvoke({"image": image, "volume": volume, "command": cmd})
+    raw = await run_docker_command.ainvoke(
+        {"image": image, "volume": volume, "command": cmd}
+    )
     result = json.loads(raw)
     returncode = result["returncode"]
     stderr = result["stderr"]

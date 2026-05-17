@@ -11,8 +11,10 @@ from src.utils.llm import Model, get_llm
 
 _llm = get_llm(Model.GPT_5_4)
 
+
 def _get_sbom_attribute(sbom: dict[str, Any], attribute: str) -> str:
     return sbom.get("metadata", {}).get("component", {}).get(attribute, "unknown")
+
 
 def _extract_components(sbom: dict[str, Any], limit: int = 80) -> tuple[list[str], int]:
     """Return (component_strings, total_count) from SBOM components."""

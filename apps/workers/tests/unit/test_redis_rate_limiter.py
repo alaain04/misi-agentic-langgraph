@@ -29,7 +29,9 @@ async def test_acquire_retries_when_no_slot():
     mock_redis.evalsha = AsyncMock(side_effect=[0, 1])
     mock_redis.zrange = AsyncMock(return_value=[(b"id", time.time() + 0.05)])
 
-    with patch("adapters.rate_limit.redis_rate_limiter.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch(
+        "adapters.rate_limit.redis_rate_limiter.asyncio.sleep", new_callable=AsyncMock
+    ) as mock_sleep:
         await limiter.acquire("npm")
         mock_sleep.assert_called_once()
 

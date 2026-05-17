@@ -26,9 +26,7 @@ def _next_url(link_header: str | None) -> str | None:
 class _GithubBaseFetcher(FetcherPort):
     rate_group = "github"
 
-    def __init__(
-        self, rate_limiter: RateLimitPort, token: str, max_retries: int = 3
-    ) -> None:
+    def __init__(self, rate_limiter: RateLimitPort, token: str, max_retries: int = 3) -> None:
         self._rate_limiter = rate_limiter
         self._token = token
         self._max_retries = max_retries
@@ -67,13 +65,9 @@ class _GithubBaseFetcher(FetcherPort):
                     raise PermanentFetchError(f"404 for {next_url}")
                 if resp.status_code >= 500:
                     if attempt == self._max_retries - 1:
-                        raise TransientFetchError(
-                            f"status {resp.status_code} for {next_url}"
-                        )
+                        raise TransientFetchError(f"status {resp.status_code} for {next_url}")
                     continue
-                raise PermanentFetchError(
-                    f"unexpected status {resp.status_code} for {next_url}"
-                )
+                raise PermanentFetchError(f"unexpected status {resp.status_code} for {next_url}")
         return results
 
 
@@ -91,9 +85,7 @@ class GithubIssuesFetcherAdapter(_GithubBaseFetcher):
         self._lookback_days = lookback_days
 
     async def fetch(self, client: httpx.AsyncClient, name: str) -> dict:
-        since = (
-            datetime.now(UTC) - timedelta(days=self._lookback_days)
-        ).isoformat()
+        since = (datetime.now(UTC) - timedelta(days=self._lookback_days)).isoformat()
         url = f"{_BASE}/repos/{name}/issues?state=all&since={since}&per_page=100"
         issues = await self._get_pages(client, url)
         return {"issues": issues}
@@ -119,8 +111,7 @@ class GithubReleasesFetcherAdapter(_GithubBaseFetcher):
         recent = [
             r
             for r in all_releases
-            if r.get("published_at")
-            and datetime.fromisoformat(r["published_at"]) >= cutoff
+            if r.get("published_at") and datetime.fromisoformat(r["published_at"]) >= cutoff
         ]
         return {"releases": recent}
 

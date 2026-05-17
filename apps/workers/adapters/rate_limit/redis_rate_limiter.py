@@ -32,16 +32,12 @@ return 1
 
 
 class RedisRateLimiter(RateLimitPort):
-    def __init__(
-        self, redis_url: str, windows: dict[str, list[tuple[int, int]]]
-    ) -> None:
+    def __init__(self, redis_url: str, windows: dict[str, list[tuple[int, int]]]) -> None:
         """
         windows: maps rate_group -> list of (window_seconds, max_requests).
         Example: {"npm": [(60, 500), (3600, 5000)]}
         """
-        self._client: aioredis.Redis = aioredis.from_url(
-            redis_url, decode_responses=False
-        )
+        self._client: aioredis.Redis = aioredis.from_url(redis_url, decode_responses=False)
         self._windows = windows
         self._sha: str | None = None
         self._load_lock = asyncio.Lock()

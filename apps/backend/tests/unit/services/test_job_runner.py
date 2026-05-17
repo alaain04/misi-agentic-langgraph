@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.models.job import JobStatus
-from src.services.job_runner import run_analysis, resume_analysis
+from src.services.job_runner import resume_analysis, run_analysis
 
 
 def _make_dao() -> AsyncMock:
@@ -18,8 +18,10 @@ async def test_run_analysis_marks_failed_on_exception():
         raise RuntimeError("graph exploded")
         yield  # makes this an async generator
 
-    with patch("src.services.job_runner.main_graph") as mock_graph, \
-         patch("src.services.job_runner.delete_store"):
+    with (
+        patch("src.services.job_runner.main_graph") as mock_graph,
+        patch("src.services.job_runner.delete_store"),
+    ):
         mock_graph.astream = bad_stream
         await run_analysis("job-1", "https://github.com/x/y", "security", dao)
 
@@ -51,8 +53,10 @@ async def test_resume_analysis_marks_failed_on_exception():
         raise RuntimeError("resume exploded")
         yield  # makes this an async generator
 
-    with patch("src.services.job_runner.main_graph") as mock_graph, \
-         patch("src.services.job_runner.delete_store"):
+    with (
+        patch("src.services.job_runner.main_graph") as mock_graph,
+        patch("src.services.job_runner.delete_store"),
+    ):
         mock_graph.astream = bad_stream
         await resume_analysis("job-2", "approve", dao)
 

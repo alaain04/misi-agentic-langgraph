@@ -1,20 +1,20 @@
 """Node: lock_generator_agent — ReAct agent that generates a lock file."""
 
 import logging
+
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.tools import tool
 from pydantic import BaseModel
 
-from src.main_graph.subgraphs.discovery.tools.filesystem import read_file, write_file
-from src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
-
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
+from src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
+from src.main_graph.subgraphs.discovery.tools.filesystem import read_file, write_file
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_5_4_MINI)
+
 
 class LockGenResult(BaseModel):
     success: bool
@@ -23,7 +23,8 @@ class LockGenResult(BaseModel):
 
 
 _SYSTEM_TEMPLATE = """\
-You are generating a lock file for a Node.js project located at {repo_path} using {pm} in {image}.
+You are generating a lock file for a Node.js project \
+located at {repo_path} using {pm} in {image}.
 
 Your goal is to successfully produce a valid lock file (package-lock.json, yarn.lock, \
     or pnpm-lock.yaml depending on the package manager).

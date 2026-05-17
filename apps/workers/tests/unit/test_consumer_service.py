@@ -1,8 +1,6 @@
 import json
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from domain.models.errors import PermanentFetchError, RateLimitError, TransientFetchError
 from domain.ports.entity_cache_port import EntityCachePort
 from domain.ports.fetcher_port import FetcherPort
@@ -24,9 +22,7 @@ def _make_settings():
 
 def _make_msg(entity_type: str = "npm", num_delivered: int = 1) -> MagicMock:
     msg = MagicMock()
-    msg.data = json.dumps(
-        {"job_id": "j1", "entity_type": entity_type, "name": "react"}
-    ).encode()
+    msg.data = json.dumps({"job_id": "j1", "entity_type": entity_type, "name": "react"}).encode()
     msg.metadata = MagicMock()
     msg.metadata.num_delivered = num_delivered
     return msg

@@ -84,9 +84,7 @@ class NATSJetStreamAdapter(MessagingPort):
             config=ConsumerConfig(max_deliver=max_deliver),
         )
 
-    async def pull_fetch(
-        self, subscription: Any, batch: int, timeout: float
-    ) -> list[Any]:
+    async def pull_fetch(self, subscription: Any, batch: int, timeout: float) -> list[Any]:
         try:
             return await subscription.fetch(batch, timeout=timeout)
         except (FetchTimeoutError, nats.errors.TimeoutError):

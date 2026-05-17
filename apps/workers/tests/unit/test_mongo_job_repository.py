@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from adapters.db.mongodb.mongo_job_repository import MongoJobRepository

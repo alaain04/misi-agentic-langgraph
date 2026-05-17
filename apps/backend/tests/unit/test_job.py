@@ -37,4 +37,5 @@ def test_job_unique_ids():
 def test_job_dao_implements_port():
     from src.domain.ports.job_repository_port import JobRepositoryPort
     from src.services.job_dao import JobDAO
+
     assert issubclass(JobDAO, JobRepositoryPort)

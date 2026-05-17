@@ -1,26 +1,40 @@
-import asyncio, json
+import asyncio
+import json
 import os
+
 from langchain_core.tools import tool
+
 _DOCKER_TIMEOUT = 300
 
+
 @tool
-async def run_docker_command(image: str, volume: str, command: str, ) -> str:
+async def run_docker_command(
+    image: str,
+    volume: str,
+    command: str,
+) -> str:
     """Run a shell command in a Docker container with the workspace mounted.
 
     Args:
         image: Docker image, e.g. "node:25-alpine"
         volume: Docker volume spec, e.g. "/host/path:/container/path"
-        command: Shell command, e.g. "cd /workspace && npm -g install pnpm && pnpm install"
+        command: Shell command to run, e.g.
+            "cd /workspace && npm -g install pnpm && pnpm install"
 
     Returns JSON with keys: returncode (int), stdout (str), stderr (str).
     """
     proc = await asyncio.create_subprocess_exec(
-        "docker", "run",
+        "docker",
+        "run",
         "--rm",
-        "--user", f"{os.getuid()}:{os.getgid()}",
-        "-v", f"{volume}",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-v",
+        f"{volume}",
         image,
-        "sh", "-c", command,
+        "sh",
+        "-c",
+        command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

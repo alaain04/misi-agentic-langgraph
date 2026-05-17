@@ -1,4 +1,4 @@
-.PHONY: help setup lint format test \
+.PHONY: help setup clean reset lint format test \
         deps-up deps-down deps-logs \
         dev-backend dev-workers dev-frontend \
         build
@@ -12,10 +12,22 @@ help: ## Show available targets
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
-setup: ## Install all dependencies
+setup: ## Clean and install all dependencies
+	$(MAKE) -C backend clean
+	$(MAKE) -C workers clean
+	$(MAKE) -C frontend clean
 	$(MAKE) -C backend setup
 	$(MAKE) -C workers setup
 	$(MAKE) -C frontend install
+
+clean: ## Clean all components
+	$(MAKE) -C backend clean
+	$(MAKE) -C workers clean
+	$(MAKE) -C frontend clean
+
+reset: clean ## Full reset — remove venvs/node_modules then reinstall
+	rm -rf backend/.venv workers/.venv frontend/node_modules
+	$(MAKE) setup
 
 # ---------------------------------------------------------------------------
 # Code quality

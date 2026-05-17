@@ -4,11 +4,10 @@ import logging
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
-
 from pydantic import BaseModel
 
-from src.main_graph.subgraphs.discovery.tools.filesystem import list_dir, read_file
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
+from src.main_graph.subgraphs.discovery.tools.filesystem import list_dir, read_file
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -25,10 +24,12 @@ class InspectorResult(BaseModel):
 
 
 _SYSTEM_TEMPLATE = """\
-You are analyzing a Node.js repository at {repo_path}, using the available inspection tools.
+You are analyzing a Node.js repository at {repo_path}, \
+using the available inspection tools.
 
 Infer:
-detected_package_manager, lock_file_missing, manifest_files, docker_image, install_command
+detected_package_manager, lock_file_missing, manifest_files, \
+docker_image, install_command
 
 Rules:
 - Detect package manager from lock files:

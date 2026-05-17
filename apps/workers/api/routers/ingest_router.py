@@ -26,7 +26,7 @@ async def ingest(
             for entity_type in body.entity_types
         }
     except Exception:
-        raise HTTPException(status_code=503, detail="failed to enqueue job")
+        raise HTTPException(status_code=503, detail="failed to enqueue job") from None
     return IngestResponse(job_ids=job_ids)
 
 

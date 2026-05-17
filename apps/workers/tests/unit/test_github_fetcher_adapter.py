@@ -49,7 +49,9 @@ async def test_fetch_issues_paginates():
 
 
 async def test_fetch_issues_raises_rate_limit_on_429():
-    fetcher = GithubIssuesFetcherAdapter(_make_limiter(), token="tok", lookback_days=30, max_retries=1)
+    fetcher = GithubIssuesFetcherAdapter(
+        _make_limiter(), token="tok", lookback_days=30, max_retries=1
+    )
     client = AsyncMock()
     client.get = AsyncMock(return_value=_resp(429))
     with pytest.raises(RateLimitError) as exc:

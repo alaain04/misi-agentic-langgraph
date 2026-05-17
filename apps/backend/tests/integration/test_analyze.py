@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017")
 
+from src.api.dependencies import get_job_repo  # noqa: E402
 from src.main import app  # noqa: E402
 
 _VALID_PAYLOAD = {
@@ -25,11 +26,10 @@ def _make_mock_dao():
 @pytest.fixture
 def mock_dao():
     dao = _make_mock_dao()
-    with (
-        patch("src.api.routes.JobDAO", return_value=dao),
-        patch("src.api.routes.run_analysis", new_callable=AsyncMock),
-    ):
+    app.dependency_overrides[get_job_repo] = lambda: dao
+    with patch("src.api.routes.run_analysis", new_callable=AsyncMock):
         yield dao
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

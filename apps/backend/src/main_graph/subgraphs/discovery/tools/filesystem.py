@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
+
 from langchain_core.tools import tool
+
 
 @tool
 def list_dir(path: str) -> str:
@@ -24,6 +26,7 @@ def read_file(path: str) -> str:
     except Exception as exc:
         return f"Error reading file: {exc}"
 
+
 @tool
 def write_file(repo_path: str, content: str) -> str:
     """Write content to a file within the workspace.
@@ -32,11 +35,11 @@ def write_file(repo_path: str, content: str) -> str:
     """
     workspace = Path(repo_path).resolve()
     target = (workspace / repo_path).resolve()
-    
+
     if not str(target).startswith(str(workspace)):
         return f"Error: path '{repo_path}' is outside the workspace"
-    
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    
+
     return f"Wrote {len(content)} bytes to {target}"

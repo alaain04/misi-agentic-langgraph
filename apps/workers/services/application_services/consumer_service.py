@@ -62,9 +62,7 @@ class ConsumerService:
                 await asyncio.sleep(0.1)
 
     def _backoff(self, num_delivered: int) -> float:
-        delay = self._settings.NATS_TRANSIENT_BACKOFF_BASE * (
-            2 ** (num_delivered - 1)
-        )
+        delay = self._settings.NATS_TRANSIENT_BACKOFF_BASE * (2 ** (num_delivered - 1))
         return min(delay, self._settings.NATS_TRANSIENT_BACKOFF_CAP)
 
     async def _process(self, msg: Any, client: httpx.AsyncClient) -> None:
@@ -82,7 +80,9 @@ class ConsumerService:
             await self._messaging.ack(msg)
 
         except RateLimitError as exc:
-            logger.warning("consumer: rate limited %s/%s, requeue in %.0fs", entity_type, name, exc.delay)
+            logger.warning(
+                "consumer: rate limited %s/%s, requeue in %.0fs", entity_type, name, exc.delay
+            )
             await self._messaging.nak(msg, delay=exc.delay)
 
         except TransientFetchError as exc:
@@ -92,7 +92,9 @@ class ConsumerService:
                 await self._job_repo.record_failure(job_id)
             else:
                 delay = self._backoff(num_delivered)
-                logger.warning("consumer: transient %s/%s, requeue in %.0fs", entity_type, name, delay)
+                logger.warning(
+                    "consumer: transient %s/%s, requeue in %.0fs", entity_type, name, delay
+                )
                 await self._messaging.nak(msg, delay=delay)
 
         except PermanentFetchError as exc:

@@ -45,10 +45,10 @@ test-cov: ## Run tests with coverage report
 # Run
 # ---------------------------------------------------------------------------
 run: ## Run the app in production mode
-	uv run uvicorn main:app --host 0.0.0.0 --port 8001
+	uv run uvicorn main:app --host 0.0.0.0 --port 8002
 
 dev: ## Run the app in development mode (hot-reload)
-	uv run uvicorn main:app --host 0.0.0.0 --port 8001 --reload --log-level debug
+	uv run uvicorn main:app --host 0.0.0.0 --port 8002 --reload --log-level debug
 
 # ---------------------------------------------------------------------------
 # Docker

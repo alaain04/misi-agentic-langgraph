@@ -1,6 +1,6 @@
-import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from adapters.fetchers.npm_fetcher_adapter import NpmFetcherAdapter
 from domain.models.errors import PermanentFetchError, RateLimitError, TransientFetchError
