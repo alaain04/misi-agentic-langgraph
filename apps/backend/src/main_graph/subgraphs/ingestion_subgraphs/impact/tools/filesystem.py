@@ -15,18 +15,21 @@ _SOURCE_EXTENSIONS = (".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs")
 @tool
 def list_source_files(
     repo_path: str,
-    extensions: list[str] = list(_SOURCE_EXTENSIONS),
+    extensions: list[str] | None = None,
 ) -> str:
     """Recursively list all source files in repo_path, excluding node_modules.
 
-    Returns newline-separated absolute file paths.
+    Searches for .js, .ts, .jsx, .tsx, .mjs, .cjs files by default.
+    Pass repo_path as the absolute path to the project root.
+    Returns newline-separated absolute file paths, or '(no source files found)'.
     """
+    exts = tuple(extensions) if extensions is not None else _SOURCE_EXTENSIONS
     found: list[str] = []
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d != "node_modules"]
         for fname in files:
-            if any(fname.endswith(ext) for ext in extensions):
-                found.append(os.path.join(root, fname))
+            if any(fname.endswith(ext) for ext in exts):
+                found.append(os.path.abspath(os.path.join(root, fname)))
     return "\n".join(found) if found else "(no source files found)"
 
 
@@ -34,11 +37,13 @@ def list_source_files(
 def find_usages(dep_name: str, repo_path: str) -> str:
     """Find all import/require usages of dep_name in the project source files.
 
-    Returns JSON: [{file, line, statement}]
+    dep_name: exact npm package name (e.g. 'express', 'lodash', '@scope/pkg').
+    repo_path: absolute path to the project root.
+    Matches ES6 imports (from 'dep'), CommonJS require('dep'), dynamic import('dep'),
+    and subpath imports like require('lodash/map').
+    Excludes node_modules. Returns JSON: [{file, line, statement}]
     """
     escaped = re.escape(dep_name)
-    # Matches: from 'dep', from "dep", require('dep'), require("dep"),
-    # import('dep'), import("dep") — also subpath imports like 'dep/sub'
     pattern = re.compile(
         r"""(?:from\s+|require\s*\(\s*|import\s*\(\s*)['"]"""
         + escaped
@@ -51,14 +56,14 @@ def find_usages(dep_name: str, repo_path: str) -> str:
         for fname in files:
             if not any(fname.endswith(ext) for ext in _SOURCE_EXTENSIONS):
                 continue
-            fpath = os.path.join(root, fname)
+            fpath = os.path.abspath(os.path.join(root, fname))
             try:
-                text = Path(fpath).read_text(encoding="utf-8", errors="ignore")
+                with open(fpath, encoding="utf-8", errors="ignore") as fh:
+                    for i, line in enumerate(fh, 1):
+                        if pattern.search(line):
+                            usages.append({"file": fpath, "line": i, "statement": line.strip()})
             except OSError:
                 continue
-            for i, line in enumerate(text.splitlines(), 1):
-                if pattern.search(line):
-                    usages.append({"file": fpath, "line": i, "statement": line.strip()})
     return json.dumps(usages)
 
 

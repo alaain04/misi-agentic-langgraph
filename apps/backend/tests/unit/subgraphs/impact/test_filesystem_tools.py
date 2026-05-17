@@ -80,14 +80,14 @@ def test_find_usages_excludes_node_modules():
 
 def test_read_file_excerpt_returns_lines_around_target():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".ts", delete=False) as f:
-        f.write("\n".join(f"line{i}" for i in range(1, 21)))
+        f.write("\n".join(f"line_{i:02d}" for i in range(1, 21)))
         path = f.name
     try:
         result = read_file_excerpt.invoke({"path": path, "around_line": 10, "context": 2})
-        assert "line10" in result
-        assert "line8" in result
-        assert "line12" in result
-        assert "   1:" not in result  # Check that line 1 is not included
+        assert "line_10" in result
+        assert "line_08" in result
+        assert "line_12" in result
+        assert "line_01" not in result  # Check that line 1 is not included
     finally:
         os.unlink(path)
 
