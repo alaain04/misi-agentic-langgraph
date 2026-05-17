@@ -1,15 +1,19 @@
-# Backend Documentation Index
+# Backend
 
-Welcome to the backend! Use this index to navigate the main documentation and conventions for development.
+LangGraph-powered dependency analysis API. Accepts a GitHub repository URL and a user concern, runs a multi-step agentic pipeline with human-in-the-loop approval, and returns a structured risk report.
 
+## Quick Start
 
-## 📚 Index
+```bash
+make sync      # install dependencies (uv)
+make mongo     # start MongoDB
+make dev       # start the API server (hot-reload)
+```
 
-- [Component Architecture](docs/architecture.md#layer-responsibilities)
-- [Graph Pipeline](docs/graphs.md)
-- [Job Status Lifecycle](docs/architecture.md#job-status-lifecycle)
-- [Key Design Decisions](docs/architecture.md#key-design-decisions)
-- [Environment Variables](docs/architecture.md#environment-variables)
-- [Development Flow](docs/architecture.md#request-lifecycle)
+## Docs
+
+- [Architecture](docs/architecture.md) — request lifecycle, layers, job status, key design decisions
+- [Graph Pipeline](docs/graphs.md) — LangGraph main graph and discovery subgraph
+- [Development Setup](docs/development-setup.md) — prerequisites, environment variables
 - [Code Conventions](docs/code-conventions.md)
-
+- [API Reference](../../docs/api.md)
