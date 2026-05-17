@@ -11,25 +11,8 @@ from src.utils.llm import Model, get_llm
 
 _llm = get_llm(Model.GPT_5_4)
 
-
-def _get_project_name(sbom: dict[str, Any]) -> str:
-    return sbom.get("metadata", {}).get("component", {}).get("name", "unknown")
-
-
-def _get_project_version(sbom: dict[str, Any]) -> str:
-    return sbom.get("metadata", {}).get("component", {}).get("version", "")
-
-
-def _detect_package_manager(manifest_files: list[str]) -> str:
-    for f in manifest_files:
-        if "pnpm" in f:
-            return "pnpm"
-        if "yarn" in f:
-            return "yarn"
-        if "package-lock" in f:
-            return "npm"
-    return "npm"
-
+def _get_sbom_attribute(sbom: dict[str, Any], attribute: str) -> str:
+    return sbom.get("metadata", {}).get("component", {}).get(attribute, "unknown")
 
 def _extract_components(sbom: dict[str, Any], limit: int = 80) -> tuple[list[str], int]:
     """Return (component_strings, total_count) from SBOM components."""
@@ -99,12 +82,11 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
         }
 
     sbom: dict[str, Any] = state.get("sbom_cyclonedx", {})
-    manifest_files: list[str] = state.get("manifest_files", [])
     concern: str = state.get("concern", "")
 
-    pm = _detect_package_manager(manifest_files)
-    project_name = _get_project_name(sbom)
-    project_version = _get_project_version(sbom)
+    pm = state.get("detected_package_manager")
+    project_name = _get_sbom_attribute(sbom, "name")
+    project_version = _get_sbom_attribute(sbom, "version")
     components, total_count = _extract_components(sbom)
 
     metadata = ProjectMetadata(

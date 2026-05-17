@@ -1,8 +1,9 @@
 import asyncio
 import math
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.api.dependencies import get_job_repo
 from src.api.schemas import (
     AnalysisRequest,
     AnalysisStatusResponse,
@@ -11,39 +12,39 @@ from src.api.schemas import (
     JobsListResponse,
 )
 from src.api.service import build_graph_info
+from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.models.job import Job, JobMetadata, JobStatus
-from src.services.job_dao import JobDAO
 from src.services.job_runner import resume_analysis, run_analysis
 
 router = APIRouter()
 
 
 @router.post("/analyze", status_code=202)
-async def analyze(request: AnalysisRequest):
+async def analyze(
+    request: AnalysisRequest,
+    dao: JobRepositoryPort = Depends(get_job_repo),
+):
     job = Job(metadata=JobMetadata(repo_url=request.repo_url, concern=request.concern))
-
-    dao = JobDAO()
     await dao.create(job)
-
     asyncio.create_task(
         run_analysis(
             job_id=job.id,
             repo_url=job.metadata.repo_url,
             concern=job.metadata.concern,
+            dao=dao,
         )
     )
-
     return {"trace_id": job.id, "status": job.status}
 
 
 @router.get("/analyze/{trace_id}", response_model=AnalysisStatusResponse)
-async def get_analysis_status(trace_id: str):
-    dao = JobDAO()
+async def get_analysis_status(
+    trace_id: str,
+    dao: JobRepositoryPort = Depends(get_job_repo),
+):
     job = await dao.get(trace_id)
-
     if job is None:
         raise HTTPException(status_code=404, detail="trace_id not found")
-
     return AnalysisStatusResponse(
         trace_id=job.id,
         status=job.status,
@@ -56,8 +57,11 @@ async def get_analysis_status(trace_id: str):
 
 
 @router.post("/analyze/{trace_id}/chat", status_code=202)
-async def chat(trace_id: str, request: ChatRequest):
-    dao = JobDAO()
+async def chat(
+    trace_id: str,
+    request: ChatRequest,
+    dao: JobRepositoryPort = Depends(get_job_repo),
+):
     job = await dao.get(trace_id)
     if job is None:
         raise HTTPException(status_code=404, detail="trace_id not found")
@@ -66,7 +70,9 @@ async def chat(trace_id: str, request: ChatRequest):
             status_code=409,
             detail=f"Job is not awaiting user input (status: {job.status})",
         )
-    asyncio.create_task(resume_analysis(job_id=trace_id, user_message=request.message))
+    asyncio.create_task(
+        resume_analysis(job_id=trace_id, user_message=request.message, dao=dao)
+    )
     return {"trace_id": trace_id, "status": JobStatus.running}
 
 
@@ -76,8 +82,8 @@ async def list_jobs(
     limit: int = Query(10, ge=1, le=100),
     status: JobStatus | None = Query(None),
     trace_id: str | None = Query(None),
+    dao: JobRepositoryPort = Depends(get_job_repo),
 ):
-    dao = JobDAO()
     jobs, total = await dao.list(page, limit, status=status, trace_id=trace_id)
     pages = math.ceil(total / limit) if total > 0 else 1
     items = [

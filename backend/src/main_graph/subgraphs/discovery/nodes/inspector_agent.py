@@ -1,42 +1,19 @@
 """Node: inspector_agent — ReAct agent that reads Node.js manifests."""
 
 import logging
-import os
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.tools import tool
+
 from pydantic import BaseModel
 
+from src.main_graph.subgraphs.discovery.tools.filesystem import list_dir, read_file
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_5_4_MINI)
-
-
-@tool
-def list_dir(path: str) -> str:
-    """List files and directories at the given absolute path."""
-    try:
-        return "\n".join(os.listdir(path))
-    except FileNotFoundError:
-        return f"Directory not found: {path}"
-    except Exception as exc:
-        return f"Error listing directory: {exc}"
-
-
-@tool
-def read_file(path: str) -> str:
-    """Read the contents of a file at the given absolute path."""
-    try:
-        with open(path) as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"File not found: {path}"
-    except Exception as exc:
-        return f"Error reading file: {exc}"
 
 
 class InspectorResult(BaseModel):
@@ -48,23 +25,21 @@ class InspectorResult(BaseModel):
 
 
 _SYSTEM_TEMPLATE = """\
-You are inspecting a cloned Node.js repository at {repo_path}.
+You are analyzing a Node.js repository at {repo_path}, using the available inspection tools.
 
-Steps:
-1. Call list_dir("{repo_path}") to see root contents.
-2. Call read_file("{repo_path}/package.json") to read the manifest.
-3. Determine the package manager by lock file presence:
-   pnpm-lock.yaml → pnpm, yarn.lock → yarn, package-lock.json → npm; default npm.
-4. Set lock_file_missing=true if none of those three files exist in the root.
-5. Read engines.node from package.json to pick the Docker image
-   (e.g. "22" → "node:22-alpine"); default "node:lts-alpine".
-6. Set install_command to the appropriate command
-   (npm install / yarn install / pnpm install).
-7. Return structured output.
+Infer:
+detected_package_manager, lock_file_missing, manifest_files, docker_image, install_command
 
-If package.json is missing, return:
-  detected_package_manager="npm", lock_file_missing=true, manifest_files=[],
-  docker_image="node:lts-alpine", install_command="npm install".
+Rules:
+- Detect package manager from lock files:
+    pnpm-lock.yaml → pnpm; yarn.lock → yarn; package-lock.json → npm; default: npm
+- lock_file_missing=true if no known lock file exists.
+- Use package.json.engines.node to select Docker image:
+example: "22" → "node:22-alpine"; fallback: "node:lts-alpine"
+Install commands:
+npm → npm install; yarn → yarn install; pnpm → pnpm install
+
+If package.json is missing or unreadable, return default
 """
 
 

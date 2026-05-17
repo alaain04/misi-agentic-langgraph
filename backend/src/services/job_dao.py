@@ -2,12 +2,13 @@ import logging
 from datetime import UTC, datetime
 
 from src.db.connection import get_db
+from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.models.job import Job, JobStatus
 
 logger = logging.getLogger(__name__)
 
 
-class JobDAO:
+class JobDAO(JobRepositoryPort):
     def __init__(self):
         self._col = get_db()["jobs"]
 

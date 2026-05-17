@@ -7,16 +7,18 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
+from src.services.dependencies import get_job_repo
+from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph.nodes.planner import _PIPELINE_SUBGRAPHS, run_planner
 from src.main_graph.state import MainState
 from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DESCRIPTIONS
-from src.services.job_dao import JobDAO
 from src.services.vector_store import get_or_create_store
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
+_dao: JobRepositoryPort = get_job_repo()
 
 # Build a name → description lookup from all known subgraphs.
 _SUBGRAPH_DESC: dict[str, str] = {}
@@ -92,8 +94,7 @@ async def orchestrator(state: MainState) -> dict | Command:
 
         # Push partial proposal now so PlanPage can read it during awaiting_approval
         proposal_created_at = datetime.now(UTC).isoformat()
-        dao = JobDAO()
-        await dao.push_proposal(
+        await _dao.push_proposal(
             job_id,
             {
                 "created_at": proposal_created_at,
@@ -127,7 +128,7 @@ async def orchestrator(state: MainState) -> dict | Command:
         logger.info("orchestrator: job=%s intent=%r plan=%s", job_id, intent, plan)
 
         # Complete the proposal with the user's response and classified intent
-        await dao.update_proposal(
+        await _dao.update_proposal(
             job_id,
             created_at=proposal_created_at,
             user_response=user_input,

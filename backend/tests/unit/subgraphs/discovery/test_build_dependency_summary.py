@@ -32,6 +32,7 @@ async def test_extracts_project_metadata_from_cyclonedx():
     state = {
         "sbom_cyclonedx": _SAMPLE_SBOM,
         "manifest_files": ["package.json", "pnpm-lock.yaml"],
+        "detected_package_manager": "pnpm",
         "concern": "security",
         "repo_url": "https://github.com/test/repo",
     }
