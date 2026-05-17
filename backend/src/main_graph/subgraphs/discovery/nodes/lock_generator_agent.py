@@ -6,8 +6,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
-from backend.src.main_graph.subgraphs.discovery.tools.filesystem import read_file ,write_file
-from backend.src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
+from src.main_graph.subgraphs.discovery.tools.filesystem import read_file, write_file
+from src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
 
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
 from src.utils.llm import Model, get_llm

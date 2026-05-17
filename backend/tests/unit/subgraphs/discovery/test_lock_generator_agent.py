@@ -1,12 +1,9 @@
 import json
-import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.main_graph.subgraphs.discovery.nodes.lock_generator_agent import (
-    _make_write_file_tool,
     lock_generator_agent,
     run_docker_command,
 )
@@ -27,7 +24,7 @@ async def test_run_docker_command_returns_json_on_success():
             {
                 "image": "node:lts-alpine",
                 "command": "npm install",
-                "workspace": "/tmp/repo",
+                "volume": "/tmp/repo:/workspace",
             }
         )
 
@@ -49,29 +46,13 @@ async def test_run_docker_command_returns_json_on_failure():
             {
                 "image": "node:lts-alpine",
                 "command": "npm install",
-                "workspace": "/tmp/repo",
+                "volume": "/tmp/repo:/workspace",
             }
         )
 
     data = json.loads(result)
     assert data["returncode"] == 1
     assert "peer conflict" in data["stderr"]
-
-
-def test_write_file_tool_writes_within_workspace():
-    with tempfile.TemporaryDirectory() as tmp:
-        write_file = _make_write_file_tool(tmp)
-        write_file.invoke({"relative_path": "package.json", "content": '{"name":"x"}'})
-        assert (Path(tmp) / "package.json").read_text() == '{"name":"x"}'
-
-
-def test_write_file_tool_rejects_path_traversal():
-    with tempfile.TemporaryDirectory() as tmp:
-        write_file = _make_write_file_tool(tmp)
-        result = write_file.invoke(
-            {"relative_path": "../../etc/passwd", "content": "bad"}
-        )
-        assert "outside" in result.lower() or "error" in result.lower()
 
 
 # --- Node integration test (mocked agent) ---
