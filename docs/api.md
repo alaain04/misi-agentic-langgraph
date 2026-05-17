@@ -12,19 +12,15 @@ Submit a dependency analysis job. Returns immediately with a `trace_id` to poll 
 
 ```json
 {
-  "package_json": "<contents of package.json as a string>",
-  "lock_file": "<contents of the lock file as a string>",
-  "lock_file_name": "package-lock.json" | "yarn.lock" | "pnpm-lock.yaml",
-  "concern": "<natural language description of the risk concern>"
+  "repo_url": "https://github.com/owner/repo",
+  "concern": "Are there vulnerable dependencies in this project?"
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `package_json` | `string` | yes | Raw contents of `package.json` |
-| `lock_file` | `string` | yes | Raw contents of the lock file |
-| `lock_file_name` | `"package-lock.json" \| "yarn.lock" \| "pnpm-lock.yaml"` | yes | Lock file type |
-| `concern` | `string` | yes | What risk to analyse (e.g. "security vulnerabilities") |
+| `repo_url` | `string` | yes | GitHub repository URL to analyse |
+| `concern` | `string` | yes | What risk to analyse (natural language) |
 
 **Response — 202 Accepted**
 
@@ -39,7 +35,7 @@ Submit a dependency analysis job. Returns immediately with a `trace_id` to poll 
 
 ## GET /analyze/{trace_id}
 
-Poll the status of a previously submitted job. When the job is done, `result` is included. When the job has finished (done or failed), `completed_at` is included.
+Poll the status of a previously submitted job.
 
 **Path parameters**
 
@@ -52,17 +48,29 @@ Poll the status of a previously submitted job. When the job is done, `result` is
 ```json
 {
   "trace_id": "682a1f3c4e5d6a7b8c9d0e1f",
-  "status": "pending" | "running" | "awaiting_approval" | "done" | "failed",
-  "completed_at": "2026-04-25T12:00:00Z" | null,
-  "result": { ... } | null,
+  "status": "running",
+  "metadata": {
+    "repo_url": "https://github.com/owner/repo",
+    "concern": "Are there vulnerable dependencies?"
+  },
+  "completed_at": null,
+  "results": null,
   "artifacts": [
     {
       "node": "discovery",
-      "status": "running" | "done" | "failed",
+      "status": "done",
       "started_at": "2026-04-25T12:00:01Z",
-      "completed_at": "2026-04-25T12:00:03Z" | null
+      "completed_at": "2026-04-25T12:00:03Z"
     }
-  ]
+  ],
+  "graph": {
+    "nodes": [
+      { "id": "discovery", "type": "backbone", "order": 0 }
+    ],
+    "edges": [
+      { "source": "discovery", "target": "orchestrator" }
+    ]
+  }
 }
 ```
 
@@ -70,32 +78,40 @@ Poll the status of a previously submitted job. When the job is done, `result` is
 |---|---|---|
 | `trace_id` | `string` | Job identifier |
 | `status` | `JobStatus` | Current job status |
-| `completed_at` | `string (ISO 8601) \| null` | Timestamp of completion; present when status is `done` or `failed` |
-| `result` | `object \| null` | Analysis result; present only when status is `done` |
-| `artifacts` | `Artifact[]` | Per-node execution status entries; empty until the job starts running |
+| `metadata` | `object` | Original request fields (`repo_url`, `concern`) |
+| `completed_at` | `string (ISO 8601) \| null` | Timestamp of completion; present when `done` or `failed` |
+| `results` | `object \| null` | Analysis result; present only when `done` |
+| `artifacts` | `Artifact[]` | Per-node execution entries; empty until the job starts |
+| `graph` | `GraphInfo` | Node/edge structure for rendering the execution DAG |
 
 **Artifact fields**
 
 | Field | Type | Description |
 |---|---|---|
-| `node` | `string` | Graph node or subgraph name (e.g. `"discovery"`, `"registry"`) |
-| `status` | `"running" \| "done" \| "failed"` | Current execution status of this node |
-| `started_at` | `string (ISO 8601)` | When the node started executing |
-| `completed_at` | `string (ISO 8601) \| null` | When the node finished; null while still running |
+| `node` | `string` | Graph node name (e.g. `"discovery"`, `"orchestrator"`) |
+| `status` | `"running" \| "done" \| "failed"` | Current execution status |
+| `started_at` | `string (ISO 8601)` | When the node started |
+| `completed_at` | `string (ISO 8601) \| null` | When the node finished; null while running |
+
+**GraphNodeInfo fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Node identifier |
+| `type` | `"terminal" \| "backbone" \| "subgraph"` | Node role in the pipeline |
+| `order` | `number` | Execution order index |
 
 **Response — 404 Not Found**
 
 ```json
-{
-  "detail": "trace_id not found"
-}
+{ "detail": "trace_id not found" }
 ```
 
 ---
 
-## POST /analyze/{trace_id}/approve
+## POST /analyze/{trace_id}/chat
 
-Submit a plan approval decision for a job that is `awaiting_approval`. Resumes the paused LangGraph execution in the background.
+Send a message to a job that is in `awaiting_approval` status. Resumes the paused LangGraph execution in the background.
 
 **Path parameters**
 
@@ -107,17 +123,13 @@ Submit a plan approval decision for a job that is `awaiting_approval`. Resumes t
 
 ```json
 {
-  "action": "approve" | "modify" | "cancel" | "refine",
-  "plan": ["registry", "risk_score", "recommendation"],
-  "feedback": "Please also include the repo subgraph."
+  "message": "Yes, proceed with the full analysis."
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `action` | `"approve" \| "modify" \| "cancel" \| "refine"` | yes | What to do with the generated plan |
-| `plan` | `string[]` | no | Replacement subgraph list; required when `action` is `"modify"`, ignored otherwise |
-| `feedback` | `string` | no | Natural language feedback used to refine the plan via LLM; required when `action` is `"refine"`, ignored otherwise. The job remains in `awaiting_approval` after a `refine` action. |
+| `message` | `string` | yes | Natural language response to the orchestrator's plan proposal |
 
 **Response — 202 Accepted**
 
@@ -139,21 +151,23 @@ Submit a plan approval decision for a job that is `awaiting_approval`. Resumes t
 Returned when the job is not currently in `awaiting_approval` status.
 
 ```json
-{ "detail": "Job is not awaiting approval (status: done)" }
+{ "detail": "Job is not awaiting user input (status: done)" }
 ```
 
 ---
 
 ## GET /jobs
 
-List all analysis jobs with pagination, sorted by creation time descending.
+List all analysis jobs with pagination and optional filters, sorted by creation time descending.
 
 **Query parameters**
 
-| Param | Type | Default | Constraints | Description |
-|---|---|---|---|---|
-| `page` | `integer` | `1` | `>= 1` | Page number |
-| `limit` | `integer` | `20` | `1–100` | Items per page |
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `page` | `integer` | `1` | Page number (≥ 1) |
+| `limit` | `integer` | `10` | Items per page (1–100) |
+| `status` | `JobStatus` | — | Filter by status |
+| `trace_id` | `string` | — | Filter by exact trace_id |
 
 **Response — 200 OK**
 
@@ -163,24 +177,17 @@ List all analysis jobs with pagination, sorted by creation time descending.
     {
       "trace_id": "682a1f3c4e5d6a7b8c9d0e1f",
       "status": "done",
+      "concern": "Are there vulnerable dependencies?",
       "created_at": "2026-04-25T11:00:00Z",
       "completed_at": "2026-04-25T11:00:10Z"
     }
   ],
   "total": 42,
   "page": 1,
-  "limit": 20,
-  "pages": 3
+  "limit": 10,
+  "pages": 5
 }
 ```
-
-| Field | Type | Description |
-|---|---|---|
-| `items` | `JobListItem[]` | Page of jobs |
-| `total` | `integer` | Total number of jobs in the collection |
-| `page` | `integer` | Current page |
-| `limit` | `integer` | Items per page requested |
-| `pages` | `integer` | Total number of pages |
 
 **JobListItem fields**
 
@@ -188,6 +195,7 @@ List all analysis jobs with pagination, sorted by creation time descending.
 |---|---|---|
 | `trace_id` | `string` | Job identifier |
 | `status` | `JobStatus` | Current job status |
+| `concern` | `string` | The original user concern |
 | `created_at` | `string (ISO 8601)` | When the job was created |
 | `completed_at` | `string (ISO 8601) \| null` | When the job finished; null if still running |
 
@@ -206,7 +214,7 @@ pending → running → awaiting_approval → running → done
 |---|---|
 | `pending` | Job created, not yet started |
 | `running` | LangGraph pipeline is executing |
-| `awaiting_approval` | Planner has produced a plan; waiting for human approval via `POST /analyze/{trace_id}/approve` |
+| `awaiting_approval` | Orchestrator has proposed a plan; waiting for user response via `POST /analyze/{trace_id}/chat` |
 | `done` | Analysis completed successfully |
 | `failed` | Pipeline encountered an unrecoverable error |
 
@@ -215,14 +223,10 @@ pending → running → awaiting_approval → running → done
 ## TypeScript types
 
 ```ts
-type LockFileName = "package-lock.json" | "yarn.lock" | "pnpm-lock.yaml";
-
 type JobStatus = "pending" | "running" | "awaiting_approval" | "done" | "failed";
 
 interface AnalyzeRequest {
-  package_json: string;
-  lock_file: string;
-  lock_file_name: LockFileName;
+  repo_url: string;
   concern: string;
 }
 
@@ -238,17 +242,50 @@ interface Artifact {
   completed_at: string | null;
 }
 
+interface GraphNodeInfo {
+  id: string;
+  type: "terminal" | "backbone" | "subgraph";
+  order: number;
+}
+
+interface GraphEdgeInfo {
+  source: string;
+  target: string;
+}
+
+interface GraphInfo {
+  nodes: GraphNodeInfo[];
+  edges: GraphEdgeInfo[];
+}
+
+interface JobMetadata {
+  repo_url: string;
+  concern: string;
+}
+
 interface StatusResponse {
   trace_id: string;
   status: JobStatus;
+  metadata: JobMetadata;
   completed_at: string | null;
-  result: Record<string, unknown> | null;
+  results: Record<string, unknown> | null;
   artifacts: Artifact[];
+  graph: GraphInfo;
+}
+
+interface ChatRequest {
+  message: string;
+}
+
+interface ChatResponse {
+  trace_id: string;
+  status: "running";
 }
 
 interface JobListItem {
   trace_id: string;
   status: JobStatus;
+  concern: string;
   created_at: string;
   completed_at: string | null;
 }
@@ -259,17 +296,6 @@ interface JobsListResponse {
   page: number;
   limit: number;
   pages: number;
-}
-
-interface PlanApprovalRequest {
-  action: "approve" | "modify" | "cancel" | "refine";
-  plan?: string[];
-  feedback?: string;
-}
-
-interface PlanApprovalResponse {
-  trace_id: string;
-  status: "running";
 }
 
 interface ErrorResponse {
