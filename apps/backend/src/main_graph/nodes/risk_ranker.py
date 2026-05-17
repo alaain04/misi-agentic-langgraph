@@ -147,7 +147,6 @@ async def risk_ranker(state: MainState) -> dict:
         )
     except Exception:
         _log.exception("risk_ranker: agent failed")
-        _rankings.clear()
 
     ranked_deps = {r["dep_name"] for r in _rankings}
     for dep in dep_scope:

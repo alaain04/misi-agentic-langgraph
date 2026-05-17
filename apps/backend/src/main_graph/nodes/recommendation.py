@@ -26,15 +26,13 @@ _SYSTEM_PROMPT = """\
 You are a dependency recommendation agent. For each high-risk dependency, \
 find 1–3 actively maintained alternatives and explain the migration trade-off.
 
-Deps to analyze: {high_risk_deps}
-
 Steps for each dep:
 1. Call get_risk_score to understand the risk profile.
 2. Call get_impact_data to understand current usage and blast radius.
 3. Call search_npm to find alternatives in the same problem space.
 4. For each candidate, call get_npm_metadata and optionally get_github_summary.
 5. Call compare_packages to get a side-by-side view.
-6. Select the top 1–3 alternatives based on maintenance health, downloads, \
+6. Select the top 1–3 alternatives based on maintenance health, weekly_downloads, \
    license compatibility, and API similarity.
 7. Call save_recommendation for this dep with a risk_summary, the selected \
    alternatives, and migration_notes.
@@ -144,9 +142,7 @@ async def recommendation(state: MainState) -> dict:
         await agent.ainvoke(
             {
                 "messages": [
-                    SystemMessage(
-                        content=_SYSTEM_PROMPT.format(high_risk_deps=high_risk_deps)
-                    ),
+                    SystemMessage(content=_SYSTEM_PROMPT),
                     HumanMessage(
                         content=f"Find alternatives for: {high_risk_deps}"
                     ),
@@ -156,7 +152,6 @@ async def recommendation(state: MainState) -> dict:
         )
     except Exception:
         _log.exception("recommendation: agent failed")
-        _recs.clear()
 
     # Fill stubs for any high-risk dep the agent didn't process
     processed_deps = {r["dep_name"] for r in _recs}

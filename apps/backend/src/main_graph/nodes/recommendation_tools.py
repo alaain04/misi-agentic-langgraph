@@ -54,6 +54,7 @@ async def _get_npm_metadata(package_name: str) -> dict:
         except Exception:
             pass
 
+        _repo = data.get("repository")
         return {
             "name": data.get("name", ""),
             "description": data.get("description", ""),
@@ -61,7 +62,7 @@ async def _get_npm_metadata(package_name: str) -> dict:
             "license": data.get("license"),
             "deprecated": data.get("deprecated"),
             "homepage": data.get("homepage"),
-            "repository": data.get("repository", {}).get("url"),
+            "repository": _repo.get("url") if isinstance(_repo, dict) else _repo,
             "maintainers": [m.get("name") for m in data.get("maintainers", [])],
             "weekly_downloads": weekly_downloads,
         }

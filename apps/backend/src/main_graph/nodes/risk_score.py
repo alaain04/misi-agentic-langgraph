@@ -89,6 +89,18 @@ async def risk_score(state: MainState) -> dict:
         return json.dumps({"records": records})
 
     @tool
+    async def get_license_compliance(dep_name: str) -> str:
+        """Return license compliance data for dep_name from Stage 1 analysis."""
+        result_id = _find_result_id("license_compliance")
+        if not result_id:
+            return json.dumps({})
+        doc = await SUBGRAPH_DAOS["license_compliance"].get(result_id)
+        if not doc:
+            return json.dumps({})
+        records = [r for r in doc.get("records", []) if r.get("name") == dep_name]
+        return json.dumps({"records": records})
+
+    @tool
     async def get_registry_data(dep_name: str) -> str:
         """Return npm registry health data for dep_name from Stage 1 analysis."""
         result_id = _find_result_id("registry", dep_name)
@@ -150,6 +162,7 @@ async def risk_score(state: MainState) -> dict:
         list_deps_to_score,
         get_preliminary_ranking,
         get_vulnerabilities,
+        get_license_compliance,
         get_registry_data,
         get_repo_data,
         get_runtime_data,
@@ -172,7 +185,6 @@ async def risk_score(state: MainState) -> dict:
         )
     except Exception:
         _log.exception("risk_score: agent failed")
-        _scores.clear()
 
     # Fill stubs for any dep the agent didn't score
     scored_deps = {s["dep_name"] for s in _scores}
