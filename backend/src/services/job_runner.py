@@ -5,6 +5,7 @@ import shutil
 
 from langgraph.types import Command
 
+from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph import main_graph
 from src.main_graph.constants import (
     CROSS_ANALYZER,
@@ -12,7 +13,6 @@ from src.main_graph.constants import (
     REPORT_REVIEWER,
 )
 from src.models.job import JobStatus
-from src.services.job_dao import JobDAO
 from src.services.vector_store import delete_store
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,8 @@ _DISCOVERY_OUTPUT_KEYS = {
 }
 
 
-async def _finalize(dao: JobDAO, job_id: str, result: dict) -> None:
+async def _finalize(dao: JobRepositoryPort, job_id: str, result: dict) -> None:
     delete_store(job_id)
-    # Safety-net: delete cloned repo if trivy_scan didn't clean it up
     if repo_path := result.get("repo_path"):
         shutil.rmtree(repo_path, ignore_errors=True)
     if result.get("cancelled"):
@@ -60,7 +59,12 @@ async def _finalize(dao: JobDAO, job_id: str, result: dict) -> None:
 
 
 async def _stream_graph(
-    graph, input_data, config, dao: JobDAO, job_id: str, on_orchestrator_complete=None
+    graph,
+    input_data,
+    config,
+    dao: JobRepositoryPort,
+    job_id: str,
+    on_orchestrator_complete=None,
 ) -> dict | None:
     """Stream graph execution, tracking backbone node artifacts.
 
@@ -118,8 +122,8 @@ async def run_analysis(
     job_id: str,
     repo_url: str,
     concern: str,
+    dao: JobRepositoryPort,
 ) -> None:
-    dao = JobDAO()
     await dao.update_status(job_id, JobStatus.running)
     await dao.start_artifact(job_id, "discovery")
 
@@ -153,9 +157,12 @@ async def run_analysis(
         await dao.mark_failed(job_id)
 
 
-async def resume_analysis(job_id: str, user_message: str) -> None:
+async def resume_analysis(
+    job_id: str,
+    user_message: str,
+    dao: JobRepositoryPort,
+) -> None:
     """Resume the orchestrator with a plain-text user message."""
-    dao = JobDAO()
     await dao.update_status(job_id, JobStatus.processing)
 
     config = {"configurable": {"thread_id": job_id}}
@@ -174,7 +181,6 @@ async def resume_analysis(job_id: str, user_message: str) -> None:
         )
 
         if interrupt_payload is not None:
-            # Orchestrator looped and interrupted again (user requested changes)
             await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
 
