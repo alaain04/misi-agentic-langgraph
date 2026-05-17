@@ -1,5 +1,5 @@
+from src.main_graph.subgraphs.ingestion_subgraphs import license_compliance
 from src.main_graph.subgraphs.ingestion_subgraphs import (
-    license_compliance,
     vulnerabilities,
 )
 from src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.dao import (

@@ -12,6 +12,7 @@ from src.main_graph.constants import (
     REPORT_REVIEWER,
     STAGE_ADVANCE,
 )
+from src.main_graph.nodes import stage_router
 from src.main_graph.state import MainState
 from src.main_graph.subgraphs import (
     cross_analyzer_subgraph,
@@ -24,7 +25,6 @@ from .nodes import (
     execution_planner,
     orchestrator,
     stage_advance,
-    stage_router,
     task_dispatcher,
 )
 
