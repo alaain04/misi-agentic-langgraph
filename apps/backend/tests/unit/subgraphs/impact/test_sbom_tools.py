@@ -1,4 +1,7 @@
+import pytest
+
 from src.main_graph.subgraphs.ingestion_subgraphs.impact.tools.sbom_tools import (
+    _pkg_name,
     compute_blast_radius,
     compute_direct_dependents,
 )
@@ -50,7 +53,7 @@ def test_compute_blast_radius_single_level():
     result = compute_blast_radius("body-parser", _SBOM)
     assert result["direct_dependents"] == 1  # express
     assert result["transitive_dependents"] == 2  # express + myapp
-    assert result["max_depth"] >= 1
+    assert result["max_depth"] == 2  # body-parser → express (depth 1) → myapp (depth 2)
 
 
 def test_compute_blast_radius_leaf_dep():
@@ -69,3 +72,17 @@ def test_compute_blast_radius_not_found():
 def test_compute_blast_radius_empty_sbom():
     result = compute_blast_radius("express", {})
     assert result["direct_dependents"] == 0
+
+
+@pytest.mark.parametrize(
+    "ref,expected",
+    [
+        ("express@4.18.2", "express"),
+        ("@types/react@18.0.0", "@types/react"),
+        ("pkg:npm/express@4.18.2", "express"),
+        ("pkg:npm/@scope/pkg@1.0.0", "@scope/pkg"),
+        ("express", "express"),
+    ],
+)
+def test_pkg_name_extracts_name(ref, expected):
+    assert _pkg_name(ref) == expected

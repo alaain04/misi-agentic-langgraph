@@ -40,7 +40,10 @@ def compute_direct_dependents(dep_name: str, sbom: dict) -> list[str]:
 def compute_blast_radius(dep_name: str, sbom: dict) -> dict:
     """BFS through the reverse dependency tree.
 
-    Returns {direct_dependents, transitive_dependents, max_depth}.
+    Returns:
+        direct_dependents: count of packages that directly depend on dep_name
+        transitive_dependents: total count of all affected packages (direct + indirect)
+        max_depth: depth of the reverse-dependency tree (1 = only direct dependents)
     """
     # Build reverse map: name -> set of names that depend on it
     reverse: dict[str, set[str]] = {}
