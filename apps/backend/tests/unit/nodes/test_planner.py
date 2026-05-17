@@ -22,21 +22,36 @@ def _make_state(
 
 
 @pytest.mark.asyncio
-async def test_planner_uses_sbom_components():
+async def test_planner_returns_plan_object():
     components = [{"name": "requests"}, {"name": "flask"}]
     state = _make_state(components)
+
+    mock_response = MagicMock()
+    mock_response.content = json.dumps(
+        {"subgraphs": ["vulnerabilities", "registry"], "dep_filter": None}
+    )
+
+    with patch("src.main_graph.nodes.planner._llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        plan = await run_planner(state)
+
+    assert plan["subgraphs"] == ["vulnerabilities", "registry"]
+    assert plan["dep_filter"] is None
+
+
+@pytest.mark.asyncio
+async def test_planner_accepts_legacy_list_response():
+    """LLM returning a plain list is accepted and wrapped in Plan."""
+    state = _make_state([{"name": "lodash"}])
 
     mock_response = MagicMock()
     mock_response.content = json.dumps(["vulnerabilities"])
 
     with patch("src.main_graph.nodes.planner._llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        await run_planner(state)
+        plan = await run_planner(state)
 
-    call_args = mock_llm.ainvoke.call_args[0][0]
-    user_msg = next(m["content"] for m in call_args if m["role"] == "user")
-    assert "requests" in user_msg
-    assert "flask" in user_msg
+    assert plan["subgraphs"] == ["vulnerabilities"]
 
 
 @pytest.mark.asyncio
@@ -54,16 +69,16 @@ async def test_planner_falls_back_on_bad_json():
 
 
 @pytest.mark.asyncio
-async def test_planner_passes_extra_instructions():
+async def test_planner_includes_dep_filter():
     state = _make_state([{"name": "axios"}])
 
     mock_response = MagicMock()
-    mock_response.content = json.dumps(["vulnerabilities"])
+    mock_response.content = json.dumps(
+        {"subgraphs": ["registry", "repo"], "dep_filter": ["axios"]}
+    )
 
     with patch("src.main_graph.nodes.planner._llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        await run_planner(state, extra_instructions="focus on licenses")
+        plan = await run_planner(state, extra_instructions="only check axios")
 
-    call_args = mock_llm.ainvoke.call_args[0][0]
-    user_msg = next(m["content"] for m in call_args if m["role"] == "user")
-    assert "focus on licenses" in user_msg
+    assert plan["dep_filter"] == ["axios"]

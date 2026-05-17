@@ -8,6 +8,7 @@ from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
 from src.main_graph.nodes.planner import _PIPELINE_SUBGRAPHS, run_planner
+from src.main_graph.plan import Plan
 from src.main_graph.state import MainState
 from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DESCRIPTIONS
 from src.services.dependencies import get_job_repo
@@ -39,21 +40,26 @@ Return ONLY one word: approve, change, or cancel.
 """
 
 
-def _present_plan(plan: list[str]) -> str:
-    """Build a deterministic presentation of the plan from known descriptions."""
+def _present_plan(plan: Plan) -> str:
+    """Build a deterministic presentation of the plan."""
+    subgraphs = plan.get("subgraphs", []) if isinstance(plan, dict) else list(plan)
+    dep_filter = plan.get("dep_filter") if isinstance(plan, dict) else None
     lines = ["**Proposed Analysis Plan:**\n"]
-    for i, name in enumerate(plan, 1):
+    for i, name in enumerate(subgraphs, 1):
         desc = _SUBGRAPH_DESC.get(name, name)
         lines.append(f"{i}. **{name}**: {desc}")
+    if dep_filter:
+        lines.append(f"\n**Scope:** {', '.join(dep_filter)}")
     lines.append(
         "\nWould you like to proceed with this plan, request changes, or cancel?"
     )
     return "\n".join(lines)
 
 
-async def _classify_intent(plan: list[str], user_input: str) -> str:
+async def _classify_intent(plan: Plan, user_input: str) -> str:
     """Classify user message as 'approve', 'change', or 'cancel'."""
-    plan_str = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan))
+    subgraphs = plan.get("subgraphs", []) if isinstance(plan, dict) else list(plan)
+    plan_str = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(subgraphs))
     response = await _llm.ainvoke(
         [
             {"role": "system", "content": _INTENT_SYSTEM_PROMPT},
