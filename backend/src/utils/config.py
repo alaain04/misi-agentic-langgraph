@@ -26,12 +26,8 @@ class Settings(BaseSettings):
     # Analysis parameters
     lookback_days: int = 90
     reviewer_batch_size: int = 20
-    registry_cache_max_age_days: int = 7
     repo_cache_max_age_days: int = 1
     runtime_cache_max_age_days: int = 30
-
-    # npm ingestor worker
-    npm_worker_url: str = "http://localhost:8001"
 
 
 settings = Settings()

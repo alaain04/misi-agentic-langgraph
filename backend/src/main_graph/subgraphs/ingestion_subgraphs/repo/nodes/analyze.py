@@ -3,9 +3,6 @@
 Fetches GitHub data (commits, issues, releases, vulnerabilities) for the primary
 package's repository, curates each entity type with a dual-phase approach
 (deterministic pre-pass + LLM), then persists the result.
-
-Repository coordinates are read from upstream_results["registry"] which the
-registry subgraph populates with repository_owner / repository_name / repository_url.
 """
 
 from __future__ import annotations

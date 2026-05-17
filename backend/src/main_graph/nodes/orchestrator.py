@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
-from src.api.dependencies import get_job_repo
+from src.services.dependencies import get_job_repo
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph.nodes.planner import _PIPELINE_SUBGRAPHS, run_planner
 from src.main_graph.state import MainState
