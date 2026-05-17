@@ -10,3 +10,4 @@ class AnalysisState(TypedDict):
     concern: str
     upstream_results: NotRequired[dict[str, Any]]
     repo_path: NotRequired[str]
+    dependency_name: NotRequired[str]
