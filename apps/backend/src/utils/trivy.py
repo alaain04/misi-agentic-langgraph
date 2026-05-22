@@ -1,51 +1,32 @@
-"""Shared Trivy Docker runner."""
+"""Shared Trivy runner via ContainerRunPort."""
 
-import asyncio
-import json
 import logging
+
+from src.domain.ports.container_run_port import ContainerRunPort
 
 logger = logging.getLogger(__name__)
 
 _TRIVY_IMAGE = "aquasec/trivy:latest"
-_TRIVY_TIMEOUT = 300
+_TRIVY_VOLUME_TEMPLATE = "{repo_path}:/repo"
 
 
-async def run_trivy(repo_path: str, *trivy_args: str) -> tuple[dict, str]:
-    """Run a Trivy Docker command and return (parsed_json, raw_stderr)."""
-    cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{repo_path}:/repo",
-        _TRIVY_IMAGE,
-        "fs",
-        "--quiet",
-        *trivy_args,
-        "/repo",
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+async def run_trivy(
+    container: ContainerRunPort, repo_path: str, *trivy_args: str
+) -> tuple[dict, str]:
+    """Run a Trivy scan via ContainerRunPort. Returns (parsed_json, stderr)."""
+    import json
+
+    volume = _TRIVY_VOLUME_TEMPLATE.format(repo_path=repo_path)
+    command = "fs --quiet " + " ".join(trivy_args) + " /repo"
+    returncode, stdout, stderr = await container.run(
+        _TRIVY_IMAGE, command, volume
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_TRIVY_TIMEOUT
-        )
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise RuntimeError(f"Trivy timed out after {_TRIVY_TIMEOUT}s")
 
-    stderr_str = stderr.decode(errors="replace")
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"Trivy exited {proc.returncode}: {stderr_str.strip()[:500]}"
-        )
+    if returncode != 0:
+        raise RuntimeError(f"Trivy exited {returncode}: {stderr.strip()[:500]}")
 
-    raw = stdout.decode(errors="replace").strip()
+    raw = stdout.strip()
     if not raw:
-        return {}, stderr_str
+        return {}, stderr
 
-    return json.loads(raw), stderr_str
+    return json.loads(raw), stderr

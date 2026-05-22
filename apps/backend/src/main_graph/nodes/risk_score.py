@@ -7,10 +7,11 @@ import logging
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
+from src.main_graph.config import get_services
 from src.main_graph.state import MainState
-from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DAOS
 from src.utils.llm import Model, get_llm
 
 _log = logging.getLogger(__name__)
@@ -43,7 +44,8 @@ save_risk_score parameters:
 """
 
 
-async def risk_score(state: MainState) -> dict:
+async def risk_score(state: MainState, config: RunnableConfig) -> dict:
+    ingestion_daos = get_services(config)["ingestion_daos"]
     plan_obj = state.get("plan") or {}
     dep_filter: list[str] | None = (
         plan_obj.get("dep_filter") if isinstance(plan_obj, dict) else None
@@ -82,7 +84,7 @@ async def risk_score(state: MainState) -> dict:
         result_id = _find_result_id("vulnerabilities")
         if not result_id:
             return json.dumps({})
-        doc = await SUBGRAPH_DAOS["vulnerabilities"].get(result_id)
+        doc = await ingestion_daos["vulnerabilities"].get(result_id)
         if not doc:
             return json.dumps({})
         records = [r for r in doc.get("records", []) if r.get("name") == dep_name]
@@ -94,7 +96,7 @@ async def risk_score(state: MainState) -> dict:
         result_id = _find_result_id("license_compliance")
         if not result_id:
             return json.dumps({})
-        doc = await SUBGRAPH_DAOS["license_compliance"].get(result_id)
+        doc = await ingestion_daos["license_compliance"].get(result_id)
         if not doc:
             return json.dumps({})
         records = [r for r in doc.get("records", []) if r.get("name") == dep_name]
@@ -106,7 +108,7 @@ async def risk_score(state: MainState) -> dict:
         result_id = _find_result_id("registry", dep_name)
         if not result_id:
             return json.dumps({})
-        doc = await SUBGRAPH_DAOS["registry"].get(result_id)
+        doc = await ingestion_daos["registry"].get(result_id)
         return json.dumps(doc or {})
 
     @tool
@@ -115,7 +117,7 @@ async def risk_score(state: MainState) -> dict:
         result_id = _find_result_id("repo", dep_name)
         if not result_id:
             return json.dumps({})
-        doc = await SUBGRAPH_DAOS["repo"].get(result_id)
+        doc = await ingestion_daos["repo"].get(result_id)
         return json.dumps(doc or {})
 
     @tool
@@ -124,7 +126,7 @@ async def risk_score(state: MainState) -> dict:
         result_id = _find_result_id("runtime", dep_name)
         if not result_id:
             return json.dumps({})
-        doc = await SUBGRAPH_DAOS["runtime"].get(result_id)
+        doc = await ingestion_daos["runtime"].get(result_id)
         return json.dumps(doc or {})
 
     @tool
@@ -133,7 +135,7 @@ async def risk_score(state: MainState) -> dict:
         result_id = _find_result_id("impact", dep_name)
         if not result_id:
             return json.dumps(None)
-        doc = await SUBGRAPH_DAOS["impact"].get(result_id)
+        doc = await ingestion_daos["impact"].get(result_id)
         return json.dumps(doc)
 
     @tool

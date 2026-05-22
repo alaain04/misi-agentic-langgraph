@@ -3,13 +3,14 @@ from datetime import UTC, datetime, timedelta
 from bson import ObjectId
 
 from src.db.connection import get_db
+from src.domain.ports.ingestion_result_port import IngestionResultPort
 from src.main_graph.subgraphs.ingestion_subgraphs.runtime.models import (
     RuntimeCacheEntry,
     RuntimeEntry,
 )
 
 
-class RuntimeDAO:
+class RuntimeDAO(IngestionResultPort):
     @property
     def _col(self):
         return get_db()["runtime_results"]

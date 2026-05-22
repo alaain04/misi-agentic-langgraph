@@ -1,18 +1,18 @@
-"""Node: lock_generator_agent — ReAct agent that generates a lock file."""
+"""Node: lock_generator_agent."""
 
 import logging
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 
+from src.main_graph.config import get_services
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
-from src.main_graph.subgraphs.discovery.tools.docker import run_docker_command
 from src.main_graph.subgraphs.discovery.tools.filesystem import read_file, write_file
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
-
 _llm = get_llm(Model.GPT_5_4_MINI)
 
 
@@ -52,7 +52,10 @@ attempts
 """
 
 
-async def lock_generator_agent(state: DiscoveryState) -> dict:
+async def lock_generator_agent(state: DiscoveryState, config: RunnableConfig) -> dict:
+    svc = get_services(config)
+    docker_tool = svc["docker_tool"]
+
     repo_path = state.get("repo_path")
     pm = state.get("detected_package_manager", "npm")
     image = state.get("docker_image", "node:lts-alpine")
@@ -60,7 +63,7 @@ async def lock_generator_agent(state: DiscoveryState) -> dict:
 
     agent = create_agent(
         model=_llm,
-        tools=[run_docker_command, read_file, write_file],
+        tools=[docker_tool, read_file, write_file],
         response_format=LockGenResult,
     )
 

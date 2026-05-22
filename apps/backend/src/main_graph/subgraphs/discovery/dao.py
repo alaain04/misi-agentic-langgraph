@@ -1,10 +1,11 @@
 from bson import ObjectId
 
 from src.db.connection import get_db
+from src.domain.ports.ingestion_result_port import IngestionResultPort
 from src.main_graph.subgraphs.discovery.models import SbomEntry
 
 
-class SbomDAO:
+class SbomDAO(IngestionResultPort):
     @property
     def _col(self):
         return get_db()["sbom_gens"]

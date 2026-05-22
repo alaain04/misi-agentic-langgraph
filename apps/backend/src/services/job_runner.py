@@ -7,13 +7,23 @@ from langgraph.types import Command
 
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph import main_graph
+from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
+from src.main_graph.adapters.langchain_vector_store_adapter import LangchainVectorStoreAdapter
 from src.main_graph.constants import (
     CROSS_ANALYZER,
     ORCHESTRATOR,
     REPORT_REVIEWER,
 )
+from src.main_graph.subgraphs.discovery.dao import sbom_dao
+from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
+from src.main_graph.subgraphs.ingestion_subgraphs.impact.dao import impact_dao
+from src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.dao import license_compliance_dao
+from src.main_graph.subgraphs.ingestion_subgraphs.registry.dao import registry_dao
+from src.main_graph.subgraphs.ingestion_subgraphs.repo.dao import repo_dao, repo_cache_dao
+from src.main_graph.subgraphs.ingestion_subgraphs.runtime.dao import runtime_dao, runtime_cache_dao
+from src.main_graph.subgraphs.ingestion_subgraphs.vulnerabilities.dao import vulnerabilities_dao
 from src.models.job import JobStatus
-from src.services.vector_store import delete_store
+from src.services.vector_store import delete_store, get_or_create_store
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +128,31 @@ async def _stream_graph(
     return interrupt_payload
 
 
+def _build_config(job_id: str, dao: JobRepositoryPort) -> dict:
+    container = DockerContainerAdapter()
+    store = get_or_create_store(job_id)
+    return {
+        "configurable": {
+            "thread_id": job_id,
+            "job_repo": dao,
+            "vector_store": LangchainVectorStoreAdapter(store),
+            "container": container,
+            "docker_tool": make_docker_tool(container),
+            "ingestion_daos": {
+                "vulnerabilities": vulnerabilities_dao,
+                "license_compliance": license_compliance_dao,
+                "registry": registry_dao,
+                "repo": repo_dao,
+                "runtime": runtime_dao,
+                "impact": impact_dao,
+            },
+            "sbom_dao": sbom_dao,
+            "repo_cache_dao": repo_cache_dao,
+            "runtime_cache_dao": runtime_cache_dao,
+        }
+    }
+
+
 async def run_analysis(
     job_id: str,
     repo_url: str,
@@ -127,7 +162,7 @@ async def run_analysis(
     await dao.update_status(job_id, JobStatus.running)
     await dao.start_artifact(job_id, "discovery")
 
-    config = {"configurable": {"thread_id": job_id}}
+    config = _build_config(job_id, dao)
 
     try:
         interrupt_payload = await _stream_graph(
@@ -165,7 +200,7 @@ async def resume_analysis(
     """Resume the orchestrator with a plain-text user message."""
     await dao.update_status(job_id, JobStatus.processing)
 
-    config = {"configurable": {"thread_id": job_id}}
+    config = _build_config(job_id, dao)
 
     async def _on_approved() -> None:
         await dao.update_status(job_id, JobStatus.running)

@@ -4,6 +4,8 @@ import pytest
 
 from src.main_graph.nodes.risk_score import risk_score
 
+_FAKE_CONFIG = {"configurable": {"job_repo": MagicMock(), "ingestion_daos": {}}}
+
 
 def _base_state():
     return {
@@ -41,7 +43,7 @@ async def test_risk_score_calls_agent_and_returns_fallback_on_empty_scores():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await risk_score(_base_state())
+        result = await risk_score(_base_state(), _FAKE_CONFIG)
 
     mock_factory.assert_called_once()
     assert "risk_scores" in result
@@ -59,7 +61,7 @@ async def test_risk_score_falls_back_on_agent_exception():
     with patch("src.main_graph.nodes.risk_score.create_agent") as mock_factory:
         mock_factory.side_effect = RuntimeError("LLM unavailable")
 
-        result = await risk_score(_base_state())
+        result = await risk_score(_base_state(), _FAKE_CONFIG)
 
     assert len(result["risk_scores"]) == 2
     assert all(s["score"] == 5.0 for s in result["risk_scores"])
@@ -75,7 +77,7 @@ async def test_risk_score_fills_stubs_for_all_deps_in_scope():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await risk_score(state)
+        result = await risk_score(state, _FAKE_CONFIG)
 
     # Both deps must appear in output even though mock agent didn't call save_risk_score
     dep_names = {s["dep_name"] for s in result["risk_scores"]}
@@ -92,6 +94,6 @@ async def test_risk_score_empty_sbom_returns_empty_scores():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await risk_score(state)
+        result = await risk_score(state, _FAKE_CONFIG)
 
     assert result["risk_scores"] == []

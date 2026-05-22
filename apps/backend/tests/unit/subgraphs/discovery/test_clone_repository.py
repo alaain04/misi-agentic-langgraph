@@ -1,25 +1,20 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.discovery.nodes.clone_repository import clone_repository
+from src.domain.ports.container_run_port import ContainerRunPort
+from src.main_graph.subgraphs.discovery.service import clone_repository_service
 
 
 @pytest.mark.asyncio
 async def test_clone_success_returns_repo_path():
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
+    container = AsyncMock(spec=ContainerRunPort)
+    container.run.return_value = (0, "", "")
 
-    with (
-        patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-        patch("asyncio.wait_for", new=AsyncMock(return_value=(b"", b""))),
-    ):
-        result = await clone_repository(
-            {
-                "repo_url": "https://github.com/test/repo",
-                "concern": "security",
-                "job_id": "99",
-            }
+    with patch("os.makedirs"):
+        result = await clone_repository_service(
+            {"repo_url": "https://github.com/test/repo", "job_id": "99"},
+            container,
         )
 
     assert "repo_path" in result
@@ -28,30 +23,26 @@ async def test_clone_success_returns_repo_path():
 
 @pytest.mark.asyncio
 async def test_clone_empty_url_returns_error():
-    result = await clone_repository(
-        {"repo_url": "", "concern": "security", "job_id": "99"}
+    container = AsyncMock(spec=ContainerRunPort)
+
+    result = await clone_repository_service(
+        {"repo_url": "", "job_id": "99"},
+        container,
     )
+
     assert result == {"discovery_error": "No repository URL provided"}
+    container.run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_clone_failure_returns_error():
-    mock_proc = MagicMock()
-    mock_proc.returncode = 1
+    container = AsyncMock(spec=ContainerRunPort)
+    container.run.return_value = (1, "", "repository not found")
 
-    with (
-        patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-        patch(
-            "asyncio.wait_for",
-            new=AsyncMock(return_value=(b"", b"repository not found")),
-        ),
-    ):
-        result = await clone_repository(
-            {
-                "repo_url": "https://github.com/bad/repo",
-                "concern": "security",
-                "job_id": "99",
-            }
+    with patch("os.makedirs"):
+        result = await clone_repository_service(
+            {"repo_url": "https://github.com/bad/repo", "job_id": "99"},
+            container,
         )
 
     assert "discovery_error" in result

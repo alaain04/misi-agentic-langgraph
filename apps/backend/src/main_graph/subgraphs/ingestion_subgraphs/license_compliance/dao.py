@@ -1,12 +1,13 @@
 from bson import ObjectId
 
 from src.db.connection import get_db
+from src.domain.ports.ingestion_result_port import IngestionResultPort
 from src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.models import (
     LicenseComplianceEntry,
 )
 
 
-class LicenseComplianceDAO:
+class LicenseComplianceDAO(IngestionResultPort):
     @property
     def _col(self):
         return get_db()["license_compliance"]
