@@ -9,23 +9,29 @@ from src.main_graph.constants import (
     EXECUTE_PLAN,
     EXECUTION_PLANNER,
     ORCHESTRATOR,
+    RECOMMENDATION,
     REPORT_REVIEWER,
+    RISK_RANKER,
+    RISK_SCORE,
     STAGE_ADVANCE,
 )
-from src.main_graph.nodes import stage_router
+from src.main_graph.nodes import (
+    execute_plan,
+    execution_planner,
+    orchestrator,
+    recommendation,
+    risk_ranker,
+    risk_ranker_router,
+    risk_score,
+    stage_advance,
+    stage_router,
+    task_dispatcher,
+)
 from src.main_graph.state import MainState
 from src.main_graph.subgraphs import (
     cross_analyzer_subgraph,
     discovery_subgraph,
     report_reviewer_subgraph,
-)
-
-from .nodes import (
-    execute_plan,
-    execution_planner,
-    orchestrator,
-    stage_advance,
-    task_dispatcher,
 )
 
 _checkpointer = InMemorySaver()
@@ -50,6 +56,9 @@ def build_main_graph():
     builder.add_node(EXECUTION_PLANNER, execution_planner)
     builder.add_node(EXECUTE_PLAN, execute_plan)
     builder.add_node(STAGE_ADVANCE, stage_advance)
+    builder.add_node(RISK_RANKER, risk_ranker)
+    builder.add_node(RISK_SCORE, risk_score)
+    builder.add_node(RECOMMENDATION, recommendation)
     builder.add_node(CROSS_ANALYZER, cross_analyzer_subgraph)
     builder.add_node(REPORT_REVIEWER, report_reviewer_subgraph)
 
@@ -59,8 +68,13 @@ def build_main_graph():
     builder.add_conditional_edges(EXECUTION_PLANNER, task_dispatcher, [EXECUTE_PLAN])
     builder.add_edge(EXECUTE_PLAN, STAGE_ADVANCE)
     builder.add_conditional_edges(
-        STAGE_ADVANCE, stage_router, [EXECUTION_PLANNER, CROSS_ANALYZER]
+        STAGE_ADVANCE, stage_router, [EXECUTION_PLANNER, RISK_RANKER, RISK_SCORE]
     )
+    builder.add_conditional_edges(
+        RISK_RANKER, risk_ranker_router, [EXECUTION_PLANNER, RISK_SCORE]
+    )
+    builder.add_edge(RISK_SCORE, RECOMMENDATION)
+    builder.add_edge(RECOMMENDATION, CROSS_ANALYZER)
     builder.add_edge(CROSS_ANALYZER, REPORT_REVIEWER)
     builder.add_conditional_edges(
         REPORT_REVIEWER, _review_router, [CROSS_ANALYZER, END]

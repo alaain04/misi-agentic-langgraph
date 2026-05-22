@@ -1,21 +1,21 @@
 """Analyze node for the Repo subgraph.
 
-Fetches GitHub data (commits, issues, releases, vulnerabilities) for the primary
-package's repository, curates each entity type with a dual-phase approach
-(deterministic pre-pass + LLM), then persists the result.
+Fetches GitHub data (issues, releases, advisories) via the workers service,
+curates each entity type with LLM agents, then persists the result.
+Commits are not analyzed — GitHub commit data is not provided by workers.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
+from src.db.connection import get_db
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.dao import (
     repo_cache_dao,
     repo_dao,
 )
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.models import (
-    Commit,
     Issue,
     Release,
     RepoCacheEntry,
@@ -23,37 +23,24 @@ from src.main_graph.subgraphs.ingestion_subgraphs.repo.models import (
     Repository,
     Vulnerability,
 )
-from src.main_graph.subgraphs.ingestion_subgraphs.repo.nodes.curators.commits import (
-    make_commit_curation_agent,
-)
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.nodes.curators.issues import (
     make_issue_curation_agent,
 )
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.nodes.curators.releases import (
     make_release_curation_agent,
 )
-from src.main_graph.subgraphs.ingestion_subgraphs.repo.nodes.curators.vulnerabilities import (  # noqa: E501
+from src.main_graph.subgraphs.ingestion_subgraphs.repo.nodes.curators.vulnerabilities import (
     make_vulnerability_curation_agent,
 )
-from src.main_graph.subgraphs.ingestion_subgraphs.repo.nodes.entity_fetch import (
-    EntityFetcher,
-)
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.state import RepoState
-from src.main_graph.subgraphs.ingestion_subgraphs.repo.tools.github_mcp_client import (
-    GitHubMCPClient,
+from src.main_graph.subgraphs.ingestion_subgraphs.sbom_utils import (
+    get_vcs_url,
+    parse_github_owner_repo,
 )
 from src.utils.config import settings
+from src.utils.workers_client import ingest_and_wait
 
 _log = logging.getLogger(__name__)
-
-
-def _since_iso(lookback_days: int) -> str:
-    since = datetime.now(UTC) - timedelta(days=lookback_days)
-    return since.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _safe_float(val) -> float | None:
@@ -63,118 +50,78 @@ def _safe_float(val) -> float | None:
         return None
 
 
-async def analyze(state: RepoState) -> dict:
-    registry_data = state.get("upstream_results", {}).get("registry", {})
-    owner = registry_data.get("repository_owner")
-    name = registry_data.get("repository_name")
-    url = registry_data.get("repository_url") or ""
+async def _read_workers_cache(collection: str, owner: str, repo: str) -> list[dict]:
+    """Read raw data from a workers cache collection keyed by 'owner/repo'."""
+    col = get_db()[collection]
+    doc = await col.find_one({"name": f"{owner}/{repo}"})
+    if doc is None:
+        return []
+    # Workers stores the fetched list under 'items' or 'data'.
+    # Adjust if the workers adapter stores data differently.
+    data = doc.get("items") or doc.get("data") or []
+    return data if isinstance(data, list) else []
 
-    if not owner or not name:
-        _log.warning("repo.analyze: no repository_owner/name in upstream registry data")
+
+async def analyze(state: RepoState) -> dict:
+    dep_name = state.get("dependency_name", "")
+    sbom = state.get("sbom_cyclonedx", {})
+
+    vcs_url = get_vcs_url(sbom, dep_name) if dep_name else None
+    parsed = parse_github_owner_repo(vcs_url) if vcs_url else None
+
+    if not parsed:
+        _log.warning("repo.analyze: no GitHub VCS URL in SBOM for %s", dep_name)
         result_id = await repo_dao.save(RepoEntry(repositories=[]))
         return {"result_id": result_id}
 
-    # Cache check — skip MCP fetch and LLM curation if data is fresh
+    owner, name = parsed
+    url = vcs_url or ""
+
+    # Cache check
     cached = await repo_cache_dao.find_cached_entry(
         owner, name, settings.lookback_days, settings.repo_cache_max_age_days
     )
     if cached is not None:
         result_id = await repo_dao.save(cached.entry)
-        _log.info(
-            "repo.analyze: cache hit for %s/%s, result_id=%s", owner, name, result_id
-        )
+        _log.info("repo.analyze: cache hit for %s/%s, result_id=%s", owner, name, result_id)
         return {"result_id": result_id}
 
-    since = _since_iso(settings.lookback_days)
-    until = _now_iso()
-    batch_size = settings.reviewer_batch_size
-
-    raw_commits: list[dict] = []
-    raw_issues: list[dict] = []
-    raw_releases: list[dict] = []
-    raw_vulns: list[dict] = []
-
+    # Trigger workers for GitHub data
     try:
-        async with GitHubMCPClient(pat=settings.github_token) as client:
-            try:
-                raw_commits = await EntityFetcher("commits", client).fetch(
-                    owner, name, since, until
-                )
-            except Exception as exc:
-                _log.warning("repo.analyze: fetch_commits failed: %s", exc)
-
-            try:
-                raw_issues = await EntityFetcher("issues", client).fetch(
-                    owner, name, since
-                )
-            except Exception as exc:
-                _log.warning("repo.analyze: fetch_issues failed: %s", exc)
-
-            try:
-                raw_releases = await EntityFetcher("releases", client).fetch(
-                    owner, name, since
-                )
-            except Exception as exc:
-                _log.warning("repo.analyze: fetch_releases failed: %s", exc)
-
-            try:
-                raw_vulns = await EntityFetcher("vulnerabilities", client).fetch(
-                    owner, name, since
-                )
-            except Exception as exc:
-                _log.warning("repo.analyze: fetch_vulnerabilities failed: %s", exc)
+        await ingest_and_wait(
+            entity_types=["github_issues", "github_releases", "github_advisories"],
+            items=[f"{owner}/{name}"],
+        )
     except Exception as exc:
-        _log.error("repo.analyze: GitHub client failed: %s", exc)
+        _log.warning("repo.analyze: workers ingest failed for %s/%s: %s", owner, name, exc)
         result_id = await repo_dao.save(RepoEntry(repositories=[]))
         return {"result_id": result_id}
 
+    # Read raw data from workers cache collections
+    raw_issues = await _read_workers_cache("github_issues_cache", owner, name)
+    raw_releases = await _read_workers_cache("github_releases_cache", owner, name)
+    raw_vulns = await _read_workers_cache("github_advisories_cache", owner, name)
+
+    batch_size = settings.reviewer_batch_size
+
     # Curate each entity type
     try:
-        curated_commits = await make_commit_curation_agent().curate(
-            raw_commits, batch_size
-        )
-    except Exception as exc:
-        _log.warning("repo.analyze: commit curation failed: %s", exc)
-        curated_commits = raw_commits
-
-    try:
-        curated_issues = await make_issue_curation_agent().curate(
-            raw_issues, batch_size
-        )
+        curated_issues = await make_issue_curation_agent().curate(raw_issues, batch_size)
     except Exception as exc:
         _log.warning("repo.analyze: issue curation failed: %s", exc)
         curated_issues = raw_issues
 
     try:
-        curated_releases = await make_release_curation_agent().curate(
-            raw_releases, batch_size
-        )
+        curated_releases = await make_release_curation_agent().curate(raw_releases, batch_size)
     except Exception as exc:
         _log.warning("repo.analyze: release curation failed: %s", exc)
         curated_releases = raw_releases
 
     try:
-        curated_vulns = await make_vulnerability_curation_agent().curate(
-            raw_vulns, batch_size
-        )
+        curated_vulns = await make_vulnerability_curation_agent().curate(raw_vulns, batch_size)
     except Exception as exc:
         _log.warning("repo.analyze: vuln curation failed: %s", exc)
         curated_vulns = raw_vulns
-
-    # Map curated dicts to domain models
-    commits = [
-        Commit(
-            sha=c.get("sha", ""),
-            message=c.get("summary") or (c.get("message") or "")[:120],
-            author=(c.get("commit") or {}).get("author", {}).get("name")
-            if isinstance(c.get("commit"), dict)
-            else None,
-            commit_type=c.get("commit_type"),
-            timestamp=c.get("timestamp"),
-        )
-        for c in curated_commits
-        if c.get("sha")
-    ]
 
     issues = [
         Issue(
@@ -234,7 +181,6 @@ async def analyze(state: RepoState) -> dict:
         url=url,
         owner=owner,
         name=name,
-        commits=commits,
         issues=issues,
         releases=releases,
         vulnerabilities=vulnerabilities,
@@ -256,8 +202,7 @@ async def analyze(state: RepoState) -> dict:
 
     result_id = await repo_dao.save(entry)
     _log.info(
-        "repo.analyze: saved — commits=%d issues=%d releases=%d vulns=%d result_id=%s",
-        len(commits),
+        "repo.analyze: saved — issues=%d releases=%d vulns=%d result_id=%s",
         len(issues),
         len(releases),
         len(vulnerabilities),

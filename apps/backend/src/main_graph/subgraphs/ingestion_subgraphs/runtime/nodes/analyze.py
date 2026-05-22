@@ -27,6 +27,10 @@ from src.main_graph.subgraphs.ingestion_subgraphs.runtime.models import (
     TestResult,
 )
 from src.main_graph.subgraphs.ingestion_subgraphs.runtime.state import RuntimeState
+from src.main_graph.subgraphs.ingestion_subgraphs.sbom_utils import (
+    get_component_version,
+    get_vcs_url,
+)
 from src.main_graph.subgraphs.ingestion_subgraphs.runtime.tools.dependency_tools import (  # noqa: E501
     clone_github_repo,
     read_package_json,
@@ -153,17 +157,14 @@ def _map_to_runtime_entry(
 
 
 async def analyze(state: RuntimeState) -> dict:
-    direct_deps = state.get("direct_dependencies", [])
-    if not direct_deps:
+    dep_name = state.get("dependency_name", "")
+    if not dep_name:
         result_id = await runtime_dao.save(RuntimeEntry())
         return {"result_id": result_id}
 
-    primary = direct_deps[0]
-    package_name = primary["name"]
-    version_spec = primary.get("version_spec", "").lstrip("^~>=< ")
-
-    registry_data = state.get("upstream_results", {}).get("registry", {})
-    repository_url = registry_data.get("repository_url") or ""
+    sbom = state.get("sbom_cyclonedx", {})
+    version_spec = (get_component_version(sbom, dep_name) or "").lstrip("^~>=< ")
+    repository_url = get_vcs_url(sbom, dep_name) or ""
 
     if not repository_url:
         _log.warning("runtime.analyze: no repository_url — saving empty entry")
@@ -172,13 +173,13 @@ async def analyze(state: RuntimeState) -> dict:
 
     # Cache check — skip Docker + LLM work if this exact version was already analyzed
     cached = await runtime_cache_dao.find_cached_entry(
-        package_name, version_spec, settings.runtime_cache_max_age_days
+        dep_name, version_spec, settings.runtime_cache_max_age_days
     )
     if cached is not None:
         result_id = await runtime_dao.save(cached.entry)
         _log.info(
             "runtime.analyze: cache hit for %s@%s, result_id=%s",
-            package_name,
+            dep_name,
             version_spec,
             result_id,
         )
@@ -199,7 +200,7 @@ async def analyze(state: RuntimeState) -> dict:
             _DOWNLOAD_TOOLS,
             _DOWNLOAD_PROMPT,
             (
-                f"Download '{package_name}' version '{version_spec}'"
+                f"Download '{dep_name}' version '{version_spec}'"
                 f" from '{repository_url}' into '{tmp_dir}'."
             ),
             max_turns=6,
@@ -262,7 +263,7 @@ async def analyze(state: RuntimeState) -> dict:
         try:
             await runtime_cache_dao.upsert_cached_entry(
                 RuntimeCacheEntry(
-                    package_name=package_name,
+                    package_name=dep_name,
                     package_version=version_spec,
                     fetched_at=datetime.now(UTC),
                     entry=entry,
@@ -271,7 +272,7 @@ async def analyze(state: RuntimeState) -> dict:
         except Exception:
             _log.warning(
                 "runtime.analyze: cache write failed for %s@%s",
-                package_name,
+                dep_name,
                 version_spec,
             )
 

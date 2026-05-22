@@ -1,4 +1,4 @@
-"""Task dispatcher — conditional edge that fans out the current stage via Send."""
+"""Task dispatcher — fans out the current stage via Send."""
 
 from typing import Any
 
@@ -9,30 +9,31 @@ from src.main_graph.state import MainState
 
 
 def task_dispatcher(state: MainState) -> list[Send]:
-    """Return one Send per subgraph in the current execution stage."""
+    """Return one Send per entry in the current execution stage."""
     stages = state.get("execution_stages", [])
     idx = state.get("current_stage_index", 0)
-    current_stage = stages[idx] if idx < len(stages) else []
+    current_stage: list[dict] = stages[idx] if idx < len(stages) else []
 
     upstream_results: dict[str, Any] = {
-        entry["subgraph"]: entry["result_id"]
+        entry["subgraph"]: entry.get("result_id")
         for entry in state.get("subgraph_results", [])
-        if "result_id" in entry
+        if entry.get("result_id")
     }
 
     return [
         Send(
             EXECUTE_PLAN,
             {
-                "subgraph_name": name,
+                "subgraph_name": entry["subgraph"],
+                "dep_name": entry.get("dep_name"),
                 "job_id": state.get("job_id", ""),
-                "direct_dependencies": state.get("direct_dependencies", []),
-                "transitive_dependencies": state.get("transitive_dependencies", []),
                 "discovery_summary": state.get("discovery_summary", ""),
                 "concern": state.get("concern", ""),
+                "sbom_cyclonedx": state.get("sbom_cyclonedx", {}),
+                "repo_path": state.get("repo_path"),
                 "upstream_results": upstream_results,
                 "subgraph_results": [],
             },
         )
-        for name in current_stage
+        for entry in current_stage
     ]
