@@ -1,61 +1,29 @@
-import asyncio
+"""Factory for a LangChain Docker tool backed by ContainerRunPort."""
+
 import json
-import os
 
 from langchain_core.tools import tool
 
-_DOCKER_TIMEOUT = 300
+from src.domain.ports.container_run_port import ContainerRunPort
 
 
-@tool
-async def run_docker_command(
-    image: str,
-    volume: str,
-    command: str,
-) -> str:
-    """Run a shell command in a Docker container with the workspace mounted.
+def make_docker_tool(container: ContainerRunPort):
+    """Return a LangChain @tool that runs Docker commands via container port."""
 
-    Args:
-        image: Docker image, e.g. "node:25-alpine"
-        volume: Docker volume spec, e.g. "/host/path:/container/path"
-        command: Shell command to run, e.g.
-            "cd /workspace && npm -g install pnpm && pnpm install"
+    @tool
+    async def run_docker_command(image: str, volume: str, command: str) -> str:
+        """Run a shell command in a Docker container with the workspace mounted.
 
-    Returns JSON with keys: returncode (int), stdout (str), stderr (str).
-    """
-    proc = await asyncio.create_subprocess_exec(
-        "docker",
-        "run",
-        "--rm",
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        "-v",
-        f"{volume}",
-        image,
-        "sh",
-        "-c",
-        command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout_b, stderr_b = await asyncio.wait_for(
-            proc.communicate(), timeout=_DOCKER_TIMEOUT
-        )
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        Args:
+            image: Docker image, e.g. "node:25-alpine"
+            volume: Docker volume spec, e.g. "/host/path:/container/path"
+            command: Shell command to run inside the container
+
+        Returns JSON with keys: returncode (int), stdout (str), stderr (str).
+        """
+        returncode, stdout, stderr = await container.run(image, command, volume)
         return json.dumps(
-            {
-                "returncode": -1,
-                "stdout": "",
-                "stderr": f"timed out after {_DOCKER_TIMEOUT}s",
-            }
+            {"returncode": returncode, "stdout": stdout, "stderr": stderr}
         )
-    return json.dumps(
-        {
-            "returncode": proc.returncode,
-            "stdout": stdout_b.decode(errors="replace"),
-            "stderr": stderr_b.decode(errors="replace")[:3000],
-        }
-    )
+
+    return run_docker_command
