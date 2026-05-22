@@ -21,6 +21,12 @@ _FORBIDDEN_IN_DOMAIN_PORTS = {
     "src.db",
 }
 
+# Skills are the new first-class investigation units; they must not reference
+# the deleted ingestion_subgraphs namespace.
+_FORBIDDEN_IN_SKILLS = {
+    "src.main_graph.subgraphs.ingestion_subgraphs",
+}
+
 
 def _get_imports(path: Path) -> set[str]:
     source = path.read_text()
@@ -90,3 +96,19 @@ def test_service_files_do_not_import_from_langgraph():
         if bad:
             violations.append(f"{svc_file.relative_to(_SRC)}: {bad}")
     assert not violations, "LangGraph imports in service files:\n" + "\n".join(violations)
+
+
+def test_skills_do_not_import_from_deleted_ingestion_subgraphs():
+    """Skills must not reference the deleted ingestion_subgraphs namespace."""
+    violations = []
+    skill_files = [
+        f for f in (_SRC / "main_graph" / "skills").rglob("*.py")
+        if f.name != "__init__.py"
+    ]
+    for skill_file in skill_files:
+        imports = _get_imports(skill_file)
+        for imp in imports:
+            for forbidden in _FORBIDDEN_IN_SKILLS:
+                if imp.startswith(forbidden):
+                    violations.append(f"{skill_file.relative_to(_SRC)}: imports {imp}")
+    assert not violations, "Forbidden imports in skill files:\n" + "\n".join(violations)
