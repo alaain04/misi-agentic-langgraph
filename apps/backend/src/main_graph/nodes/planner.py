@@ -13,25 +13,18 @@ from src.utils.llm import Model, get_llm, parse_llm_json
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_4O_MINI)
+_llm = get_llm(Model.GPT_5_4)
 
 _PIPELINE_SUBGRAPHS: list[tuple[str, str]] = [
     ("risk_score", "Computes a composite 0–10 risk score per dependency from all analysis signals"),
     ("recommendation", "Finds 1–3 maintained alternatives for each high-risk dependency"),
 ]
 
-VALID_SUBGRAPHS: set[str] = set(SUBGRAPH_REGISTRY.keys()) | {
-    name for name, _ in _PIPELINE_SUBGRAPHS
-}
-
-_FALLBACK_PLAN: Plan = {"subgraphs": ["vulnerabilities", "risk_score", "recommendation"], "dep_filter": None}
-
 _ingestion_lines = "\n".join(
     f"- {name}: {desc}"
     for entry in SUBGRAPH_DESCRIPTIONS
     for name, desc in [entry.split(":", 1)]
 )
-_pipeline_lines = "\n".join(f"- {name}: {desc}" for name, desc in _PIPELINE_SUBGRAPHS)
 _example = json.dumps({"subgraphs": ["vulnerabilities", "registry"], "dep_filter": None})
 _example_filter = json.dumps({"subgraphs": ["registry", "repo", "runtime"], "dep_filter": ["react", "lodash"]})
 
@@ -41,7 +34,6 @@ summary, its components, and a user concern, decide which analysis subgraphs
 to run. Available subgraphs:
 
 {_ingestion_lines}
-{_pipeline_lines}
 
 Return ONLY a valid JSON object with keys:
   "subgraphs": array of subgraph names relevant to the user's concern
@@ -51,7 +43,6 @@ Examples:
   Security concern: {_example}
   Specific dep concern: {_example_filter}
 
-risk_score and recommendation always run and do not need to be included in subgraphs.
 If additional instructions are provided, honor them — they reflect updated user preferences.
 """
 
@@ -90,19 +81,7 @@ async def run_planner(state: MainState, extra_instructions: str = "") -> Plan:
         ]
     )
 
-    try:
-        parsed = parse_llm_json(response.content or "")
-        if isinstance(parsed, list):
-            subgraphs = [s for s in parsed if s in VALID_SUBGRAPHS]
-            plan: Plan = {"subgraphs": subgraphs or _FALLBACK_PLAN["subgraphs"], "dep_filter": None}
-        elif isinstance(parsed, dict):
-            subgraphs = [s for s in (parsed.get("subgraphs") or []) if s in VALID_SUBGRAPHS]
-            plan = {"subgraphs": subgraphs or _FALLBACK_PLAN["subgraphs"], "dep_filter": parsed.get("dep_filter")}
-        else:
-            plan = _FALLBACK_PLAN
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        logger.warning("run_planner: failed to parse LLM response, using fallback plan")
-        plan = _FALLBACK_PLAN
+    parsed = parse_llm_json(response.content or "")
 
-    logger.info("run_planner: selected subgraphs=%s dep_filter=%s", plan["subgraphs"], plan.get("dep_filter"))
-    return plan
+    logger.info("run_planner: selected subgraphs=%s dep_filter=%s", parsed.get("subgraphs"), parsed.get("dep_filter"))
+    return parsed
