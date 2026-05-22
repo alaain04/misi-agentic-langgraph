@@ -7,8 +7,10 @@ import logging
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
+from src.main_graph.config import get_services
 from src.main_graph.nodes.recommendation_tools import (
     _compare_packages,
     _get_github_summary,
@@ -16,7 +18,6 @@ from src.main_graph.nodes.recommendation_tools import (
     _search_npm,
 )
 from src.main_graph.state import MainState
-from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_DAOS
 from src.utils.llm import Model, get_llm
 
 _log = logging.getLogger(__name__)
@@ -51,7 +52,9 @@ migration_effort values: low | medium | high
 """
 
 
-async def recommendation(state: MainState) -> dict:
+async def recommendation(state: MainState, config: RunnableConfig) -> dict:
+    svc = get_services(config)
+    ingestion_daos = svc["ingestion_daos"]
     high_risk_deps: list[str] = state.get("high_risk_deps") or []
 
     if not high_risk_deps:
@@ -82,7 +85,7 @@ async def recommendation(state: MainState) -> dict:
         result_id = _find_result_id("impact", dep_name)
         if not result_id:
             return json.dumps(None)
-        doc = await SUBGRAPH_DAOS["impact"].get(result_id)
+        doc = await ingestion_daos["impact"].get(result_id)
         return json.dumps(doc)
 
     @tool

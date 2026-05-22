@@ -4,6 +4,8 @@ import pytest
 
 from src.main_graph.nodes.risk_ranker import _select_high_risk, risk_ranker, risk_ranker_router
 
+_FAKE_CONFIG = {"configurable": {"job_repo": MagicMock(), "ingestion_daos": {}}}
+
 
 def _base_state():
     return {
@@ -64,7 +66,7 @@ async def test_risk_ranker_calls_agent_and_returns_fallback_on_empty_rankings():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await risk_ranker(_base_state())
+        result = await risk_ranker(_base_state(), _FAKE_CONFIG)
 
     mock_factory.assert_called_once()
     assert result["risk_ranker_done"] is True
@@ -82,7 +84,7 @@ async def test_risk_ranker_falls_back_on_agent_exception():
     ) as mock_factory:
         mock_factory.side_effect = RuntimeError("LLM unavailable")
 
-        result = await risk_ranker(_base_state())
+        result = await risk_ranker(_base_state(), _FAKE_CONFIG)
 
     assert result["risk_ranker_done"] is True
     assert len(result["risk_rankings"]) == 3
@@ -98,7 +100,7 @@ async def test_risk_ranker_extends_execution_stages_for_impact():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await risk_ranker(state)
+        result = await risk_ranker(state, _FAKE_CONFIG)
 
     # high_risk_deps is non-empty and "impact" is in subgraphs → new stage added
     assert len(result["execution_stages"]) == 1
@@ -116,7 +118,7 @@ async def test_risk_ranker_no_impact_in_plan_skips_stage_extension():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await risk_ranker(state)
+        result = await risk_ranker(state, _FAKE_CONFIG)
 
     assert result["execution_stages"] == []
 

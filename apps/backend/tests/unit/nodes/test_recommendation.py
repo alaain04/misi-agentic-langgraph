@@ -4,6 +4,8 @@ import pytest
 
 from src.main_graph.nodes.recommendation import recommendation
 
+_FAKE_CONFIG = {"configurable": {"job_repo": MagicMock(), "ingestion_daos": {}}}
+
 
 def _base_state():
     return {
@@ -41,7 +43,7 @@ async def test_recommendation_calls_agent_and_returns_fallback_on_empty():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await recommendation(_base_state())
+        result = await recommendation(_base_state(), _FAKE_CONFIG)
 
     mock_factory.assert_called_once()
     assert "recommendations" in result
@@ -59,7 +61,7 @@ async def test_recommendation_falls_back_on_agent_exception():
     ) as mock_factory:
         mock_factory.side_effect = RuntimeError("LLM unavailable")
 
-        result = await recommendation(_base_state())
+        result = await recommendation(_base_state(), _FAKE_CONFIG)
 
     assert len(result["recommendations"]) == 2
     assert all(r["alternatives"] == [] for r in result["recommendations"])
@@ -77,7 +79,7 @@ async def test_recommendation_empty_high_risk_deps_returns_empty():
         mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
         mock_factory.return_value = mock_agent
 
-        result = await recommendation(state)
+        result = await recommendation(state, _FAKE_CONFIG)
 
     assert result["recommendations"] == []
     # agent should not be called when there's nothing to do
@@ -93,7 +95,7 @@ async def test_recommendation_ainvoke_exception_returns_fallback():
         mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("recursion limit"))
         mock_factory.return_value = mock_agent
 
-        result = await recommendation(_base_state())
+        result = await recommendation(_base_state(), _FAKE_CONFIG)
 
     assert len(result["recommendations"]) == 2
     assert all(r["alternatives"] == [] for r in result["recommendations"])
