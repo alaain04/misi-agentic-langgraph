@@ -3,13 +3,14 @@ from datetime import UTC, datetime, timedelta
 from bson import ObjectId
 
 from src.db.connection import get_db
+from src.domain.ports.ingestion_result_port import IngestionResultPort
 from src.main_graph.subgraphs.ingestion_subgraphs.repo.models import (
     RepoCacheEntry,
     RepoEntry,
 )
 
 
-class RepoDAO:
+class RepoDAO(IngestionResultPort):
     @property
     def _col(self):
         return get_db()["repositories"]
