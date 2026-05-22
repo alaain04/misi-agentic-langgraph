@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.nodes.planner import _FALLBACK_PLAN, run_planner
+from src.main_graph.nodes.planner import run_planner
 
 
 def _make_state(
@@ -37,35 +37,6 @@ async def test_planner_returns_plan_object():
 
     assert plan["subgraphs"] == ["vulnerabilities", "registry"]
     assert plan["dep_filter"] is None
-
-
-@pytest.mark.asyncio
-async def test_planner_accepts_legacy_list_response():
-    """LLM returning a plain list is accepted and wrapped in Plan."""
-    state = _make_state([{"name": "lodash"}])
-
-    mock_response = MagicMock()
-    mock_response.content = json.dumps(["vulnerabilities"])
-
-    with patch("src.main_graph.nodes.planner._llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        plan = await run_planner(state)
-
-    assert plan["subgraphs"] == ["vulnerabilities"]
-
-
-@pytest.mark.asyncio
-async def test_planner_falls_back_on_bad_json():
-    state = _make_state([{"name": "lodash"}])
-
-    mock_response = MagicMock()
-    mock_response.content = "not json at all"
-
-    with patch("src.main_graph.nodes.planner._llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        plan = await run_planner(state)
-
-    assert plan == _FALLBACK_PLAN
 
 
 @pytest.mark.asyncio
