@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.discovery.nodes.generate_sbom import generate_sbom
+from src.domain.ports.container_run_port import ContainerRunPort
+from src.domain.ports.ingestion_result_port import IngestionResultPort
+from src.main_graph.subgraphs.discovery.service import generate_sbom_service
 
 _BASE_STATE = {
     "repo_url": "https://github.com/test/repo",
@@ -20,38 +22,21 @@ _SAMPLE_SBOM = {
     "components": [{"name": "express", "version": "4.18.2"}],
 }
 
-_SBOM_JSON = json.dumps(_SAMPLE_SBOM)
-
-
-def _docker_ok(stdout: str = _SBOM_JSON) -> str:
-    return json.dumps({"returncode": 0, "stdout": stdout, "stderr": ""})
-
-
-def _docker_fail(stderr: str) -> str:
-    return json.dumps({"returncode": 1, "stdout": "", "stderr": stderr})
-
 
 @pytest.mark.asyncio
 async def test_generate_sbom_npm_success():
-    with (
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
-        ) as mock_cmd,
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
-        ) as mock_dao,
-        patch("pathlib.Path.exists", return_value=True),
-    ):
-        mock_cmd.ainvoke = AsyncMock(return_value=_docker_ok())
-        mock_dao.save = AsyncMock(return_value="abc123")
-        result = await generate_sbom(_BASE_STATE)
+    container = AsyncMock(spec=ContainerRunPort)
+    container.run.return_value = (0, json.dumps(_SAMPLE_SBOM), "")
+    dao = AsyncMock(spec=IngestionResultPort)
+    dao.save.return_value = "abc123"
 
-    mock_cmd.ainvoke.assert_awaited_once_with(
-        {
-            "image": "node:22-alpine",
-            "command": "npm sbom --sbom-format=cyclonedx --package-lock-only",
-            "workspace": "/tmp/repo",
-        }
+    with patch("pathlib.Path.exists", return_value=True):
+        result = await generate_sbom_service(_BASE_STATE, container, dao)
+
+    container.run.assert_awaited_once_with(
+        "node:22-alpine",
+        "npm sbom --sbom-format=cyclonedx --package-lock-only",
+        "/tmp/repo:/workspace",
     )
     assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
     assert result["sbom_result_id"] == "abc123"
@@ -65,26 +50,18 @@ async def test_generate_sbom_pnpm_success():
         "detected_package_manager": "pnpm",
         "docker_image": "node:20-alpine",
     }
+    container = AsyncMock(spec=ContainerRunPort)
+    container.run.return_value = (0, json.dumps(_SAMPLE_SBOM), "")
+    dao = AsyncMock(spec=IngestionResultPort)
+    dao.save.return_value = "abc123"
 
-    with (
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
-        ) as mock_cmd,
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
-        ) as mock_dao,
-        patch("pathlib.Path.exists", return_value=True),
-    ):
-        mock_cmd.ainvoke = AsyncMock(return_value=_docker_ok())
-        mock_dao.save = AsyncMock(return_value="abc123")
-        result = await generate_sbom(state)
+    with patch("pathlib.Path.exists", return_value=True):
+        result = await generate_sbom_service(state, container, dao)
 
-    mock_cmd.ainvoke.assert_awaited_once_with(
-        {
-            "image": "node:20-alpine",
-            "command": "pnpm sbom --sbom-format=cyclonedx --package-lock-only",
-            "workspace": "/tmp/repo",
-        }
+    container.run.assert_awaited_once_with(
+        "node:20-alpine",
+        "pnpm sbom --sbom-format=cyclonedx --package-lock-only",
+        "/tmp/repo:/workspace",
     )
     assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
 
@@ -92,19 +69,13 @@ async def test_generate_sbom_pnpm_success():
 @pytest.mark.asyncio
 async def test_generate_sbom_lts_image_is_allowed():
     state = {**_BASE_STATE, "docker_image": "node:lts-alpine"}
+    container = AsyncMock(spec=ContainerRunPort)
+    container.run.return_value = (0, json.dumps(_SAMPLE_SBOM), "")
+    dao = AsyncMock(spec=IngestionResultPort)
+    dao.save.return_value = "abc123"
 
-    with (
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
-        ) as mock_cmd,
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
-        ) as mock_dao,
-        patch("pathlib.Path.exists", return_value=True),
-    ):
-        mock_cmd.ainvoke = AsyncMock(return_value=_docker_ok())
-        mock_dao.save = AsyncMock(return_value="abc123")
-        result = await generate_sbom(state)
+    with patch("pathlib.Path.exists", return_value=True):
+        result = await generate_sbom_service(state, container, dao)
 
     assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
     assert "sbom_error" not in result
@@ -113,37 +84,28 @@ async def test_generate_sbom_lts_image_is_allowed():
 @pytest.mark.asyncio
 async def test_generate_sbom_rejects_node18():
     state = {**_BASE_STATE, "docker_image": "node:18-alpine"}
+    container = AsyncMock(spec=ContainerRunPort)
+    dao = AsyncMock(spec=IngestionResultPort)
+    dao.save.return_value = "err123"
 
-    with (
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
-        ) as mock_dao,
-        patch("pathlib.Path.exists", return_value=False),
-    ):
-        mock_dao.save = AsyncMock(return_value="err123")
-        result = await generate_sbom(state)
+    with patch("pathlib.Path.exists", return_value=False):
+        result = await generate_sbom_service(state, container, dao)
 
+    container.run.assert_not_awaited()
     assert result["sbom_cyclonedx"] == {}
-    assert "18" in result["sbom_error"] or "node:20+" in result["sbom_error"]
+    assert "18" in result["sbom_error"]
     assert result["sbom_result_id"] == "err123"
 
 
 @pytest.mark.asyncio
 async def test_generate_sbom_command_failure_saves_error():
-    with (
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.run_docker_command"
-        ) as mock_cmd,
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
-        ) as mock_dao,
-        patch("pathlib.Path.exists", return_value=True),
-    ):
-        mock_cmd.ainvoke = AsyncMock(
-            return_value=_docker_fail("npm: unknown command: sbom")
-        )
-        mock_dao.save = AsyncMock(return_value="err456")
-        result = await generate_sbom(_BASE_STATE)
+    container = AsyncMock(spec=ContainerRunPort)
+    container.run.return_value = (1, "", "npm: unknown command: sbom")
+    dao = AsyncMock(spec=IngestionResultPort)
+    dao.save.return_value = "err456"
+
+    with patch("pathlib.Path.exists", return_value=True):
+        result = await generate_sbom_service(_BASE_STATE, container, dao)
 
     assert result["sbom_cyclonedx"] == {}
     assert "unknown command" in result["sbom_error"]
@@ -153,12 +115,11 @@ async def test_generate_sbom_command_failure_saves_error():
 @pytest.mark.asyncio
 async def test_generate_sbom_no_repo_path():
     state = {"repo_url": "", "concern": "", "repo_path": ""}
+    container = AsyncMock(spec=ContainerRunPort)
+    dao = AsyncMock(spec=IngestionResultPort)
+    dao.save.return_value = "no-path-id"
 
-    with patch(
-        "src.main_graph.subgraphs.discovery.nodes.generate_sbom.sbom_dao"
-    ) as mock_dao:
-        mock_dao.save = AsyncMock(return_value="no-path-id")
-        result = await generate_sbom(state)
+    result = await generate_sbom_service(state, container, dao)
 
     assert result["sbom_error"] == "repo_path not available"
     assert result["sbom_cyclonedx"] == {}
