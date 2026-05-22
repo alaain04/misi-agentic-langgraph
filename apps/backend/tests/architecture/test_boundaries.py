@@ -8,12 +8,6 @@ _SRC = Path(__file__).parents[2] / "src"
 _FORBIDDEN_IN_NODES = {
     "src.db.connection",
     "src.utils.trivy",
-    "src.main_graph.subgraphs.ingestion_subgraphs.vulnerabilities.dao",
-    "src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.dao",
-    "src.main_graph.subgraphs.ingestion_subgraphs.registry.dao",
-    "src.main_graph.subgraphs.ingestion_subgraphs.repo.dao",
-    "src.main_graph.subgraphs.ingestion_subgraphs.runtime.dao",
-    "src.main_graph.subgraphs.ingestion_subgraphs.impact.dao",
     "src.main_graph.subgraphs.discovery.dao",
     "src.services.dependencies",
     "src.services.vector_store",
@@ -46,7 +40,6 @@ def _node_files():
     patterns = [
         "main_graph/nodes/*.py",
         "main_graph/subgraphs/*/nodes/*.py",
-        "main_graph/subgraphs/ingestion_subgraphs/*/nodes/*.py",
     ]
     files = []
     for pattern in patterns:
@@ -80,8 +73,8 @@ def test_domain_ports_have_no_infrastructure_imports():
 
 
 _LANGGRAPH_EXEMPT_SERVICES = {
-    # orchestrator_service.py intentionally uses Command, interrupt, END
-    "orchestrator_service.py",
+    # investigation_planner_service.py intentionally uses Command, interrupt, END for HITL loop
+    "investigation_planner_service.py",
 }
 
 

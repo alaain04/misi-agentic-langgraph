@@ -4,7 +4,7 @@ import json
 import logging
 
 from src.main_graph.skills.base import InvestigationSkill, SkillContext
-from src.main_graph.subgraphs.ingestion_subgraphs.impact.tools.filesystem import find_usages
+from src.main_graph.skills.tools.filesystem import find_usages
 from src.models.evidence import Evidence
 
 logger = logging.getLogger(__name__)

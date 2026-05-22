@@ -1,0 +1,140 @@
+<h2>Section 5 — Folder Structure & Migration</h2>
+<p class="subtitle">New source layout and how to get from the current codebase to the new architecture</p>
+
+<div class="section">
+  <h3>Proposed folder structure (backend/src)</h3>
+  <div style="font-family:monospace; font-size:12px; background:#1e1e2e; color:#cdd6f4; padding:14px; border-radius:6px; white-space:pre-wrap">
+src/
+├── api/                          <span style="color:#6c7086"># unchanged</span>
+├── db/                           <span style="color:#6c7086"># unchanged</span>
+├── domain/
+│   └── ports/                    <span style="color:#6c7086"># add EvidenceStorePort</span>
+├── models/                       <span style="color:#6c7086"># add Evidence, Hypothesis, RiskFinding, InvestigationPlan</span>
+├── services/                     <span style="color:#6c7086"># unchanged (job_dao, job_runner)</span>
+└── main_graph/
+    ├── graph.py                  <span style="color:#6c7086"># rewired — 6 backbone nodes</span>
+    ├── state.py                  <span style="color:#6c7086"># replaced with new MainState</span>
+    ├── constants.py              <span style="color:#6c7086"># updated node names</span>
+    ├── config.py                 <span style="color:#6c7086"># add skill_registry to services</span>
+    │
+    ├── <span style="color:#a6e3a1">skills/</span>                   <span style="color:#a6e3a1"># NEW — replaces ingestion_subgraphs/</span>
+    │   ├── base.py               <span style="color:#6c7086"># InvestigationSkill ABC, SkillContext, Evidence</span>
+    │   ├── registry.py           <span style="color:#6c7086"># SKILL_REGISTRY dict + SKILL_DESCRIPTIONS</span>
+    │   ├── vulnerability.py      <span style="color:#6c7086"># wraps vulnerabilities subgraph logic</span>
+    │   ├── maintainer_trust.py   <span style="color:#6c7086"># wraps repo subgraph (commits, issues)</span>
+    │   ├── supply_chain.py       <span style="color:#6c7086"># wraps registry subgraph</span>
+    │   ├── license.py            <span style="color:#6c7086"># wraps license_compliance subgraph</span>
+    │   ├── reachability.py       <span style="color:#6c7086"># wraps impact subgraph</span>
+    │   ├── blast_radius.py       <span style="color:#6c7086"># new</span>
+    │   ├── release_anomaly.py    <span style="color:#6c7086"># wraps repo subgraph (releases)</span>
+    │   └── ecosystem.py          <span style="color:#6c7086"># wraps registry subgraph</span>
+    │
+    ├── nodes/
+    │   ├── investigation_planner.py   <span style="color:#a6e3a1"># replaces orchestrator + planner</span>
+    │   ├── skill_dispatcher.py        <span style="color:#a6e3a1"># replaces execution_planner + task_dispatcher</span>
+    │   ├── skill_executor.py          <span style="color:#a6e3a1"># replaces execute_plan</span>
+    │   ├── evidence_collector.py      <span style="color:#a6e3a1"># replaces stage_advance</span>
+    │   ├── evidence_correlator.py     <span style="color:#a6e3a1"># replaces cross_analyzer</span>
+    │   ├── finding_reviewer.py        <span style="color:#a6e3a1"># replaces report_reviewer</span>
+    │   └── report_builder.py          <span style="color:#a6e3a1"># new — deterministic assembly</span>
+    │
+    └── subgraphs/
+        └── discovery/            <span style="color:#6c7086"># unchanged</span>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Migration strategy — what to keep, wrap, and rewrite</h3>
+  <table style="width:100%; border-collapse:collapse; font-size:12px">
+    <thead>
+      <tr style="background:#313244; color:#cdd6f4">
+        <th style="padding:8px; text-align:left">Current component</th>
+        <th style="padding:8px; text-align:left">Migration action</th>
+        <th style="padding:8px; text-align:left">Risk</th>
+      </tr>
+    </thead>
+    <tbody style="color:#cdd6f4">
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">discovery subgraph</td>
+        <td style="padding:8px; color:#a6e3a1">Keep as-is. Zero changes.</td>
+        <td style="padding:8px; color:#a6e3a1">none</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">vulnerabilities/service.py (Trivy logic)</td>
+        <td style="padding:8px; color:#89b4fa">Move into VulnerabilitySkill.execute(). Same logic, new wrapper.</td>
+        <td style="padding:8px; color:#a6e3a1">low</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">license_compliance/service.py</td>
+        <td style="padding:8px; color:#89b4fa">Move into LicenseSkill.execute().</td>
+        <td style="padding:8px; color:#a6e3a1">low</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">impact subgraph (reachability)</td>
+        <td style="padding:8px; color:#89b4fa">Move into ReachabilitySkill.execute().</td>
+        <td style="padding:8px; color:#a6e3a1">low</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">repo subgraph (commits/issues/releases)</td>
+        <td style="padding:8px; color:#89b4fa">Split into MaintainerTrustSkill + ReleaseAnomalySkill. Same MCP calls.</td>
+        <td style="padding:8px; color:#fab387">medium — split logic carefully</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">registry subgraph</td>
+        <td style="padding:8px; color:#89b4fa">Split into SupplyChainSkill + EcosystemSkill.</td>
+        <td style="padding:8px; color:#fab387">medium</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">orchestrator + planner</td>
+        <td style="padding:8px; color:#f38ba8">Rewrite as investigation_planner. New prompt, new output schema.</td>
+        <td style="padding:8px; color:#fab387">medium — prompt engineering</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">execution_planner + task_dispatcher</td>
+        <td style="padding:8px; color:#f38ba8">Rewrite as skill_dispatcher. Same Send() pattern, new input shape.</td>
+        <td style="padding:8px; color:#a6e3a1">low — mostly mechanical</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">execute_plan</td>
+        <td style="padding:8px; color:#f38ba8">Rewrite as skill_executor. Calls skill.execute() instead of subgraph.invoke().</td>
+        <td style="padding:8px; color:#a6e3a1">low</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">stage_advance</td>
+        <td style="padding:8px; color:#f38ba8">Rewrite as evidence_collector. Same fan-in, accumulates Evidence[].</td>
+        <td style="padding:8px; color:#a6e3a1">low</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">cross_analyzer (dict merge)</td>
+        <td style="padding:8px; color:#f38ba8">Full rewrite as evidence_correlator. Correlation + contradiction + confidence.</td>
+        <td style="padding:8px; color:#f38ba8">high — most complex new code</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">report_reviewer</td>
+        <td style="padding:8px; color:#f38ba8">Rewrite as finding_reviewer with structured criteria + HITL gate 2.</td>
+        <td style="padding:8px; color:#fab387">medium</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">risk_score + recommendation nodes</td>
+        <td style="padding:8px; color:#a6e3a1">Absorbed into evidence_correlator. No separate nodes needed.</td>
+        <td style="padding:8px; color:#a6e3a1">none — delete</td>
+      </tr>
+      <tr style="background:#181825">
+        <td style="padding:8px">MainState</td>
+        <td style="padding:8px; color:#f38ba8">Replace. Keep discovery fields. Drop execution tracking fields. Add evidence[].</td>
+        <td style="padding:8px; color:#fab387">medium — cascades to all nodes</td>
+      </tr>
+      <tr style="background:#1e1e2e">
+        <td style="padding:8px">API layer, job_dao, job_runner</td>
+        <td style="padding:8px; color:#a6e3a1">Keep as-is. External contract unchanged.</td>
+        <td style="padding:8px; color:#a6e3a1">none</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div style="padding:14px; background:#1e1e2e; border-radius:8px; border-left:3px solid #89b4fa">
+  <p style="color:#cdd6f4; margin:0; font-size:13px">
+    <strong style="color:#89b4fa">Safe migration order:</strong> Start with the data models (Evidence, Hypothesis, InvestigationPlan, RiskFinding) and the skill base class — these have no LangGraph dependencies. Then wire skills one by one, replacing ingestion subgraphs from simplest (license) to most complex (repo split). Replace graph nodes last, once all skills are tested in isolation. The API contract never changes.
+  </p>
+</div>

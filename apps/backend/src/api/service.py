@@ -1,52 +1,46 @@
 from src.api.schemas import GraphEdgeInfo, GraphInfo, GraphNodeInfo
 from src.main_graph.constants import (
-    CROSS_ANALYZER,
     DISCOVERY,
-    ORCHESTRATOR,
-    REPORT_REVIEWER,
+    EVIDENCE_COLLECTOR,
+    EVIDENCE_CORRELATOR,
+    FINDING_REVIEWER,
+    INVESTIGATION_PLANNER,
+    REPORT_BUILDER,
+    SKILL_DISPATCHER,
+    SKILL_EXECUTOR,
 )
-from src.main_graph.subgraphs.ingestion_subgraphs import SUBGRAPH_REGISTRY
 from src.models.job import Job
+
+_BACKBONE_NODES = [
+    (DISCOVERY, 1),
+    (INVESTIGATION_PLANNER, 2),
+    (SKILL_DISPATCHER, 3),
+    (SKILL_EXECUTOR, 4),
+    (EVIDENCE_COLLECTOR, 5),
+    (EVIDENCE_CORRELATOR, 6),
+    (FINDING_REVIEWER, 7),
+    (REPORT_BUILDER, 8),
+]
 
 
 def build_graph_info(job: Job) -> GraphInfo:
-    result = job.result or {}
-    plan: list[str] = result.get("plan") or []
-    if not plan:
-        orch = next(
-            (a for a in (job.artifacts or []) if a["node"] == "orchestrator"), None
-        )
-        if orch:
-            proposals = orch.get("proposals") or []
-            if proposals:
-                plan = proposals[-1].get("plan") or []
-
-    known = set(SUBGRAPH_REGISTRY.keys())
-    subgraph_nodes = list(dict.fromkeys(s for s in plan if s in known))
-
     nodes: list[GraphNodeInfo] = [
         GraphNodeInfo(id="START", type="terminal", order=0),
-        GraphNodeInfo(id=DISCOVERY, type="backbone", order=1),
-        GraphNodeInfo(id=ORCHESTRATOR, type="backbone", order=2),
-        *[GraphNodeInfo(id=s, type="subgraph", order=3) for s in subgraph_nodes],
-        GraphNodeInfo(id=CROSS_ANALYZER, type="backbone", order=4),
-        GraphNodeInfo(id=REPORT_REVIEWER, type="backbone", order=5),
-        GraphNodeInfo(id="END", type="terminal", order=6),
+        *[GraphNodeInfo(id=name, type="backbone", order=order) for name, order in _BACKBONE_NODES],
+        GraphNodeInfo(id="END", type="terminal", order=9),
     ]
 
     edges: list[GraphEdgeInfo] = [
         GraphEdgeInfo(source="START", target=DISCOVERY),
-        GraphEdgeInfo(source=DISCOVERY, target=ORCHESTRATOR),
-    ]
-    if subgraph_nodes:
-        for s in subgraph_nodes:
-            edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=s))
-            edges.append(GraphEdgeInfo(source=s, target=CROSS_ANALYZER))
-    else:
-        edges.append(GraphEdgeInfo(source=ORCHESTRATOR, target=CROSS_ANALYZER))
-    edges += [
-        GraphEdgeInfo(source=CROSS_ANALYZER, target=REPORT_REVIEWER),
-        GraphEdgeInfo(source=REPORT_REVIEWER, target="END"),
+        GraphEdgeInfo(source=DISCOVERY, target=INVESTIGATION_PLANNER),
+        GraphEdgeInfo(source=INVESTIGATION_PLANNER, target=SKILL_DISPATCHER),
+        GraphEdgeInfo(source=SKILL_DISPATCHER, target=SKILL_EXECUTOR),
+        GraphEdgeInfo(source=SKILL_EXECUTOR, target=EVIDENCE_COLLECTOR),
+        GraphEdgeInfo(source=EVIDENCE_COLLECTOR, target=EVIDENCE_CORRELATOR),
+        GraphEdgeInfo(source=EVIDENCE_CORRELATOR, target=FINDING_REVIEWER),
+        GraphEdgeInfo(source=FINDING_REVIEWER, target=REPORT_BUILDER),
+        GraphEdgeInfo(source=FINDING_REVIEWER, target=EVIDENCE_CORRELATOR),
+        GraphEdgeInfo(source=REPORT_BUILDER, target="END"),
     ]
 
     return GraphInfo(nodes=nodes, edges=edges)

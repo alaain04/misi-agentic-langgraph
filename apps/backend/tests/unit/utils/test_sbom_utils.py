@@ -1,4 +1,4 @@
-from src.main_graph.subgraphs.ingestion_subgraphs.sbom_utils import (
+from src.main_graph.utils.sbom_utils import (
     get_vcs_url,
     get_component_version,
     parse_github_owner_repo,
