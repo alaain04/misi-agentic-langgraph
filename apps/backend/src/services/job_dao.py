@@ -107,35 +107,28 @@ class JobDAO(JobRepositoryPort):
                 },
             )
 
-    async def push_proposal(self, job_id: str, proposal: dict) -> None:
-        """Append a proposal entry to the orchestrator artifact's proposals array."""
+    async def push_artifact_message(self, job_id: str, node: str, message: dict) -> None:
+        """Append a chat message to the artifact's messages array.
+
+        Upserts the artifact with status 'running' if it does not exist yet.
+        This handles finding_reviewer, which calls this before the runner creates its artifact.
+        """
         result = await self._col.update_one(
-            {"_id": job_id, "artifacts.node": "orchestrator"},
-            {"$push": {"artifacts.$.proposals": proposal}},
+            {"_id": job_id, "artifacts.node": node},
+            {"$push": {"artifacts.$.messages": message}},
         )
         if result.matched_count == 0:
-            logger.warning(
-                "push_proposal: orchestrator artifact not found for job=%s", job_id
+            now = datetime.now(UTC)
+            await self._col.update_one(
+                {"_id": job_id},
+                {"$push": {"artifacts": {
+                    "node": node,
+                    "status": "running",
+                    "started_at": now,
+                    "completed_at": None,
+                    "messages": [message],
+                }}},
             )
-
-    async def update_proposal(
-        self, job_id: str, created_at: str, user_response: str, intent: str
-    ) -> None:
-        """Set user_response and user_intended_action on a specific
-        orchestrator proposal."""
-        await self._col.update_one(
-            {"_id": job_id},
-            {
-                "$set": {
-                    "artifacts.$[orch].proposals.$[prop].user_response": user_response,
-                    "artifacts.$[orch].proposals.$[prop].user_intended_action": intent,
-                }
-            },
-            array_filters=[
-                {"orch.node": "orchestrator"},
-                {"prop.created_at": created_at},
-            ],
-        )
 
     async def update_artifact_data(self, job_id: str, node: str, data: dict) -> None:
         """Merge extra fields into an existing artifact entry."""

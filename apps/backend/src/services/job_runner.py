@@ -10,18 +10,13 @@ from src.main_graph import main_graph
 from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
 from src.main_graph.adapters.langchain_vector_store_adapter import LangchainVectorStoreAdapter
 from src.main_graph.constants import (
-    CROSS_ANALYZER,
-    ORCHESTRATOR,
-    REPORT_REVIEWER,
+    EVIDENCE_CORRELATOR,
+    FINDING_REVIEWER,
+    INVESTIGATION_PLANNER,
+    REPORT_BUILDER,
 )
 from src.main_graph.subgraphs.discovery.dao import sbom_dao
 from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
-from src.main_graph.subgraphs.ingestion_subgraphs.impact.dao import impact_dao
-from src.main_graph.subgraphs.ingestion_subgraphs.license_compliance.dao import license_compliance_dao
-from src.main_graph.subgraphs.ingestion_subgraphs.registry.dao import registry_dao
-from src.main_graph.subgraphs.ingestion_subgraphs.repo.dao import repo_dao, repo_cache_dao
-from src.main_graph.subgraphs.ingestion_subgraphs.runtime.dao import runtime_dao, runtime_cache_dao
-from src.main_graph.subgraphs.ingestion_subgraphs.vulnerabilities.dao import vulnerabilities_dao
 from src.models.job import JobStatus
 from src.services.vector_store import delete_store, get_or_create_store
 
@@ -48,19 +43,14 @@ async def _finalize(dao: JobRepositoryPort, job_id: str, result: dict) -> None:
         logger.error("job=%s error=%s", job_id, result["discovery_error"])
         await dao.mark_failed(job_id)
     else:
-        logger.info(
-            "job=%s done subgraphs=%s",
-            job_id,
-            [r.get("subgraph") for r in result.get("subgraph_results", [])],
-        )
+        logger.info("job=%s done", job_id)
         await dao.save_result(
             job_id,
             {
                 "discovery": {
                     k: result[k] for k in _DISCOVERY_OUTPUT_KEYS if k in result
                 },
-                "plan": result.get("plan", []),
-                "subgraph_results": result.get("subgraph_results", []),
+                "risk_findings": [f.__dict__ for f in result.get("risk_findings") or []],
                 "analysis_report": result.get("analysis_report"),
                 "review_approved": result.get("review_approved"),
                 "review_iterations": result.get("review_iterations"),
@@ -74,12 +64,10 @@ async def _stream_graph(
     config,
     dao: JobRepositoryPort,
     job_id: str,
-    on_orchestrator_complete=None,
 ) -> dict | None:
     """Stream graph execution, tracking backbone node artifacts.
 
-    Returns the interrupt payload if the graph paused at the orchestrator,
-    or None if the graph ran to completion.
+    Returns the interrupt payload if the graph paused, or None if run to completion.
     """
     interrupt_payload = None
 
@@ -91,39 +79,39 @@ async def _stream_graph(
 
             if node_name == "discovery":
                 await dao.complete_artifact(job_id, "discovery", "done")
-                await dao.start_artifact(job_id, ORCHESTRATOR)
-            elif node_name == ORCHESTRATOR:
-                artifact_status = (
-                    "cancelled" if node_update.get("cancelled") else "done"
-                )
-                await dao.complete_artifact(job_id, ORCHESTRATOR, artifact_status)
-                if on_orchestrator_complete and not node_update.get("cancelled"):
-                    await on_orchestrator_complete()
-            elif node_name == CROSS_ANALYZER:
-                await dao.start_artifact(job_id, CROSS_ANALYZER)
-                if "analysis_report" in node_update:
+                await dao.start_artifact(job_id, INVESTIGATION_PLANNER)
+            elif node_name == INVESTIGATION_PLANNER:
+                await dao.complete_artifact(job_id, INVESTIGATION_PLANNER, "done")
+            elif node_name == EVIDENCE_CORRELATOR:
+                if "risk_findings" in node_update:
                     await dao.update_artifact_data(
                         job_id,
-                        CROSS_ANALYZER,
-                        {"output": node_update["analysis_report"]},
+                        EVIDENCE_CORRELATOR,
+                        {"output": {"finding_count": len(node_update["risk_findings"])}},
                     )
-                await dao.complete_artifact(job_id, CROSS_ANALYZER, "done")
-            elif node_name == REPORT_REVIEWER:
-                await dao.start_artifact(job_id, REPORT_REVIEWER)
+            elif node_name == FINDING_REVIEWER:
+                await dao.start_artifact(job_id, FINDING_REVIEWER)
                 if "review_approved" in node_update:
                     await dao.update_artifact_data(
                         job_id,
-                        REPORT_REVIEWER,
+                        FINDING_REVIEWER,
                         {
                             "output": {
                                 "review_approved": node_update.get("review_approved"),
-                                "reviewer_feedback": node_update.get(
-                                    "reviewer_feedback"
-                                ),
+                                "reviewer_feedback": node_update.get("reviewer_feedback"),
                             }
                         },
                     )
-                await dao.complete_artifact(job_id, REPORT_REVIEWER, "done")
+                await dao.complete_artifact(job_id, FINDING_REVIEWER, "done")
+            elif node_name == REPORT_BUILDER:
+                await dao.start_artifact(job_id, REPORT_BUILDER)
+                if "analysis_report" in node_update:
+                    await dao.update_artifact_data(
+                        job_id,
+                        REPORT_BUILDER,
+                        {"output": node_update["analysis_report"]},
+                    )
+                await dao.complete_artifact(job_id, REPORT_BUILDER, "done")
 
     return interrupt_payload
 
@@ -138,17 +126,7 @@ def _build_config(job_id: str, dao: JobRepositoryPort) -> dict:
             "vector_store": LangchainVectorStoreAdapter(store),
             "container": container,
             "docker_tool": make_docker_tool(container),
-            "ingestion_daos": {
-                "vulnerabilities": vulnerabilities_dao,
-                "license_compliance": license_compliance_dao,
-                "registry": registry_dao,
-                "repo": repo_dao,
-                "runtime": runtime_dao,
-                "impact": impact_dao,
-            },
             "sbom_dao": sbom_dao,
-            "repo_cache_dao": repo_cache_dao,
-            "runtime_cache_dao": runtime_cache_dao,
         }
     }
 
@@ -171,8 +149,8 @@ async def run_analysis(
                 "repo_url": repo_url,
                 "concern": concern,
                 "job_id": job_id,
-                "subgraph_results": [],
                 "messages": [],
+                "evidence": [],
             },
             config,
             dao,
@@ -197,13 +175,10 @@ async def resume_analysis(
     user_message: str,
     dao: JobRepositoryPort,
 ) -> None:
-    """Resume the orchestrator with a plain-text user message."""
+    """Resume graph execution after a human-in-the-loop interrupt."""
     await dao.update_status(job_id, JobStatus.processing)
 
     config = _build_config(job_id, dao)
-
-    async def _on_approved() -> None:
-        await dao.update_status(job_id, JobStatus.running)
 
     try:
         interrupt_payload = await _stream_graph(
@@ -212,7 +187,6 @@ async def resume_analysis(
             config,
             dao,
             job_id,
-            on_orchestrator_complete=_on_approved,
         )
 
         if interrupt_payload is not None:

@@ -1,0 +1,88 @@
+from unittest.mock import AsyncMock, patch
+
+from src.main_graph.constants import FINDING_REVIEWER
+from src.main_graph.nodes.finding_reviewer import _check_criteria, finding_reviewer
+from src.models.risk_finding import RiskFinding
+
+
+def _make_finding(dep, score, confidence, severity, evidence_count=2):
+    evs = [f"ev{i}" for i in range(evidence_count)]
+    return RiskFinding(
+        dep_name=dep, risk_score=score, confidence=confidence,
+        severity=severity, hypotheses=[], supporting_evidence=evs,
+        contradictions=[], missing_evidence=[], summary="test summary",
+        recommendation="update package", alternatives=["safer-alt"],
+    )
+
+
+async def test_criteria_pass_when_all_met():
+    findings = [_make_finding("lodash", 8.0, 0.8, "high", evidence_count=3)]
+    result = await _check_criteria(findings, [])
+    assert result["approved"] is True
+    assert result["failed_criteria"] == []
+
+
+async def test_criteria_fail_high_score_low_confidence():
+    findings = [_make_finding("lodash", 8.5, 0.3, "high")]
+    result = await _check_criteria(findings, [])
+    assert result["approved"] is False
+    assert any("confidence" in c.lower() for c in result["failed_criteria"])
+
+
+async def test_criteria_fail_high_sev_no_alternative():
+    f = _make_finding("lodash", 8.0, 0.8, "high")
+    f.alternatives = []
+    f.recommendation = None
+    result = await _check_criteria([f], [])
+    assert result["approved"] is False
+
+
+async def test_finding_reviewer_stores_messages_for_high_sev_findings():
+    dao = AsyncMock()
+    config = {"configurable": {"job_repo": dao}}
+    state = {
+        "job_id": "job-1",
+        "risk_findings": [_make_finding("lodash", 8.0, 0.8, "high", evidence_count=3)],
+        "evidence": [],
+        "review_iterations": 0,
+    }
+
+    with patch("src.main_graph.nodes.finding_reviewer.interrupt", return_value="acknowledged"):
+        result = await finding_reviewer(state, config)
+
+    assert result["review_approved"] is True
+
+    calls = dao.push_artifact_message.await_args_list
+    assert len(calls) == 2
+
+    assert calls[0].args[0] == "job-1"
+    assert calls[0].args[1] == FINDING_REVIEWER
+    assert calls[0].args[2]["role"] == "assistant"
+    assert "content" in calls[0].args[2]
+
+    assert calls[1].args[1] == FINDING_REVIEWER
+    assert calls[1].args[2]["role"] == "human"
+    assert calls[1].args[2]["content"] == "acknowledged"
+    assert calls[1].args[2]["action"] == "approve"
+
+    dao.update_artifact_data.assert_awaited_once()
+    data_call = dao.update_artifact_data.await_args_list[0]
+    assert data_call.args[1] == FINDING_REVIEWER
+    assert "risk_findings" in data_call.args[2]["data"]
+
+
+async def test_finding_reviewer_no_messages_when_no_high_sev_findings():
+    dao = AsyncMock()
+    config = {"configurable": {"job_repo": dao}}
+    state = {
+        "job_id": "job-1",
+        "risk_findings": [_make_finding("lodash", 4.0, 0.9, "low", evidence_count=2)],
+        "evidence": [],
+        "review_iterations": 0,
+    }
+
+    result = await finding_reviewer(state, config)
+
+    assert result["review_approved"] is True
+    dao.push_artifact_message.assert_not_awaited()
+    dao.update_artifact_data.assert_not_awaited()
