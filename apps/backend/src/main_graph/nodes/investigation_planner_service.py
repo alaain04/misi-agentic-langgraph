@@ -9,6 +9,7 @@ from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
 from src.domain.ports.job_repository_port import JobRepositoryPort
+from src.main_graph.constants import INVESTIGATION_PLANNER
 from src.main_graph.skills.registry import SKILL_DESCRIPTIONS, SKILL_REGISTRY
 from src.main_graph.state import MainState
 from src.models.hypothesis import Hypothesis
@@ -50,6 +51,19 @@ Output ONLY a valid JSON object:
 }}
 """
 
+_DEP_SELECTOR_SYSTEM = """\
+You are a dependency relevance ranker.
+
+Given a user's security concern and a list of transitive dependency names,
+return the names most relevant to investigate, ordered by relevance to the concern.
+
+Output ONLY a valid JSON array of dependency names, most relevant first:
+["dep1", "dep2", ...]
+"""
+
+_SELECTOR_THRESHOLD = 30   # max transitive deps before LLM ranking kicks in
+_MAX_SELECTED_TRANSITIVES = 20
+
 _INTENT_SYSTEM = """\
 Classify the user's response to a proposed investigation plan as one of:
   - approve: user is satisfied and wants to proceed
@@ -58,6 +72,50 @@ Classify the user's response to a proposed investigation plan as one of:
 
 Return ONLY one word: approve, change, or cancel.
 """
+
+
+def _get_direct_dep_names(sbom: dict) -> set[str]:
+    """Returns names of direct dependencies from the CycloneDX dependencies section."""
+    root_ref = sbom.get("metadata", {}).get("component", {}).get("bom-ref")
+    if not root_ref:
+        return set()
+    ref_to_name = {
+        c.get("bom-ref"): c.get("name")
+        for c in sbom.get("components", [])
+        if c.get("bom-ref")
+    }
+    for entry in sbom.get("dependencies", []):
+        if entry.get("ref") == root_ref:
+            return {ref_to_name[r] for r in entry.get("dependsOn", []) if r in ref_to_name}
+    return set()
+
+
+async def _rank_transitive_deps(concern: str, transitive: list[dict]) -> list[str]:
+    """Ask the LLM to rank transitive deps by relevance to the concern."""
+    names_text = "\n".join(c["name"] for c in transitive)
+    response = await _llm.ainvoke([
+        {"role": "system", "content": _DEP_SELECTOR_SYSTEM},
+        {"role": "user", "content": f"Concern: {concern}\n\nTransitive dependencies:\n{names_text}"},
+    ])
+    result = parse_llm_json(response.content or "")
+    if isinstance(result, list):
+        return result
+    return [c["name"] for c in transitive[:_MAX_SELECTED_TRANSITIVES]]
+
+
+async def _select_deps(concern: str, components: list[dict], sbom: dict) -> list[dict]:
+    """Returns direct deps + LLM-ranked transitive deps for large SBOMs."""
+    direct_names = _get_direct_dep_names(sbom)
+    direct = [c for c in components if c.get("name") in direct_names]
+    transitive = [c for c in components if c.get("name") not in direct_names]
+
+    if len(transitive) <= _SELECTOR_THRESHOLD:
+        return components
+
+    ranked = await _rank_transitive_deps(concern, transitive)
+    top_names = set(ranked[:_MAX_SELECTED_TRANSITIVES])
+    selected_transitive = [c for c in transitive if c.get("name") in top_names]
+    return direct + selected_transitive
 
 
 def _build_skill_descriptions() -> str:
@@ -109,9 +167,8 @@ async def _run_planner(state: MainState, extra_instructions: str = "") -> Invest
     summary = state.get("discovery_summary", "")
     sbom = state.get("sbom_cyclonedx", {})
     components = sbom.get("components", [])
-    comp_list = ", ".join(c["name"] for c in components[:30])
-    if len(components) > 30:
-        comp_list += f", and {len(components) - 30} more"
+    selected = await _select_deps(concern, components, sbom)
+    comp_list = ", ".join(c["name"] for c in selected)
 
     user_msg = (
         f"Concern: {concern}\n"
@@ -153,10 +210,18 @@ async def investigation_planner_service(
         assistant_msg = _present_plan(plan)
         created_at = datetime.now(UTC).isoformat()
 
-        await dao.push_proposal(job_id, {
+        await dao.push_artifact_message(job_id, INVESTIGATION_PLANNER, {
+            "role": "assistant",
+            "content": assistant_msg,
             "created_at": created_at,
-            "plan": {"hypotheses": [h.__dict__ for h in plan.hypotheses], "rationale": plan.rationale},
-            "assistant_message": assistant_msg,
+        })
+        await dao.update_artifact_data(job_id, INVESTIGATION_PLANNER, {
+            "data": {
+                "plan": {
+                    "hypotheses": [h.__dict__ for h in plan.hypotheses],
+                    "rationale": plan.rationale,
+                }
+            }
         })
 
         user_input: str = interrupt({
@@ -171,7 +236,12 @@ async def investigation_planner_service(
                 logger.warning("investigation_planner: vector store add failed")
 
         intent = await _classify_intent(plan, user_input)
-        await dao.update_proposal(job_id, created_at=created_at, user_response=user_input, intent=intent)
+        await dao.push_artifact_message(job_id, INVESTIGATION_PLANNER, {
+            "role": "human",
+            "content": user_input,
+            "created_at": datetime.now(UTC).isoformat(),
+            "action": intent,
+        })
 
         new_messages = [AIMessage(content=assistant_msg), HumanMessage(content=user_input)]
 
