@@ -29,16 +29,7 @@ class JobRepositoryPort(ABC):
     async def complete_artifact(self, job_id: str, node: str, status: str) -> None: ...
 
     @abstractmethod
-    async def push_proposal(self, job_id: str, proposal: dict) -> None: ...
-
-    @abstractmethod
-    async def update_proposal(
-        self,
-        job_id: str,
-        created_at: str,
-        user_response: str,
-        intent: str,
-    ) -> None: ...
+    async def push_artifact_message(self, job_id: str, node: str, message: dict) -> None: ...
 
     @abstractmethod
     async def update_artifact_data(
