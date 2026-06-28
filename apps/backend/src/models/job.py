@@ -27,6 +27,7 @@ class Job(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     result: dict | None = None
+    error: str | None = None
     artifacts: list[dict] = Field(default_factory=list)
 
     def to_doc(self) -> dict:

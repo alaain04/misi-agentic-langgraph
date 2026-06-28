@@ -38,16 +38,11 @@ class JobDAO(JobRepositoryPort):
             },
         )
 
-    async def mark_failed(self, job_id: str) -> None:
-        await self._col.update_one(
-            {"_id": job_id},
-            {
-                "$set": {
-                    "status": JobStatus.failed,
-                    "completed_at": datetime.now(UTC),
-                }
-            },
-        )
+    async def mark_failed(self, job_id: str, error: str | None = None) -> None:
+        fields: dict = {"status": JobStatus.failed, "completed_at": datetime.now(UTC)}
+        if error:
+            fields["error"] = error
+        await self._col.update_one({"_id": job_id}, {"$set": fields})
 
     async def mark_cancelled(self, job_id: str) -> None:
         await self._col.update_one(

@@ -11,3 +11,4 @@ class SbomEntry(BaseModel):
     repo_url: str = ""
     sbom_cyclonedx: dict[str, Any] = Field(default_factory=dict)
     scan_error: str | None = None
+    created_at: float = Field(default_factory=lambda: __import__("time").time())

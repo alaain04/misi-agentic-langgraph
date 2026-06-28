@@ -57,30 +57,55 @@ async def clone_repository_service(state: DiscoveryState, container: ContainerRu
 
 
 async def _run_sbom(
-    pm: str, docker_image: str, repo_path: str, container: ContainerRunPort
+    pm: str, pm_version: str, docker_image: str, repo_path: str, container: ContainerRunPort
 ) -> tuple[dict, str | None]:
-    """Run `{pm} sbom --package-lock-only` and return (sbom_data, error)."""
-    version = _node_version(docker_image)
-    if version is not None and version < _MIN_NODE_VERSION:
+    """Run sbom and return (sbom_data, error). Tries pnpm first for pnpm/yarn, falls back to npm."""
+    node_version = _node_version(docker_image)
+    if node_version is not None and node_version < _MIN_NODE_VERSION:
         return (
             {},
-            f"Node.js {version} does not support '{pm} sbom'"
+            f"Node.js {node_version} does not support 'npm sbom'"
             f" (requires node:{_MIN_NODE_VERSION}+)",
         )
 
-    command = f"{pm} sbom --sbom-format=cyclonedx --package-lock-only"
-    logger.info("generate_sbom: running '%s' in %s", command, docker_image)
-
     volume = f"{repo_path}:/workspace"
-    returncode, stdout, stderr = await container.run(docker_image, command, volume)
+
+    # Try pnpm first for pnpm/yarn projects (sbom added in pnpm v11).
+    # docker_image is already set by inspector_agent to satisfy both project and pnpm requirements.
+    # Fall back to npm if pnpm fails for any reason.
+    if pm in ("pnpm", "yarn"):
+        pnpm_cmd = (
+            f"cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g pnpm@{pm_version}"
+            f" && pnpm sbom --sbom-format=cyclonedx --package-lock-only"
+        )
+        logger.info("generate_sbom: trying pnpm@%s in %s", pm_version, docker_image)
+        returncode, stdout, stderr = await container.run(docker_image, pnpm_cmd, volume, run_as_root=True)
+        if returncode == 0:
+            return _parse_sbom(stdout)
+        logger.warning("generate_sbom: pnpm failed (rc=%d), retrying with npm: %s", returncode, stderr[:300])
+
+    # npm fallback: generate package-lock.json first if the project doesn't have one
+    # (pnpm/yarn projects only have their own lock file format).
+    npm_cmd = (
+        "cd /workspace"
+        " && NO_UPDATE_NOTIFIER=1 npm install --package-lock-only --ignore-scripts"
+        " && NO_UPDATE_NOTIFIER=1 npm sbom --sbom-format=cyclonedx --package-lock-only"
+    )
+    logger.info("generate_sbom: running npm fallback in %s", docker_image)
+    returncode, stdout, stderr = await container.run(docker_image, npm_cmd, volume, run_as_root=True)
 
     if returncode != 0:
-        return {}, stderr or "sbom command failed with no stderr"
+        diagnostic = "\n".join(filter(None, [stderr, stdout])) or "sbom command failed with no output"
+        return {}, diagnostic
 
+    return _parse_sbom(stdout)
+
+
+def _parse_sbom(stdout: str) -> tuple[dict, str | None]:
     try:
         return json.loads(stdout), None
     except json.JSONDecodeError as exc:
-        return {}, f"sbom output is not valid JSON: {exc}"
+        return {}, f"sbom output is not valid JSON: {exc}\nstdout={stdout[:500]}"
 
 
 async def generate_sbom_service(
@@ -103,9 +128,10 @@ async def generate_sbom_service(
         }
 
     pm = state.get("detected_package_manager", "npm")
+    pm_version = state.get("package_manager_version", "latest")
     docker_image = state.get("docker_image", "node:lts-alpine")
 
-    sbom_data, sbom_error = await _run_sbom(pm, docker_image, repo_path, container)
+    sbom_data, sbom_error = await _run_sbom(pm, pm_version, docker_image, repo_path, container)
     if sbom_error:
         logger.error("generate_sbom: %s", sbom_error)
 

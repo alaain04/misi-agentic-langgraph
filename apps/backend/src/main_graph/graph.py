@@ -10,7 +10,6 @@ from src.main_graph.constants import (
     FINDING_REVIEWER,
     INVESTIGATION_PLANNER,
     REPORT_BUILDER,
-    SKILL_DISPATCHER,
     SKILL_EXECUTOR,
 )
 from src.main_graph.nodes.evidence_collector import evidence_collector
@@ -26,6 +25,12 @@ from src.main_graph.subgraphs.discovery import discovery_subgraph
 _MAX_REVIEW_ITERATIONS = 2
 
 
+def _after_discovery(state: MainState) -> str:
+    if state.get("discovery_error") or state.get("sbom_error"):
+        return END
+    return INVESTIGATION_PLANNER
+
+
 def _reviewer_route(state: MainState) -> str:
     if state.get("reviewer_feedback") and (state.get("review_iterations") or 0) < _MAX_REVIEW_ITERATIONS:
         return EVIDENCE_CORRELATOR
@@ -37,7 +42,6 @@ def build_main_graph():
 
     builder.add_node(DISCOVERY, discovery_subgraph)
     builder.add_node(INVESTIGATION_PLANNER, investigation_planner)
-    builder.add_node(SKILL_DISPATCHER, skill_dispatcher)
     builder.add_node(SKILL_EXECUTOR, skill_executor)
     builder.add_node(EVIDENCE_COLLECTOR, evidence_collector)
     builder.add_node(EVIDENCE_CORRELATOR, evidence_correlator)
@@ -45,9 +49,8 @@ def build_main_graph():
     builder.add_node(REPORT_BUILDER, report_builder)
 
     builder.add_edge(START, DISCOVERY)
-    builder.add_edge(DISCOVERY, INVESTIGATION_PLANNER)
-    builder.add_edge(INVESTIGATION_PLANNER, SKILL_DISPATCHER)
-    # skill_dispatcher returns list[Send] — LangGraph handles fan-out internally
+    builder.add_conditional_edges(DISCOVERY, _after_discovery, [INVESTIGATION_PLANNER, END])
+    builder.add_conditional_edges(INVESTIGATION_PLANNER, skill_dispatcher, [SKILL_EXECUTOR, EVIDENCE_COLLECTOR])
     builder.add_edge(SKILL_EXECUTOR, EVIDENCE_COLLECTOR)
     builder.add_edge(EVIDENCE_COLLECTOR, EVIDENCE_CORRELATOR)
     builder.add_edge(EVIDENCE_CORRELATOR, FINDING_REVIEWER)
@@ -56,7 +59,6 @@ def build_main_graph():
 
     return builder.compile(
         checkpointer=InMemorySaver(),
-        interrupt_before=[INVESTIGATION_PLANNER],
     )
 
 

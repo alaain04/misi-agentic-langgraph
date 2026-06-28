@@ -16,6 +16,20 @@ def _get_sbom_attribute(sbom: dict[str, Any], attribute: str) -> str:
     return sbom.get("metadata", {}).get("component", {}).get(attribute, "unknown")
 
 
+def _count_deps(sbom: dict[str, Any]) -> tuple[int, int]:
+    """Return (direct_count, transitive_count) using the CycloneDX dependencies section."""
+    root_ref = sbom.get("metadata", {}).get("component", {}).get("bom-ref", "")
+    all_refs = {c.get("bom-ref") for c in sbom.get("components", []) if c.get("bom-ref")}
+    direct_refs: set[str] = set()
+    for entry in sbom.get("dependencies", []):
+        if entry.get("ref") == root_ref:
+            direct_refs = {r for r in entry.get("dependsOn", []) if r in all_refs}
+            break
+    direct = len(direct_refs)
+    transitive = len(all_refs) - direct
+    return direct, transitive
+
+
 def _extract_components(sbom: dict[str, Any], limit: int = 80) -> tuple[list[str], int]:
     """Return (component_strings, total_count) from SBOM components."""
     components = sbom.get("components", [])
@@ -79,6 +93,7 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
                 name="unknown",
                 package_manager="unknown",
                 direct_dependencies_count=0,
+                transitive_dependencies_count=0,
             ),
             "discovery_summary": f"Discovery failed: {error}",
         }
@@ -90,11 +105,13 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
     project_name = _get_sbom_attribute(sbom, "name")
     project_version = _get_sbom_attribute(sbom, "version")
     components, total_count = _extract_components(sbom)
+    direct_count, transitive_count = _count_deps(sbom)
 
     metadata = ProjectMetadata(
         name=project_name,
         package_manager=pm,
-        direct_dependencies_count=total_count,
+        direct_dependencies_count=direct_count,
+        transitive_dependencies_count=transitive_count,
     )
 
     lock_note = ""
