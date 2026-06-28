@@ -63,7 +63,7 @@ volume for all SBOM commands: "{tmp_dir}:/workspace"
 
   pnpm-lock.yaml:
     run_docker_command(image=docker_image, volume=...,
-      command="cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g pnpm@{{pm_version}} && pnpm sbom --sbom-format=cyclonedx")
+      command="cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g pnpm@{{pm_version}} && pnpm sbom --sbom-format=cyclonedx --package-lock-only")
     (replace {{pm_version}} with the version you detected in Step 2, e.g. "9.15.0" or "latest")
 
   package-lock.json:

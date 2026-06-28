@@ -24,6 +24,12 @@ _SAMPLE_SBOM = {
             "purl": "pkg:npm/accepts@1.3.8",
         },
     ],
+    "dependencies": [
+        {
+            "ref": "my-app",
+            "dependsOn": ["pkg:npm/express@4.18.2", "pkg:npm/accepts@1.3.8"],
+        }
+    ],
 }
 
 
