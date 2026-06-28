@@ -1,5 +1,6 @@
 """Background task: run a job through the full analysis pipeline."""
 
+import dataclasses
 import logging
 import shutil
 
@@ -39,9 +40,10 @@ async def _finalize(dao: JobRepositoryPort, job_id: str, result: dict) -> None:
     if result.get("cancelled"):
         logger.info("job=%s cancelled by user", job_id)
         await dao.mark_cancelled(job_id)
-    elif result.get("discovery_error"):
-        logger.error("job=%s error=%s", job_id, result["discovery_error"])
-        await dao.mark_failed(job_id)
+    elif result.get("discovery_error") or result.get("sbom_error"):
+        error = result.get("discovery_error") or result.get("sbom_error")
+        logger.error("job=%s error=%s", job_id, error)
+        await dao.mark_failed(job_id, error=error)
     else:
         logger.info("job=%s done", job_id)
         await dao.save_result(
@@ -50,7 +52,7 @@ async def _finalize(dao: JobRepositoryPort, job_id: str, result: dict) -> None:
                 "discovery": {
                     k: result[k] for k in _DISCOVERY_OUTPUT_KEYS if k in result
                 },
-                "risk_findings": [f.__dict__ for f in result.get("risk_findings") or []],
+                "risk_findings": [dataclasses.asdict(f) for f in result.get("risk_findings") or []],
                 "analysis_report": result.get("analysis_report"),
                 "review_approved": result.get("review_approved"),
                 "review_iterations": result.get("review_iterations"),
@@ -78,8 +80,11 @@ async def _stream_graph(
                 continue
 
             if node_name == "discovery":
-                await dao.complete_artifact(job_id, "discovery", "done")
-                await dao.start_artifact(job_id, INVESTIGATION_PLANNER)
+                if node_update.get("discovery_error") or node_update.get("sbom_error"):
+                    await dao.complete_artifact(job_id, "discovery", "failed")
+                else:
+                    await dao.complete_artifact(job_id, "discovery", "done")
+                    await dao.start_artifact(job_id, INVESTIGATION_PLANNER)
             elif node_name == INVESTIGATION_PLANNER:
                 await dao.complete_artifact(job_id, INVESTIGATION_PLANNER, "done")
             elif node_name == EVIDENCE_CORRELATOR:
@@ -164,10 +169,10 @@ async def run_analysis(
         snapshot = await main_graph.aget_state(config)
         await _finalize(dao, job_id, snapshot.values)
 
-    except Exception:
+    except Exception as exc:
         logger.exception("job=%s unhandled error in graph", job_id)
         delete_store(job_id)
-        await dao.mark_failed(job_id)
+        await dao.mark_failed(job_id, error=str(exc))
 
 
 async def resume_analysis(
@@ -196,7 +201,7 @@ async def resume_analysis(
         snapshot = await main_graph.aget_state(config)
         await _finalize(dao, job_id, snapshot.values)
 
-    except Exception:
+    except Exception as exc:
         logger.exception("job=%s unhandled error on resume", job_id)
         delete_store(job_id)
-        await dao.mark_failed(job_id)
+        await dao.mark_failed(job_id, error=str(exc))

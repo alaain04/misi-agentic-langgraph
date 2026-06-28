@@ -1,6 +1,7 @@
 """Investigation planner business logic."""
 from __future__ import annotations
 
+import dataclasses
 import logging
 from datetime import UTC, datetime
 
@@ -197,6 +198,38 @@ async def _classify_intent(plan: InvestigationPlan, user_input: str) -> str:
     return intent if intent in ("approve", "change", "cancel") else "change"
 
 
+async def _get_artifact(dao: JobRepositoryPort, job_id: str, node: str) -> dict:
+    """Return the artifact dict for `node` from the stored job, or {}."""
+    job = await dao.get(job_id)
+    if not job:
+        return {}
+    return next((a for a in job.artifacts if a.get("node") == node), {})
+
+
+def _reconstruct_plan(artifact: dict, concern: str) -> InvestigationPlan | None:
+    """Reconstruct InvestigationPlan from stored artifact data, or return None."""
+    plan_data = artifact.get("data", {}).get("plan")
+    if not plan_data:
+        return None
+    try:
+        hypotheses = [Hypothesis(**h) for h in plan_data.get("hypotheses", [])]
+    except Exception:
+        return None
+    skill_plan = [
+        SkillAssignment(dep_name=h.dep_name, hypothesis_id=h.id, skill_id=sid)
+        for h in hypotheses
+        for sid in h.skills
+        if sid in SKILL_REGISTRY
+    ]
+    return InvestigationPlan(
+        concern=concern,
+        hypotheses=hypotheses,
+        skill_plan=skill_plan,
+        rationale=plan_data.get("rationale", ""),
+        dep_filter=plan_data.get("dep_filter"),
+    )
+
+
 async def investigation_planner_service(
     state: MainState,
     dao: JobRepositoryPort,
@@ -204,28 +237,41 @@ async def investigation_planner_service(
 ) -> dict | Command:
     """HITL loop: present plan, classify intent, loop on change, exit on approve/cancel."""
     job_id = state["job_id"]
-    plan = await _run_planner(state)
+    concern = state.get("concern", "")
+
+    # Re-run detection: LangGraph re-executes this entire node from scratch when
+    # resuming from interrupt(). If artifact already has stored plan data, use it
+    # instead of re-calling the LLM — avoids duplicate messages and wrong-plan bugs.
+    artifact = await _get_artifact(dao, job_id, INVESTIGATION_PLANNER)
+    stored_plan = _reconstruct_plan(artifact, concern)
+    plan = stored_plan if stored_plan is not None else await _run_planner(state)
 
     while True:
-        assistant_msg = _present_plan(plan)
-        created_at = datetime.now(UTC).isoformat()
+        messages = artifact.get("messages", [])
+        is_rerun = bool(messages) and messages[-1].get("role") == "assistant"
 
-        await dao.push_artifact_message(job_id, INVESTIGATION_PLANNER, {
-            "role": "assistant",
-            "content": assistant_msg,
-            "created_at": created_at,
-        })
-        await dao.update_artifact_data(job_id, INVESTIGATION_PLANNER, {
-            "data": {
-                "plan": {
-                    "hypotheses": [h.__dict__ for h in plan.hypotheses],
-                    "rationale": plan.rationale,
+        if is_rerun:
+            assistant_msg = messages[-1]["content"]
+        else:
+            assistant_msg = _present_plan(plan)
+            created_at = datetime.now(UTC).isoformat()
+            await dao.push_artifact_message(job_id, INVESTIGATION_PLANNER, {
+                "role": "assistant",
+                "content": assistant_msg,
+                "created_at": created_at,
+            })
+            await dao.update_artifact_data(job_id, INVESTIGATION_PLANNER, {
+                "data": {
+                    "plan": {
+                        "hypotheses": [dataclasses.asdict(h) for h in plan.hypotheses],
+                        "rationale": plan.rationale,
+                        "dep_filter": plan.dep_filter,
+                    }
                 }
-            }
-        })
+            })
 
         user_input: str = interrupt({
-            "investigation_plan": plan.__dict__,
+            "investigation_plan": dataclasses.asdict(plan),
             "assistant_message": assistant_msg,
         })
 
@@ -253,3 +299,5 @@ async def investigation_planner_service(
             return Command(goto=END, update={"cancelled": True, "messages": new_messages})
 
         plan = await _run_planner(state, extra_instructions=user_input)
+        # Reload artifact so next iteration sees the human message as last → not a re-run
+        artifact = await _get_artifact(dao, job_id, INVESTIGATION_PLANNER)

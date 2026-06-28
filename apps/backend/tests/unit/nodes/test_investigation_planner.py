@@ -2,10 +2,12 @@ import json
 from unittest.mock import AsyncMock, patch
 
 from src.models.investigation_plan import InvestigationPlan
+from src.models.job import Job, JobMetadata
 from src.main_graph.nodes.investigation_planner_service import (
     _run_planner,
     _select_deps,
     _get_direct_dep_names,
+    _reconstruct_plan,
 )
 
 
@@ -231,6 +233,7 @@ async def test_planner_service_pushes_assistant_and_human_messages_on_approve():
     from src.main_graph.nodes.investigation_planner_service import investigation_planner_service
 
     dao = AsyncMock()
+    dao.get.return_value = None  # fresh run — no stored artifact
 
     mock_llm = AsyncMock()
     mock_llm.ainvoke.side_effect = [
@@ -271,6 +274,7 @@ async def test_planner_service_pushes_four_messages_on_change_then_approve():
     from src.main_graph.nodes.investigation_planner_service import investigation_planner_service
 
     dao = AsyncMock()
+    dao.get.return_value = None  # fresh run — no stored artifact
 
     mock_llm = AsyncMock()
     mock_llm.ainvoke.side_effect = [
@@ -300,3 +304,97 @@ async def test_planner_service_pushes_four_messages_on_change_then_approve():
     assert calls[3].args[2]["action"] == "approve"
 
     assert dao.update_artifact_data.await_count == 2
+
+
+# ── Re-run detection (LangGraph re-executes node on resume) ───────────────────
+
+_STORED_HYPOTHESIS = {
+    "id": "h1",
+    "dep_name": "lodash",
+    "statement": "lodash may expose prototype pollution",
+    "risk_theme": "vulnerability",
+    "rationale": "known CVEs",
+    "skills": ["VulnerabilitySkill"],
+    "status": "open",
+    "confidence": None,
+}
+
+_STORED_ASSISTANT_MSG = "**Proposed Investigation Plan:**\n..."
+
+
+def _make_job_with_pending_assistant() -> Job:
+    """Job whose investigation_planner artifact has an unanswered assistant message."""
+    return Job(
+        id="job-1",
+        metadata=JobMetadata(repo_url="https://github.com/test/repo", concern="security audit"),
+        artifacts=[{
+            "node": "investigation_planner",
+            "status": "running",
+            "started_at": None,
+            "completed_at": None,
+            "messages": [{"role": "assistant", "content": _STORED_ASSISTANT_MSG, "created_at": "2026-06-28T10:00:00Z"}],
+            "data": {
+                "plan": {
+                    "hypotheses": [_STORED_HYPOTHESIS],
+                    "rationale": "security focus",
+                    "dep_filter": None,
+                }
+            },
+        }],
+    )
+
+
+async def test_planner_service_skips_push_and_replan_on_langgraph_rerun():
+    """On node re-execution after resume, no new assistant message is pushed and
+    the LLM is not called for planning — only for intent classification."""
+    from src.main_graph.nodes.investigation_planner_service import investigation_planner_service
+
+    dao = AsyncMock()
+    dao.get.return_value = _make_job_with_pending_assistant()
+
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke.side_effect = [
+        AsyncMock(content="approve"),  # _classify_intent only — no _run_planner call
+    ]
+
+    with (
+        patch("src.main_graph.nodes.investigation_planner_service._llm", mock_llm),
+        patch("src.main_graph.nodes.investigation_planner_service.interrupt", return_value="ok proceed"),
+    ):
+        result = await investigation_planner_service(_PLANNER_STATE, dao)
+
+    assert "investigation_plan" in result
+
+    # Only the human message should be pushed — no duplicate assistant message
+    calls = dao.push_artifact_message.await_args_list
+    assert len(calls) == 1
+    assert calls[0].args[2]["role"] == "human"
+    assert calls[0].args[2]["action"] == "approve"
+
+    # No update_artifact_data (plan already stored)
+    dao.update_artifact_data.assert_not_awaited()
+
+    # LLM called once (classify_intent), never for re-planning
+    assert mock_llm.ainvoke.await_count == 1
+
+
+def test_reconstruct_plan_returns_none_when_no_data():
+    assert _reconstruct_plan({}, "security") is None
+    assert _reconstruct_plan({"data": {}}, "security") is None
+
+
+def test_reconstruct_plan_restores_plan_from_stored_data():
+    artifact = {
+        "data": {
+            "plan": {
+                "hypotheses": [_STORED_HYPOTHESIS],
+                "rationale": "security focus",
+                "dep_filter": None,
+            }
+        }
+    }
+    plan = _reconstruct_plan(artifact, "security audit")
+    assert plan is not None
+    assert plan.rationale == "security focus"
+    assert len(plan.hypotheses) == 1
+    assert plan.hypotheses[0].dep_name == "lodash"

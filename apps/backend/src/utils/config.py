@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     reviewer_batch_size: int = 20
     repo_cache_max_age_days: int = 1
     runtime_cache_max_age_days: int = 30
+    # Minimum severity for gate-2 human review. Findings below this threshold are
+    # included in the report but do not pause execution for approval.
+    # Values: any | low | medium | high | critical  (default: any)
+    reviewer_min_severity: str = "any"
 
 
 settings = Settings()

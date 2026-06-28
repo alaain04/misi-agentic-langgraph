@@ -13,10 +13,18 @@ from src.main_graph.constants import FINDING_REVIEWER
 from src.main_graph.state import MainState
 from src.models.evidence import Evidence
 from src.models.risk_finding import RiskFinding
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
 _MAX_REVIEW_ITERATIONS = 2
+
+_SEVERITY_RANK: dict[str, int] = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "any": -1}
+
+
+def _above_threshold(severity: str) -> bool:
+    min_rank = _SEVERITY_RANK.get(settings.reviewer_min_severity, -1)
+    return _SEVERITY_RANK.get(severity, 0) >= min_rank
 
 
 async def _check_criteria(findings: list[RiskFinding], evidence: list[Evidence]) -> dict:
@@ -45,7 +53,7 @@ async def _check_criteria(findings: list[RiskFinding], evidence: list[Evidence])
 
 
 def _format_findings_for_review(findings: list[RiskFinding]) -> str:
-    lines = ["**High-Severity Findings Require Your Review:**\n"]
+    lines = ["**Risk Findings Require Your Review:**\n"]
     for f in findings:
         lines.append(f"**{f.dep_name}** — {f.severity.upper()} (score: {f.risk_score}/10, confidence: {f.confidence:.0%})")
         lines.append(f"  {f.summary}")
@@ -73,22 +81,34 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
         logger.info("finding_reviewer: criteria failed, requesting re-correlation. feedback=%s", review["feedback"])
         return {"reviewer_feedback": review["feedback"]}
 
-    high_sev = [f for f in findings if f.severity in ("critical", "high")]
-    if high_sev:
-        assistant_msg = _format_findings_for_review(high_sev)
-        created_at = datetime.now(UTC).isoformat()
+    reviewable = [f for f in findings if _above_threshold(f.severity)]
+    if reviewable:
+        # Re-run detection: LangGraph re-executes this node from scratch when resuming
+        # from interrupt(). Skip push if last stored message is already an assistant message.
+        job = await dao.get(job_id)
+        stored_artifact = next(
+            (a for a in (job.artifacts if job else []) if a.get("node") == FINDING_REVIEWER),
+            {},
+        )
+        stored_messages = stored_artifact.get("messages", [])
+        is_rerun = bool(stored_messages) and stored_messages[-1].get("role") == "assistant"
 
-        await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
-            "role": "assistant",
-            "content": assistant_msg,
-            "created_at": created_at,
-        })
-        await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
-            "data": {"risk_findings": [dataclasses.asdict(f) for f in high_sev]}
-        })
+        if is_rerun:
+            assistant_msg = stored_messages[-1]["content"]
+        else:
+            assistant_msg = _format_findings_for_review(reviewable)
+            created_at = datetime.now(UTC).isoformat()
+            await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
+                "role": "assistant",
+                "content": assistant_msg,
+                "created_at": created_at,
+            })
+            await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
+                "data": {"risk_findings": [dataclasses.asdict(f) for f in reviewable]}
+            })
 
         user_input: str = interrupt({
-            "risk_findings": [f.__dict__ for f in high_sev],
+            "risk_findings": [dataclasses.asdict(f) for f in reviewable],
             "assistant_message": assistant_msg,
         })
 
@@ -99,7 +119,7 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
             "action": "approve",
         })
 
-        logger.info("finding_reviewer: HITL gate 2 — user acknowledged high-severity findings")
+        logger.info("finding_reviewer: HITL gate 2 — user acknowledged findings")
         return {
             "review_approved": True,
             "messages": [AIMessage(content=assistant_msg), HumanMessage(content=user_input)],

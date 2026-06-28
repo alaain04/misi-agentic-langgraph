@@ -26,6 +26,7 @@ class MainState(TypedDict):
     sbom_cyclonedx: NotRequired[dict[str, Any]]
     sbom_result_id: NotRequired[str]
     sbom_error: NotRequired[str | None]
+    lock_generation_error: NotRequired[str | None]
 
     # ── Investigation plan ───────────────────────────────────────────────────
     investigation_plan: NotRequired[InvestigationPlan]

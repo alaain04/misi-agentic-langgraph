@@ -9,6 +9,7 @@ class ProjectMetadata(TypedDict):
     name: str
     package_manager: str
     direct_dependencies_count: int
+    transitive_dependencies_count: int
 
 
 class DiscoveryState(TypedDict):
@@ -23,6 +24,7 @@ class DiscoveryState(TypedDict):
     # set by inspector_agent
     manifest_files: NotRequired[list[str]]
     detected_package_manager: NotRequired[str]  # "npm" | "yarn" | "pnpm"
+    package_manager_version: NotRequired[str]  # e.g. "9.15.0" or "latest"
     lock_file_missing: NotRequired[bool]
     docker_image: NotRequired[str]  # e.g. "node:22-alpine"
     install_command: NotRequired[str]  # e.g. "npm install"

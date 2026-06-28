@@ -12,11 +12,12 @@ from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_llm(Model.GPT_5_4)
 
 
 class InspectorResult(BaseModel):
     detected_package_manager: str  # "npm" | "yarn" | "pnpm"
+    package_manager_version: str  # from packageManager field, e.g. "9.15.0"; "latest" if absent
     lock_file_missing: bool
     manifest_files: list[str]
     docker_image: str  # e.g. "node:22-alpine"
@@ -28,19 +29,28 @@ You are analyzing a Node.js repository at {repo_path}, \
 using the available inspection tools.
 
 Infer:
-detected_package_manager, lock_file_missing, manifest_files, \
-docker_image, install_command
+detected_package_manager, package_manager_version, lock_file_missing, \
+manifest_files, docker_image, install_command
 
 Rules:
 - Detect package manager from lock files:
     pnpm-lock.yaml → pnpm; yarn.lock → yarn; package-lock.json → npm; default: npm
 - lock_file_missing=true if no known lock file exists.
-- Use package.json.engines.node to select Docker image:
-example: "22" → "node:22-alpine"; fallback: "node:lts-alpine"
-Install commands:
-npm → npm install; yarn → yarn install; pnpm → pnpm install
+- Read package.json.packageManager (e.g. "pnpm@9.15.0") to extract package_manager_version.
+  Strip any hash suffix (e.g. "+sha256.abc"). Default: "latest".
+- Select docker_image to satisfy BOTH the project's engines.node AND the package manager's \
+Node requirement:
+    pnpm v11+ requires Node >=22; otherwise follow engines.node.
+    Take the higher of the two requirements.
+    Examples:
+      engines.node=">=20", pnpm@11 → "node:22-alpine"
+      engines.node=">=22", pnpm@9  → "node:22-alpine"
+      engines.node=">=20", npm     → "node:20-alpine"
+    Fallback: "node:lts-alpine"
+- Install commands:
+    npm → npm install; yarn → yarn install; pnpm → pnpm install
 
-If package.json is missing or unreadable, return default
+If package.json is missing or unreadable, return defaults.
 """
 
 
@@ -72,6 +82,7 @@ async def inspector_agent(state: DiscoveryState) -> dict:
 
     return {
         "detected_package_manager": output.detected_package_manager,
+        "package_manager_version": output.package_manager_version,
         "lock_file_missing": output.lock_file_missing,
         "manifest_files": output.manifest_files,
         "docker_image": output.docker_image,

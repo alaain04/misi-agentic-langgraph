@@ -1,0 +1,303 @@
+{
+  "info": {
+    "name": "MISI LangGraph Backend",
+    "description": "E2E collection for the cognitive investigation pipeline.\n\nFlow:\n1. POST /analyze → trace_id is auto-captured into the collection variable.\n2. Poll GET /analyze/{{traceId}} until status = awaiting_approval (plan proposal ready).\n3. POST /analyze/{{traceId}}/chat to approve, change, or cancel the plan (HITL gate 1).\n4. Poll again — if findings are high/critical, status returns to awaiting_approval (HITL gate 2).\n5. POST /analyze/{{traceId}}/chat to acknowledge findings.\n6. Poll until status = done, then read results.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "Backend base URL. Change to your deployed URL if not running locally."
+    },
+    {
+      "key": "traceId",
+      "value": "",
+      "type": "string",
+      "description": "Populated automatically from POST /analyze response."
+    }
+  ],
+  "item": [
+    {
+      "name": "E2E Flow",
+      "description": "Requests in the order they should be executed for a full investigation run.",
+      "item": [
+        {
+          "name": "1. Start Analysis",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/analyze",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze"]
+            },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"repo_url\": \"https://github.com/jsynowiec/node-typescript-boilerplate\",\n  \"concern\": \"Are there vulnerable dependencies in this project? If so, which ones and how severe are they?\"\n}"
+            },
+            "description": "Kicks off the pipeline. Returns 202 immediately while discovery runs in the background.\n\nThe test script captures trace_id into the {{traceId}} collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resp = pm.response.json();",
+                  "pm.collectionVariables.set('traceId', resp.trace_id);",
+                  "console.log('trace_id:', resp.trace_id);",
+                  "pm.test('Status 202', () => pm.response.to.have.status(202));",
+                  "pm.test('trace_id returned', () => pm.expect(resp.trace_id).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Poll Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/analyze/{{traceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "{{traceId}}"]
+            },
+            "description": "Poll this until status changes.\n\nStatus lifecycle:\n  pending → running → awaiting_approval (HITL gate 1: plan review)\n  → running → awaiting_approval (HITL gate 2: findings review, only if high/critical)\n  → done | failed | cancelled\n\nWhen awaiting_approval, the response includes the interrupt payload inside artifacts."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resp = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "console.log('Job status:', resp.status);",
+                  "if (resp.status === 'awaiting_approval') {",
+                  "  console.log('Ready for /chat — send approve, change request, or cancel.');",
+                  "  const planner = (resp.artifacts || []).find(a => a.node === 'investigation_planner');",
+                  "  if (planner && planner.output) console.log('Plan:', JSON.stringify(planner.output, null, 2));",
+                  "}",
+                  "if (resp.status === 'done') {",
+                  "  console.log('Analysis complete. Risk findings:', resp.results?.risk_findings?.length ?? 0);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3a. Approve Plan (HITL gate 1)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/analyze/{{traceId}}/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "{{traceId}}", "chat"]
+            },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Yes, looks good. Please proceed with the full investigation.\"\n}"
+            },
+            "description": "Send when status = awaiting_approval and you want to approve the proposed investigation plan.\n\nThe LLM classifies intent as approve / change / cancel. Clear approval phrases work best."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 202', () => pm.response.to.have.status(202));",
+                  "console.log('Plan approved — poll status until next awaiting_approval or done.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3b. Request Plan Change (HITL gate 1)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/analyze/{{traceId}}/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "{{traceId}}", "chat"]
+            },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Please also include supply chain and maintainer trust checks for all dependencies, not just the direct ones.\"\n}"
+            },
+            "description": "Send when status = awaiting_approval and you want the plan revised.\n\nThe planner will regenerate the plan using your message as additional instructions, then interrupt again for review."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 202', () => pm.response.to.have.status(202));",
+                  "console.log('Change requested — poll status, a revised plan will appear in the next awaiting_approval.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3c. Cancel Analysis (HITL gate 1)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/analyze/{{traceId}}/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "{{traceId}}", "chat"]
+            },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Cancel the analysis.\"\n}"
+            },
+            "description": "Aborts the run. Job status will become cancelled."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 202', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Acknowledge Findings (HITL gate 2)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/analyze/{{traceId}}/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "{{traceId}}", "chat"]
+            },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Acknowledged. Please generate the final report.\"\n}"
+            },
+            "description": "Only triggered when findings contain high or critical severity items.\n\nThe finding_reviewer node presents a summary of critical findings and waits for acknowledgement before building the report."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 202', () => pm.response.to.have.status(202));",
+                  "console.log('Findings acknowledged — poll status until done.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Get Final Results",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/analyze/{{traceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "{{traceId}}"]
+            },
+            "description": "Same as polling but used as the final read once status = done.\n\nresponse.results.analysis_report contains the full report.\nresponse.results.risk_findings contains per-dependency risk findings."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resp = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Analysis done', () => pm.expect(resp.status).to.equal('done'));",
+                  "if (resp.results?.analysis_report) {",
+                  "  const r = resp.results.analysis_report;",
+                  "  console.log('Report summary:', JSON.stringify(r.summary, null, 2));",
+                  "  (r.findings || []).forEach(f => {",
+                  "    console.log(`[${f.severity.toUpperCase()}] ${f.dep_name} — score ${f.risk_score}/10`);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "description": "Job listing and filtering.",
+      "item": [
+        {
+          "name": "List All Jobs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/jobs?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["jobs"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Returns paginated list of all jobs."
+          }
+        },
+        {
+          "name": "List Jobs — awaiting approval",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/jobs?status=awaiting_approval",
+              "host": ["{{baseUrl}}"],
+              "path": ["jobs"],
+              "query": [
+                { "key": "status", "value": "awaiting_approval" }
+              ]
+            },
+            "description": "Filter by status. Valid values: pending, running, processing, awaiting_approval, done, failed, cancelled."
+          }
+        },
+        {
+          "name": "Find Job by trace_id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/jobs?trace_id={{traceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["jobs"],
+              "query": [
+                { "key": "trace_id", "value": "{{traceId}}" }
+              ]
+            },
+            "description": "Lookup a specific job by its trace_id in the list endpoint."
+          }
+        }
+      ]
+    }
+  ]
+}
