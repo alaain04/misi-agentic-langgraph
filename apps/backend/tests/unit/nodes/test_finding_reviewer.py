@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 from src.main_graph.constants import FINDING_REVIEWER
-from src.main_graph.nodes.finding_reviewer import _check_criteria, finding_reviewer
+from src.main_graph.nodes.finding_reviewer import _above_threshold, _check_criteria, finding_reviewer
 from src.models.job import Job, JobMetadata
 from src.models.risk_finding import RiskFinding
 
@@ -111,6 +111,71 @@ async def test_finding_reviewer_no_messages_when_no_findings():
     assert result["review_approved"] is True
     dao.push_artifact_message.assert_not_awaited()
     dao.update_artifact_data.assert_not_awaited()
+
+
+async def test_above_threshold_default_any_passes_all():
+    with patch("src.main_graph.nodes.finding_reviewer.settings") as mock_settings:
+        mock_settings.reviewer_min_severity = "any"
+        assert _above_threshold("low") is True
+        assert _above_threshold("medium") is True
+        assert _above_threshold("high") is True
+        assert _above_threshold("critical") is True
+
+
+async def test_above_threshold_high_filters_medium_and_below():
+    with patch("src.main_graph.nodes.finding_reviewer.settings") as mock_settings:
+        mock_settings.reviewer_min_severity = "high"
+        assert _above_threshold("critical") is True
+        assert _above_threshold("high") is True
+        assert _above_threshold("medium") is False
+        assert _above_threshold("low") is False
+        assert _above_threshold("info") is False
+
+
+async def test_finding_reviewer_skips_gate_when_findings_below_threshold():
+    """When reviewer_min_severity=high, medium findings do not trigger gate 2."""
+    dao = AsyncMock()
+    config = {"configurable": {"job_repo": dao}}
+    state = {
+        "job_id": "job-1",
+        "risk_findings": [_make_finding("lodash", 5.0, 0.7, "medium", evidence_count=2)],
+        "evidence": [],
+        "review_iterations": 0,
+    }
+
+    with patch("src.main_graph.nodes.finding_reviewer.settings") as mock_settings:
+        mock_settings.reviewer_min_severity = "high"
+        result = await finding_reviewer(state, config)
+
+    assert result["review_approved"] is True
+    dao.push_artifact_message.assert_not_awaited()
+    dao.update_artifact_data.assert_not_awaited()
+
+
+async def test_finding_reviewer_triggers_gate_when_findings_meet_threshold():
+    """When reviewer_min_severity=medium, medium findings do trigger gate 2."""
+    dao = AsyncMock()
+    dao.get.return_value = None
+    config = {"configurable": {"job_repo": dao}}
+    state = {
+        "job_id": "job-1",
+        "risk_findings": [_make_finding("lodash", 5.0, 0.7, "medium", evidence_count=2)],
+        "evidence": [],
+        "review_iterations": 0,
+    }
+
+    with (
+        patch("src.main_graph.nodes.finding_reviewer.settings") as mock_settings,
+        patch("src.main_graph.nodes.finding_reviewer.interrupt", return_value="ok"),
+    ):
+        mock_settings.reviewer_min_severity = "medium"
+        result = await finding_reviewer(state, config)
+
+    assert result["review_approved"] is True
+    calls = dao.push_artifact_message.await_args_list
+    assert len(calls) == 2
+    assert calls[0].args[2]["role"] == "assistant"
+    assert calls[1].args[2]["role"] == "human"
 
 
 async def test_finding_reviewer_skips_push_on_langgraph_rerun():

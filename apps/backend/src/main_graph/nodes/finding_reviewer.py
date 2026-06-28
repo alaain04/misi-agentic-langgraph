@@ -13,10 +13,18 @@ from src.main_graph.constants import FINDING_REVIEWER
 from src.main_graph.state import MainState
 from src.models.evidence import Evidence
 from src.models.risk_finding import RiskFinding
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
 _MAX_REVIEW_ITERATIONS = 2
+
+_SEVERITY_RANK: dict[str, int] = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "any": -1}
+
+
+def _above_threshold(severity: str) -> bool:
+    min_rank = _SEVERITY_RANK.get(settings.reviewer_min_severity, -1)
+    return _SEVERITY_RANK.get(severity, 0) >= min_rank
 
 
 async def _check_criteria(findings: list[RiskFinding], evidence: list[Evidence]) -> dict:
@@ -73,7 +81,8 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
         logger.info("finding_reviewer: criteria failed, requesting re-correlation. feedback=%s", review["feedback"])
         return {"reviewer_feedback": review["feedback"]}
 
-    if findings:
+    reviewable = [f for f in findings if _above_threshold(f.severity)]
+    if reviewable:
         # Re-run detection: LangGraph re-executes this node from scratch when resuming
         # from interrupt(). Skip push if last stored message is already an assistant message.
         job = await dao.get(job_id)
@@ -87,7 +96,7 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
         if is_rerun:
             assistant_msg = stored_messages[-1]["content"]
         else:
-            assistant_msg = _format_findings_for_review(findings)
+            assistant_msg = _format_findings_for_review(reviewable)
             created_at = datetime.now(UTC).isoformat()
             await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
                 "role": "assistant",
@@ -95,11 +104,11 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
                 "created_at": created_at,
             })
             await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
-                "data": {"risk_findings": [dataclasses.asdict(f) for f in findings]}
+                "data": {"risk_findings": [dataclasses.asdict(f) for f in reviewable]}
             })
 
         user_input: str = interrupt({
-            "risk_findings": [dataclasses.asdict(f) for f in findings],
+            "risk_findings": [dataclasses.asdict(f) for f in reviewable],
             "assistant_message": assistant_msg,
         })
 
