@@ -1,4 +1,7 @@
-from src.main_graph.nodes.finding_reviewer import _check_criteria
+from unittest.mock import AsyncMock, patch
+
+from src.main_graph.constants import FINDING_REVIEWER
+from src.main_graph.nodes.finding_reviewer import _check_criteria, finding_reviewer
 from src.models.risk_finding import RiskFinding
 
 
@@ -32,12 +35,6 @@ async def test_criteria_fail_high_sev_no_alternative():
     f.recommendation = None
     result = await _check_criteria([f], [])
     assert result["approved"] is False
-
-
-from unittest.mock import AsyncMock, patch
-
-from src.main_graph.constants import FINDING_REVIEWER
-from src.main_graph.nodes.finding_reviewer import finding_reviewer
 
 
 async def test_finding_reviewer_stores_messages_for_high_sev_findings():

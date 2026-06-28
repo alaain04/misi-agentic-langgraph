@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 from datetime import UTC, datetime
 
@@ -83,7 +84,7 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
             "created_at": created_at,
         })
         await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
-            "data": {"risk_findings": [f.__dict__ for f in high_sev]}
+            "data": {"risk_findings": [dataclasses.asdict(f) for f in high_sev]}
         })
 
         user_input: str = interrupt({
