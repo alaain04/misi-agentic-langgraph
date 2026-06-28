@@ -115,10 +115,10 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
     )
 
     lock_note = ""
-    if state.get("lock_generation_error"):
-        err = state["lock_generation_error"]
+    if state.get("sbom_error"):
         lock_note = (
-            f"\nNote: lock file generation failed ({err}); SBOM may be incomplete."
+            f"\nNote: SBOM generation encountered an error ({state['sbom_error']}); "
+            "dependency list may be incomplete."
         )
 
     prompt = _build_prompt(

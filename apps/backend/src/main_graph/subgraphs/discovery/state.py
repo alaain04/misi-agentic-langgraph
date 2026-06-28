@@ -1,4 +1,4 @@
-"""State schema for the ProjectDiscovery subgraph."""
+"""State schema for the discovery subgraph."""
 
 from typing import Any, NotRequired
 
@@ -18,22 +18,12 @@ class DiscoveryState(TypedDict):
     repo_url: str
     concern: str
 
-    # set by clone_repository
+    # set by discovery_orchestrator
     repo_path: NotRequired[str]
-
-    # set by inspector_agent
     manifest_files: NotRequired[list[str]]
-    detected_package_manager: NotRequired[str]  # "npm" | "yarn" | "pnpm"
-    package_manager_version: NotRequired[str]  # e.g. "9.15.0" or "latest"
-    lock_file_missing: NotRequired[bool]
-    docker_image: NotRequired[str]  # e.g. "node:22-alpine"
-    install_command: NotRequired[str]  # e.g. "npm install"
-
-    # set by lock_generator_agent
-    lock_generation_attempts: NotRequired[int]
-    lock_generation_error: NotRequired[str | None]
-
-    # set by generate_sbom
+    detected_package_manager: NotRequired[str]
+    package_manager_version: NotRequired[str]
+    docker_image: NotRequired[str]
     sbom_cyclonedx: NotRequired[dict[str, Any]]
     sbom_result_id: NotRequired[str]
     sbom_error: NotRequired[str | None]
