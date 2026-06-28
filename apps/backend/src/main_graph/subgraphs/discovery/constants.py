@@ -1,7 +1,4 @@
-"""Node name constants for the ProjectDiscovery subgraph."""
+"""Node name constants for the discovery subgraph."""
 
-CLONE_REPOSITORY = "clone_repository"
-INSPECTOR_AGENT = "inspector_agent"
-LOCK_GENERATOR_AGENT = "lock_generator_agent"
-GENERATE_SBOM = "generate_sbom"
+DISCOVERY_ORCHESTRATOR = "discovery_orchestrator"
 BUILD_DEPENDENCY_SUMMARY = "build_dependency_summary"
