@@ -38,7 +38,7 @@ async def test_criteria_fail_high_sev_no_alternative():
     assert result["approved"] is False
 
 
-async def test_finding_reviewer_stores_messages_for_high_sev_findings():
+async def test_finding_reviewer_stores_messages_for_any_findings():
     dao = AsyncMock()
     dao.get.return_value = None  # fresh run — no stored artifact
     config = {"configurable": {"job_repo": dao}}
@@ -73,12 +73,35 @@ async def test_finding_reviewer_stores_messages_for_high_sev_findings():
     assert "risk_findings" in data_call.args[2]["data"]
 
 
-async def test_finding_reviewer_no_messages_when_no_high_sev_findings():
+async def test_finding_reviewer_stores_messages_for_low_sev_findings():
+    """Gate 2 fires for any findings, not just high/critical."""
     dao = AsyncMock()
+    dao.get.return_value = None
     config = {"configurable": {"job_repo": dao}}
     state = {
         "job_id": "job-1",
         "risk_findings": [_make_finding("lodash", 4.0, 0.9, "low", evidence_count=2)],
+        "evidence": [],
+        "review_iterations": 0,
+    }
+
+    with patch("src.main_graph.nodes.finding_reviewer.interrupt", return_value="ok"):
+        result = await finding_reviewer(state, config)
+
+    assert result["review_approved"] is True
+    calls = dao.push_artifact_message.await_args_list
+    assert len(calls) == 2
+    assert calls[0].args[2]["role"] == "assistant"
+    assert calls[1].args[2]["role"] == "human"
+
+
+async def test_finding_reviewer_no_messages_when_no_findings():
+    """Auto-approves silently when the correlator produced no findings at all."""
+    dao = AsyncMock()
+    config = {"configurable": {"job_repo": dao}}
+    state = {
+        "job_id": "job-1",
+        "risk_findings": [],
         "evidence": [],
         "review_iterations": 0,
     }

@@ -45,7 +45,7 @@ async def _check_criteria(findings: list[RiskFinding], evidence: list[Evidence])
 
 
 def _format_findings_for_review(findings: list[RiskFinding]) -> str:
-    lines = ["**High-Severity Findings Require Your Review:**\n"]
+    lines = ["**Risk Findings Require Your Review:**\n"]
     for f in findings:
         lines.append(f"**{f.dep_name}** — {f.severity.upper()} (score: {f.risk_score}/10, confidence: {f.confidence:.0%})")
         lines.append(f"  {f.summary}")
@@ -73,8 +73,7 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
         logger.info("finding_reviewer: criteria failed, requesting re-correlation. feedback=%s", review["feedback"])
         return {"reviewer_feedback": review["feedback"]}
 
-    high_sev = [f for f in findings if f.severity in ("critical", "high")]
-    if high_sev:
+    if findings:
         # Re-run detection: LangGraph re-executes this node from scratch when resuming
         # from interrupt(). Skip push if last stored message is already an assistant message.
         job = await dao.get(job_id)
@@ -88,7 +87,7 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
         if is_rerun:
             assistant_msg = stored_messages[-1]["content"]
         else:
-            assistant_msg = _format_findings_for_review(high_sev)
+            assistant_msg = _format_findings_for_review(findings)
             created_at = datetime.now(UTC).isoformat()
             await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
                 "role": "assistant",
@@ -96,11 +95,11 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
                 "created_at": created_at,
             })
             await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
-                "data": {"risk_findings": [dataclasses.asdict(f) for f in high_sev]}
+                "data": {"risk_findings": [dataclasses.asdict(f) for f in findings]}
             })
 
         user_input: str = interrupt({
-            "risk_findings": [dataclasses.asdict(f) for f in high_sev],
+            "risk_findings": [dataclasses.asdict(f) for f in findings],
             "assistant_message": assistant_msg,
         })
 
@@ -111,7 +110,7 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
             "action": "approve",
         })
 
-        logger.info("finding_reviewer: HITL gate 2 — user acknowledged high-severity findings")
+        logger.info("finding_reviewer: HITL gate 2 — user acknowledged findings")
         return {
             "review_approved": True,
             "messages": [AIMessage(content=assistant_msg), HumanMessage(content=user_input)],
