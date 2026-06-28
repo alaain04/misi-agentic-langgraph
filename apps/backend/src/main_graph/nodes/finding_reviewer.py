@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
+from src.main_graph.config import get_services
+from src.main_graph.constants import FINDING_REVIEWER
 from src.main_graph.state import MainState
 from src.models.evidence import Evidence
 from src.models.risk_finding import RiskFinding
@@ -53,7 +57,11 @@ def _format_findings_for_review(findings: list[RiskFinding]) -> str:
     return "\n".join(lines)
 
 
-async def finding_reviewer(state: MainState) -> dict:
+async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
+    svc = get_services(config)
+    dao = svc["job_repo"]
+    job_id = state["job_id"]
+
     findings = state.get("risk_findings") or []
     evidence = state.get("evidence") or []
     iterations = state.get("review_iterations") or 0
@@ -67,10 +75,29 @@ async def finding_reviewer(state: MainState) -> dict:
     high_sev = [f for f in findings if f.severity in ("critical", "high")]
     if high_sev:
         assistant_msg = _format_findings_for_review(high_sev)
+        created_at = datetime.now(UTC).isoformat()
+
+        await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
+            "role": "assistant",
+            "content": assistant_msg,
+            "created_at": created_at,
+        })
+        await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
+            "data": {"risk_findings": [f.__dict__ for f in high_sev]}
+        })
+
         user_input: str = interrupt({
             "risk_findings": [f.__dict__ for f in high_sev],
             "assistant_message": assistant_msg,
         })
+
+        await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
+            "role": "human",
+            "content": user_input,
+            "created_at": datetime.now(UTC).isoformat(),
+            "action": "approve",
+        })
+
         logger.info("finding_reviewer: HITL gate 2 — user acknowledged high-severity findings")
         return {
             "review_approved": True,
