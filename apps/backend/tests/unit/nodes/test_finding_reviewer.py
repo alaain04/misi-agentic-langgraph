@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 from src.main_graph.constants import FINDING_REVIEWER
 from src.main_graph.nodes.finding_reviewer import _check_criteria, finding_reviewer
+from src.models.job import Job, JobMetadata
 from src.models.risk_finding import RiskFinding
 
 
@@ -39,6 +40,7 @@ async def test_criteria_fail_high_sev_no_alternative():
 
 async def test_finding_reviewer_stores_messages_for_high_sev_findings():
     dao = AsyncMock()
+    dao.get.return_value = None  # fresh run — no stored artifact
     config = {"configurable": {"job_repo": dao}}
     state = {
         "job_id": "job-1",
@@ -85,4 +87,43 @@ async def test_finding_reviewer_no_messages_when_no_high_sev_findings():
 
     assert result["review_approved"] is True
     dao.push_artifact_message.assert_not_awaited()
+    dao.update_artifact_data.assert_not_awaited()
+
+
+async def test_finding_reviewer_skips_push_on_langgraph_rerun():
+    """On node re-execution after resume, no new assistant message is pushed."""
+    stored_msg = "**High-Severity Findings Require Your Review:**\n..."
+    job = Job(
+        id="job-1",
+        metadata=JobMetadata(repo_url="https://github.com/test/repo", concern="security"),
+        artifacts=[{
+            "node": FINDING_REVIEWER,
+            "status": "running",
+            "started_at": None,
+            "completed_at": None,
+            "messages": [{"role": "assistant", "content": stored_msg, "created_at": "2026-06-28T10:00:00Z"}],
+            "data": {"risk_findings": []},
+        }],
+    )
+    dao = AsyncMock()
+    dao.get.return_value = job
+    config = {"configurable": {"job_repo": dao}}
+    state = {
+        "job_id": "job-1",
+        "risk_findings": [_make_finding("lodash", 8.0, 0.8, "high", evidence_count=3)],
+        "evidence": [],
+        "review_iterations": 0,
+    }
+
+    with patch("src.main_graph.nodes.finding_reviewer.interrupt", return_value="acknowledged"):
+        result = await finding_reviewer(state, config)
+
+    assert result["review_approved"] is True
+
+    # Only the human message — no duplicate assistant push
+    calls = dao.push_artifact_message.await_args_list
+    assert len(calls) == 1
+    assert calls[0].args[2]["role"] == "human"
+    assert calls[0].args[2]["action"] == "approve"
+
     dao.update_artifact_data.assert_not_awaited()

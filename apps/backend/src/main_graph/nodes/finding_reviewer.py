@@ -75,20 +75,32 @@ async def finding_reviewer(state: MainState, config: RunnableConfig) -> dict:
 
     high_sev = [f for f in findings if f.severity in ("critical", "high")]
     if high_sev:
-        assistant_msg = _format_findings_for_review(high_sev)
-        created_at = datetime.now(UTC).isoformat()
+        # Re-run detection: LangGraph re-executes this node from scratch when resuming
+        # from interrupt(). Skip push if last stored message is already an assistant message.
+        job = await dao.get(job_id)
+        stored_artifact = next(
+            (a for a in (job.artifacts if job else []) if a.get("node") == FINDING_REVIEWER),
+            {},
+        )
+        stored_messages = stored_artifact.get("messages", [])
+        is_rerun = bool(stored_messages) and stored_messages[-1].get("role") == "assistant"
 
-        await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
-            "role": "assistant",
-            "content": assistant_msg,
-            "created_at": created_at,
-        })
-        await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
-            "data": {"risk_findings": [dataclasses.asdict(f) for f in high_sev]}
-        })
+        if is_rerun:
+            assistant_msg = stored_messages[-1]["content"]
+        else:
+            assistant_msg = _format_findings_for_review(high_sev)
+            created_at = datetime.now(UTC).isoformat()
+            await dao.push_artifact_message(job_id, FINDING_REVIEWER, {
+                "role": "assistant",
+                "content": assistant_msg,
+                "created_at": created_at,
+            })
+            await dao.update_artifact_data(job_id, FINDING_REVIEWER, {
+                "data": {"risk_findings": [dataclasses.asdict(f) for f in high_sev]}
+            })
 
         user_input: str = interrupt({
-            "risk_findings": [f.__dict__ for f in high_sev],
+            "risk_findings": [dataclasses.asdict(f) for f in high_sev],
             "assistant_message": assistant_msg,
         })
 
