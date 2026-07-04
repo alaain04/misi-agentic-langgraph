@@ -11,6 +11,7 @@ from src.main_graph import main_graph
 from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
 from src.main_graph.adapters.langchain_vector_store_adapter import LangchainVectorStoreAdapter
 from src.main_graph.constants import (
+    EVIDENCE_COLLECTOR,
     EVIDENCE_CORRELATOR,
     FINDING_REVIEWER,
     INVESTIGATION_PLANNER,
@@ -87,13 +88,21 @@ async def _stream_graph(
                     await dao.start_artifact(job_id, INVESTIGATION_PLANNER)
             elif node_name == INVESTIGATION_PLANNER:
                 await dao.complete_artifact(job_id, INVESTIGATION_PLANNER, "done")
+            elif node_name == EVIDENCE_COLLECTOR:
+                await dao.start_artifact(job_id, EVIDENCE_COLLECTOR)
+                await dao.complete_artifact(job_id, EVIDENCE_COLLECTOR, "done")
             elif node_name == EVIDENCE_CORRELATOR:
-                if "risk_findings" in node_update:
-                    await dao.update_artifact_data(
-                        job_id,
-                        EVIDENCE_CORRELATOR,
-                        {"output": {"finding_count": len(node_update["risk_findings"])}},
-                    )
+                await dao.start_artifact(job_id, EVIDENCE_CORRELATOR)
+                findings = node_update.get("risk_findings") or []
+                contradictions = node_update.get("contradictions") or []
+                await dao.update_artifact_data(job_id, EVIDENCE_CORRELATOR, {
+                    "data": {
+                        "findings_count": len(findings),
+                        "contradictions_count": len(contradictions),
+                        "deps_covered": [f.dep_name for f in findings],
+                    }
+                })
+                await dao.complete_artifact(job_id, EVIDENCE_CORRELATOR, "done")
             elif node_name == FINDING_REVIEWER:
                 await dao.start_artifact(job_id, FINDING_REVIEWER)
                 if "review_approved" in node_update:
