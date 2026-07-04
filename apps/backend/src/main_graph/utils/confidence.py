@@ -5,6 +5,7 @@ from src.models.risk_finding import ContradictionReport
 
 _SEVERITY_ORDER: dict[str, int] = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 _SEVERITY_BASE: dict[str, float] = {"critical": 10.0, "high": 7.5, "medium": 5.0, "low": 2.5}
+_CONFIDENCE_THRESHOLD = 0.25
 
 
 def compute_confidence(
@@ -32,7 +33,10 @@ def compute_confidence(
 
 
 def compute_severity(evidence: list[Evidence]) -> Severity:
-    supporting = [e for e in evidence if e.supports_hypothesis and e.severity]
+    supporting = [
+        e for e in evidence
+        if e.supports_hypothesis and e.severity and e.confidence >= _CONFIDENCE_THRESHOLD
+    ]
     if not supporting:
         return "low"
     best = max(supporting, key=lambda e: _SEVERITY_ORDER.get(e.severity or "info", 0))

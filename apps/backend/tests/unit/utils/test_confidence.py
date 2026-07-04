@@ -57,6 +57,35 @@ def test_compute_severity_no_supporting():
     assert compute_severity(evs) == "low"
 
 
+def test_compute_severity_suppressed_below_threshold():
+    # medium-severity evidence but confidence=0.1 → below threshold → "low"
+    evs = [
+        _make_evidence("maintainer_signal", "dep", "MaintainerTrustSkill",
+                       confidence=0.1, reliability=0.8, supports=True, severity="medium"),
+    ]
+    assert compute_severity(evs) == "low"
+
+
+def test_compute_severity_kept_at_threshold():
+    # confidence exactly at threshold (0.25) → still counts
+    evs = [
+        _make_evidence("maintainer_signal", "dep", "MaintainerTrustSkill",
+                       confidence=0.25, reliability=0.8, supports=True, severity="medium"),
+    ]
+    assert compute_severity(evs) == "medium"
+
+
+def test_compute_severity_low_confidence_critical_masked_by_high_confidence_medium():
+    # critical at 5% confidence + medium at 60% confidence → medium wins
+    evs = [
+        _make_evidence("vulnerability", "dep", "VulnerabilitySkill",
+                       confidence=0.05, reliability=0.9, supports=True, severity="critical"),
+        _make_evidence("ecosystem", "dep", "EcosystemSkill",
+                       confidence=0.6, reliability=0.8, supports=True, severity="medium"),
+    ]
+    assert compute_severity(evs) == "medium"
+
+
 def test_compute_risk_score():
     assert compute_risk_score("critical", 1.0) == 10.0
     assert compute_risk_score("high", 0.5) == 3.8
