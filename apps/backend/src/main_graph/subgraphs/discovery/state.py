@@ -18,11 +18,12 @@ class DiscoveryState(TypedDict):
     repo_url: str
     concern: str
 
-    # set by discovery_orchestrator
+    # set by discovery nodes
     repo_path: NotRequired[str]
     manifest_files: NotRequired[list[str]]
     detected_package_manager: NotRequired[str]
     package_manager_version: NotRequired[str]
+    has_lock_file: NotRequired[bool]
     docker_image: NotRequired[str]
     sbom_cyclonedx: NotRequired[dict[str, Any]]
     sbom_result_id: NotRequired[str]
