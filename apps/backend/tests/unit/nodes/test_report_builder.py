@@ -95,3 +95,74 @@ def test_report_builder_findings_sorted_by_score():
     assert findings[0]["dep_name"] == "a_dep"
     assert findings[1]["dep_name"] == "m_dep"
     assert findings[2]["dep_name"] == "z_dep"
+
+
+def test_report_builder_overall_risk_level_picks_max_severity():
+    state = {
+        "concern": "security",
+        "risk_findings": [
+            _make_finding("lodash", 8.5, "high"),
+            _make_finding("express", 3.0, "low"),
+        ],
+        "contradictions": [],
+    }
+    result = report_builder(state)
+    assert result["analysis_report"]["overall_risk_level"] == "high"
+
+
+def test_report_builder_overall_risk_level_none_when_no_findings():
+    state = {"concern": "test", "risk_findings": [], "contradictions": []}
+    result = report_builder(state)
+    assert result["analysis_report"]["overall_risk_level"] == "none"
+
+
+def test_report_builder_recommendations_deduplicated():
+    # both findings have recommendation="update" — should appear once
+    state = {
+        "concern": "security",
+        "risk_findings": [
+            _make_finding("lodash", 8.5, "high"),
+            _make_finding("express", 3.0, "low"),
+        ],
+        "contradictions": [],
+    }
+    result = report_builder(state)
+    assert result["analysis_report"]["recommendations"] == ["update"]
+
+
+def test_report_builder_recommendations_empty_when_all_null():
+    from src.models.risk_finding import RiskFinding
+    finding = RiskFinding(
+        dep_name="dep", risk_score=1.0, confidence=0.5, severity="low",
+        hypotheses=[], supporting_evidence=[], contradictions=[], missing_evidence=[],
+        summary="s", recommendation=None, alternatives=[],
+    )
+    state = {"concern": "t", "risk_findings": [finding], "contradictions": []}
+    result = report_builder(state)
+    assert result["analysis_report"]["recommendations"] == []
+
+
+def test_report_builder_recommendations_ordered_by_risk_score():
+    from src.models.risk_finding import RiskFinding
+
+    def _make_rec(dep, score, severity, rec):
+        return RiskFinding(
+            dep_name=dep, risk_score=score, confidence=0.8, severity=severity,
+            hypotheses=[], supporting_evidence=[], contradictions=[], missing_evidence=[],
+            summary=f"{dep} summary", recommendation=rec, alternatives=[],
+        )
+
+    state = {
+        "concern": "security",
+        "risk_findings": [
+            _make_rec("z_dep", 2.0, "low", "pin z_dep"),
+            _make_rec("a_dep", 9.0, "high", "update a_dep immediately"),
+            _make_rec("m_dep", 5.0, "medium", "monitor m_dep"),
+        ],
+        "contradictions": [],
+    }
+    result = report_builder(state)
+    recs = result["analysis_report"]["recommendations"]
+    assert recs[0] == "update a_dep immediately"
+    assert recs[1] == "monitor m_dep"
+    assert recs[2] == "pin z_dep"
