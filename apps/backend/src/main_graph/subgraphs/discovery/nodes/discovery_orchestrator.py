@@ -74,7 +74,7 @@ volume for all SBOM commands: "{tmp_dir}:/workspace"
     run_docker_command(image=docker_image, volume=...,
       command="cd /workspace && NO_UPDATE_NOTIFIER=1 npm install --package-lock-only --ignore-scripts && NO_UPDATE_NOTIFIER=1 npm sbom --sbom-format=cyclonedx --package-lock-only")
 
-### If NO lock file — generate one first, then SBOM:
+### If NO lock file — install first, then SBOM:
 
   pnpm:
     run_docker_command(image=docker_image, volume=...,
@@ -83,7 +83,12 @@ volume for all SBOM commands: "{tmp_dir}:/workspace"
     run_docker_command(image=docker_image, volume=...,
       command="cd /workspace && NO_UPDATE_NOTIFIER=1 npm install --ignore-scripts")
 
-  Verify the lock file was created with read_file. Then run the SBOM command for the detected pm.
+  After install, check if package-lock.json now exists with read_file("{tmp_dir}/package-lock.json").
+  - If the lock file WAS created: run npm sbom with --package-lock-only (same as the lock-file path above).
+  - If the lock file was NOT created (common when .npmrc contains "package-lock=false"): run SBOM
+    directly from node_modules — do NOT use --package-lock-only:
+      run_docker_command(image=docker_image, volume=...,
+        command="cd /workspace && NO_UPDATE_NOTIFIER=1 npm sbom --sbom-format=cyclonedx")
 
 ## Step 4 — Retry strategy (max 8 total SBOM attempts)
 
