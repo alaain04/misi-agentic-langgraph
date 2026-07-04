@@ -16,7 +16,7 @@ from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_5_4)
+_llm = get_llm(Model.GPT_4O_MINI)
 
 _SYSTEM = """\
 You are a Node.js dependency discovery agent. Your goal is to clone a repository, \

@@ -9,7 +9,7 @@ from src.main_graph.subgraphs.discovery.state import (
 )
 from src.utils.llm import Model, get_llm
 
-_llm = get_llm(Model.GPT_5_4)
+_llm = get_llm(Model.GPT_4O_MINI)
 
 
 def _get_sbom_attribute(sbom: dict[str, Any], attribute: str) -> str:
