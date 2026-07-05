@@ -29,8 +29,8 @@ async def run_analysis(
     job_id: str,
     repo_url: str,
     concern: str,
-    autopilot: bool,
     dao: JobRepositoryPort,
+    autopilot: bool = False,
 ) -> None:
     await dao.update_status(job_id, JobStatus.running)
     config = _build_config(job_id, dao)
