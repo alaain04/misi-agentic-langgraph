@@ -54,4 +54,4 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
 
     lock_created = os.path.exists(os.path.join(repo_path, "package-lock.json"))
     logger.info("install_deps: lock_created=%s", lock_created)
-    return {"has_lock_file": lock_created, "discovery_steps": ["install_deps"]}
+    return {"has_lock_file": lock_created}

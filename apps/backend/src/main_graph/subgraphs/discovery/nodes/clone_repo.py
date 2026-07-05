@@ -33,7 +33,7 @@ async def clone_repo(state: DiscoveryState, config: RunnableConfig) -> dict:
 
     if rc != 0:
         logger.error("clone_repo: failed rc=%d stderr=%s", rc, stderr[:300])
-        return {"repo_path": tmp_dir, "discovery_error": stderr.strip() or "git clone failed", "discovery_steps": ["clone_repo"]}
+        return {"repo_path": tmp_dir, "discovery_error": stderr.strip() or "git clone failed"}
 
     logger.info("clone_repo: success repo_url=%s", repo_url)
-    return {"repo_path": tmp_dir, "discovery_steps": ["clone_repo"]}
+    return {"repo_path": tmp_dir}
