@@ -1,10 +1,9 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
 
 from src.main_graph.nodes.conductor import conductor
-from src.models.conductor import ConductorDecision, FindingNote, ToolCall, ToolResult
+from src.models.conductor import ConductorDecision, FindingNote, ToolCall
 
 
 def _make_state(**kwargs):
