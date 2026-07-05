@@ -42,6 +42,9 @@ async def _npm_metadata(package_name: str) -> dict:
 
 @register("github_advisory", "Queries GitHub Advisory Database (GraphQL) for known vulnerabilities in a package")
 async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
+    key = f"advisory:{ecosystem}:{package_name}"
+    if key in _cache:
+        return _cache[key]
     token = os.getenv("GITHUB_TOKEN", "")
     if not token:
         return {"error": "GITHUB_TOKEN not set", "advisories": []}
@@ -68,13 +71,18 @@ async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
             r.raise_for_status()
             data = r.json()
         nodes = data.get("data", {}).get("securityVulnerabilities", {}).get("nodes", [])
-        return {"package": package_name, "advisories": nodes, "count": len(nodes)}
+        result = {"package": package_name, "advisories": nodes, "count": len(nodes)}
+        _cache[key] = result
+        return result
     except Exception as exc:
         return {"error": str(exc), "advisories": []}
 
 
 @register("osv_lookup", "Queries OSV.dev for vulnerability records for a package version")
 async def osv_lookup(package_name: str, version: str = "", ecosystem: str = "npm") -> dict:
+    key = f"osv:{ecosystem}:{package_name}:{version}"
+    if key in _cache:
+        return _cache[key]
     payload = {"package": {"name": package_name, "ecosystem": ecosystem}}
     if version:
         payload["version"] = version
@@ -84,7 +92,9 @@ async def osv_lookup(package_name: str, version: str = "", ecosystem: str = "npm
             r.raise_for_status()
             data = r.json()
         vulns = data.get("vulns", [])
-        return {"package": package_name, "version": version, "vulnerabilities": vulns, "count": len(vulns)}
+        result = {"package": package_name, "version": version, "vulnerabilities": vulns, "count": len(vulns)}
+        _cache[key] = result
+        return result
     except Exception as exc:
         return {"error": str(exc), "vulnerabilities": []}
 
@@ -100,7 +110,6 @@ async def package_reputation(package_name: str) -> dict:
     modified = time_data.get("modified", "")
     maintainers = meta.get("maintainers", [])
     latest_ver = meta.get("dist-tags", {}).get("latest", "")
-    weekly_downloads = meta.get("downloads", {}).get("last-week", None)
     return {
         "package": package_name,
         "created": created,
@@ -109,7 +118,6 @@ async def package_reputation(package_name: str) -> dict:
         "latest_version": latest_ver,
         "maintainer_count": len(maintainers),
         "maintainers": [m.get("name") for m in maintainers],
-        "weekly_downloads": weekly_downloads,
     }
 
 
@@ -119,8 +127,9 @@ async def unmaintained_packages(repo_path: str) -> dict:
     deps = list(_all_deps(pkg).keys())
     cutoff = datetime.now(UTC) - timedelta(days=365)
     flagged = []
-    for dep in deps[:30]:  # limit to avoid rate limiting
-        meta = await _npm_metadata(dep)
+    deps_to_check = deps[:30]  # limit to avoid rate limiting
+    metas = await asyncio.gather(*[_npm_metadata(d) for d in deps_to_check])
+    for dep, meta in zip(deps_to_check, metas):
         if "error" in meta:
             continue
         modified_str = meta.get("time", {}).get("modified", "")
@@ -163,8 +172,9 @@ async def typosquat_detection(repo_path: str) -> dict:
     for dep in deps:
         dep_clean = dep.lstrip("@").split("/")[-1]
         for popular in _POPULAR_PACKAGES:
-            if dep_clean != popular and _edit_distance(dep_clean, popular) <= 2:
-                flagged.append({"package": dep, "similar_to": popular, "edit_distance": _edit_distance(dep_clean, popular)})
+            dist = _edit_distance(dep_clean, popular)
+            if dep_clean != popular and dist <= 2:
+                flagged.append({"package": dep, "similar_to": popular, "edit_distance": dist})
                 break
     return {"potential_typosquats": flagged, "checked": len(deps)}
 
@@ -176,8 +186,9 @@ async def high_risk_packages(repo_path: str) -> dict:
     cutoff_new = datetime.now(UTC) - timedelta(days=90)
     cutoff_abandoned = datetime.now(UTC) - timedelta(days=730)
     flagged = []
-    for dep in deps[:30]:
-        meta = await _npm_metadata(dep)
+    deps_to_check = deps[:30]
+    metas = await asyncio.gather(*[_npm_metadata(d) for d in deps_to_check])
+    for dep, meta in zip(deps_to_check, metas):
         if "error" in meta:
             continue
         time_data = meta.get("time", {})
