@@ -22,7 +22,7 @@ export default function ExecutionPage() {
 
   const { data, isPolling, error, startPolling, resume } = useJobStatus(traceId)
 
-  const { activeGate, messages, send, isSending } = useChat(
+  const { activeGate, messages, send, isSending, sendError } = useChat(
     traceId,
     data?.artifacts ?? [],
     { autopilot, onSent: resume },
@@ -188,6 +188,7 @@ export default function ExecutionPage() {
         messages={messages}
         isSending={isSending}
         onSend={send}
+        sendError={sendError}
       />
     </main>
   )

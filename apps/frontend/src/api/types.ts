@@ -50,6 +50,7 @@ export interface DiscoveryResult {
   discovery_error: string | null
   sbom_result_id: string | null
   sbom_error: string | null
+  lock_generation_error: string | null
 }
 
 export interface Hypothesis {

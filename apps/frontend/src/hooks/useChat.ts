@@ -16,6 +16,7 @@ export function useChat(
   opts: UseChatOptions,
 ) {
   const [isSending, setIsSending] = useState(false)
+  const [sendError, setSendError] = useState<Error | null>(null)
   const hasFiredRef = useRef<Gate | null>(null)
   const optsRef = useRef(opts)
   useEffect(() => {
@@ -37,9 +38,12 @@ export function useChat(
     async (message: string) => {
       if (!traceId) return
       setIsSending(true)
+      setSendError(null)
       try {
         await sendChatMessage(traceId, message)
         optsRef.current.onSent()
+      } catch (err) {
+        setSendError(err instanceof Error ? err : new Error(String(err)))
       } finally {
         setIsSending(false)
       }
@@ -60,5 +64,5 @@ export function useChat(
     if (!activeGate) hasFiredRef.current = null
   }, [activeGate])
 
-  return { activeGate, messages, send, isSending }
+  return { activeGate, messages, send, isSending, sendError }
 }

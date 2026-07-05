@@ -1,6 +1,7 @@
 // src/components/chat/ChatOverlay.tsx
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
 import { Spinner } from '../ui/Spinner'
@@ -14,6 +15,7 @@ interface ChatOverlayProps {
   messages: ArtifactMessage[]
   isSending: boolean
   onSend: (message: string) => Promise<void>
+  sendError?: Error | null
 }
 
 const GATE_LABELS: Record<Gate, string> = {
@@ -28,6 +30,7 @@ export function ChatOverlay({
   messages,
   isSending,
   onSend,
+  sendError,
 }: ChatOverlayProps) {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -102,7 +105,7 @@ export function ChatOverlay({
                 </div>
               )
             }
-            const html = marked.parse(msg.content) as string
+            const html = DOMPurify.sanitize(marked.parse(msg.content) as string)
             return (
               <div key={i} className="rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
                 <div
@@ -151,6 +154,11 @@ export function ChatOverlay({
 
         {/* Input */}
         <div className="shrink-0 border-t border-[--color-border] p-4">
+          {sendError && (
+            <p className="font-mono text-[10px] text-[--color-error] mb-2">
+              Failed to send — {sendError.message}
+            </p>
+          )}
           <div className="flex gap-2">
             <textarea
               rows={2}
