@@ -1,10 +1,8 @@
 import type { ComponentType } from 'react'
 import type { NodeId } from './graphDefinition'
-import type { PanelProps } from './panels/DiscoveryPanel'
+import type { PanelProps } from './panels/types'
 import { DiscoveryPanel } from './panels/DiscoveryPanel'
 import { PlannerPanel } from './panels/PlannerPanel'
-import { SubgraphPanel } from './panels/SubgraphPanel'
-import { FinalReportPanel } from './panels/FinalReportPanel'
 
 // Re-export so callers only need to import from this file
 export type { PanelProps }
@@ -12,18 +10,10 @@ export type { PanelProps }
 type PanelComponent = ComponentType<PanelProps>
 
 // Registry: nodeId → panel component
-// To add a new subgraph panel: add one line here (or reuse SubgraphPanel).
+// To add a new node panel: add one line here.
 export const NODE_PANEL_REGISTRY = new Map<NodeId, PanelComponent>([
   ['discovery', DiscoveryPanel],
-  ['orchestrator', PlannerPanel],
-  ['registry', SubgraphPanel],
-  ['repo', SubgraphPanel],
-  ['runtime', SubgraphPanel],
-  ['risk_score', SubgraphPanel],
-  ['recommendation', SubgraphPanel],
-  ['summarizer', FinalReportPanel],
-  ['reviewer', FinalReportPanel],
-  ['recommender', FinalReportPanel],
+  ['investigation_planner', PlannerPanel],
 ])
 
 export function getPanelComponent(id: NodeId): PanelComponent | undefined {
