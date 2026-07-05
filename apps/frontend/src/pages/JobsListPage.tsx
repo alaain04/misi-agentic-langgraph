@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { getJobs } from '../api/client'
 import type { JobStatus, JobsListResponse } from '../api/types'
 import { Badge } from '../components/ui/Badge'
@@ -14,8 +14,11 @@ const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'pending', label: 'pending' },
   { value: 'running', label: 'running' },
+  { value: 'processing', label: 'processing' },
+  { value: 'awaiting_approval', label: 'awaiting approval' },
   { value: 'done', label: 'done' },
   { value: 'failed', label: 'failed' },
+  { value: 'cancelled', label: 'cancelled' },
 ]
 
 function formatDate(iso: string): string {
@@ -89,6 +92,12 @@ export default function JobsListPage() {
         </span>
         <div className="h-px flex-1 bg-[--color-border]" />
         {data && <span className="font-mono text-xs text-[--color-muted]">{data.total} total</span>}
+        <Link
+          to="/new"
+          className="rounded border border-[--color-accent]/40 bg-[--color-accent]/5 px-3 py-1.5 font-mono text-xs text-[--color-accent] transition-colors hover:bg-[--color-accent]/10"
+        >
+          New analysis →
+        </Link>
       </div>
 
       {/* Filters */}
@@ -159,7 +168,9 @@ export default function JobsListPage() {
               {data.items.map((item) => (
                 <tr
                   key={item.trace_id}
-                  onClick={() => navigate(`/jobs/${item.trace_id}`)}
+                  onClick={() =>
+                    navigate(item.status === 'done' ? `/jobs/${item.trace_id}/report` : `/jobs/${item.trace_id}`)
+                  }
                   className="cursor-pointer border-b border-[--color-border] bg-[--color-surface] transition-colors duration-100 last:border-b-0 hover:bg-white/[0.03]"
                 >
                   <td className="px-4 py-3">

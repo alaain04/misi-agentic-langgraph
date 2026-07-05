@@ -35,18 +35,10 @@ const FEATURES = [
 ]
 
 const STEPS = [
-  { n: '01', label: 'Import your project', detail: 'Upload package.json and lock files' },
-  {
-    n: '02',
-    label: 'AI builds the analysis plan',
-    detail: 'Deprisk determines the safest review strategy',
-  },
-  { n: '03', label: 'Validate the scan', detail: 'Approve before deeper inspection' },
-  {
-    n: '04',
-    label: 'Receive actionable fixes',
-    detail: 'Prioritized risks with remediation guidance',
-  },
+  { n: '01', label: 'Enter repository URL', detail: 'Paste any GitHub repository URL' },
+  { n: '02', label: 'AI builds the analysis plan', detail: 'Hypotheses and skill assignments generated' },
+  { n: '03', label: 'Review and approve', detail: 'Inspect the plan before execution starts' },
+  { n: '04', label: 'Receive actionable report', detail: 'Prioritised risks with remediation guidance' },
 ]
 
 export function LandingPage() {
@@ -88,7 +80,7 @@ export function LandingPage() {
         </p>
 
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-          <Button size="lg" onClick={() => navigate('/scan')}>
+          <Button size="lg" onClick={() => navigate('/new')}>
             Start scanning →
           </Button>
         </div>
@@ -170,7 +162,7 @@ export function LandingPage() {
           <p className="mx-auto mb-6 max-w-sm font-mono text-xs text-[--color-muted]">
             Start with one of our curated samples or paste your own package.json and lock file.
           </p>
-          <Button size="lg" onClick={() => navigate('/scan')}>
+          <Button size="lg" onClick={() => navigate('/new')}>
             Launch scanner →
           </Button>
         </div>

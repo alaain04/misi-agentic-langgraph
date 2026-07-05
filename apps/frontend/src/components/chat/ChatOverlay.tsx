@@ -110,7 +110,6 @@ export function ChatOverlay({
                     'prose prose-invert prose-sm max-w-none font-mono text-xs leading-relaxed',
                     'text-[--color-text] [&_strong]:text-[--color-text] [&_li]:text-[--color-muted]',
                   )}
-                  // eslint-disable-next-line react/no-danger
                   dangerouslySetInnerHTML={{ __html: html }}
                 />
               </div>
