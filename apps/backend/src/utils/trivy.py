@@ -17,7 +17,7 @@ async def run_trivy(
     import json
 
     volume = _TRIVY_VOLUME_TEMPLATE.format(repo_path=repo_path)
-    command = "fs --quiet " + " ".join(trivy_args) + " /repo"
+    command = "trivy fs --quiet --cache-dir /tmp/trivy-cache " + " ".join(trivy_args) + " /repo"
     returncode, stdout, stderr = await container.run(
         _TRIVY_IMAGE, command, volume
     )

@@ -24,7 +24,7 @@ async def _run_with_peer_retry(
     rc, out, err = await container.run(image=image, command=cmd, volume=volume, run_as_root=True)
     if rc == 0 or pm == "pnpm":
         return rc, out, err
-    if "ERESOLVE" in err or "peer" in err.lower():
+    if "ERESOLVE" in err or "ESBOMPROBLEMS" in err or "peer" in err.lower():
         rc, out, err = await container.run(
             image=image, command=cmd + " --legacy-peer-deps", volume=volume, run_as_root=True
         )
