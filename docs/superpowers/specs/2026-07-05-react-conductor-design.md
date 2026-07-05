@@ -123,35 +123,71 @@ Tool failures are non-fatal: `ToolResult.error` is set and the conductor observe
 
 ## Tools
 
-All tools are async. External API calls have a 10s timeout. Failures return a structured error object.
+All tools are async. Tools that hit external APIs (marked ★) have a 10s timeout, require rate limiting, and should cache results within a session. Failures return a structured error object the conductor can observe and decide whether to retry or skip.
 
-### Dependency analysis
+### Core dependency inventory
 | Tool | Description |
 |------|-------------|
-| `npm_audit(repo_path)` | Runs `npm audit --json`; returns vulnerabilities with severity, CVE IDs, affected packages |
 | `npm_list(repo_path)` | Runs `npm list --json`; returns full dependency tree with versions |
+| `package_json(repo_path)` | Parses `package.json`; returns declared dependencies, scripts, engines, package manager, workspaces |
+| `package_lock(repo_path)` | Parses `package-lock.json` (or equivalent lockfile); returns resolved versions and integrity hashes |
 | `npm_outdated(repo_path)` | Returns packages with newer versions available |
-| `check_licenses(repo_path)` | Parses license info from `npm list --json --long`; flags problematic licenses |
 
-### Registry & advisory lookups
+### Security
 | Tool | Description |
 |------|-------------|
-| `npm_registry_info(package_name)` | Fetches publish history, maintainers, download counts from npm registry API |
+| `npm_audit(repo_path)` | Runs `npm audit --json`; returns vulnerabilities, severities, advisories, affected packages |
+| `dependency_confusion(repo_path)` | Detects internal/private package names that may be vulnerable to dependency confusion attacks |
+| `install_scripts(repo_path)` | Detects packages with `preinstall`, `install`, `postinstall`, or other lifecycle scripts |
+
+### External advisories ★
+| Tool | Description |
+|------|-------------|
 | `github_advisory(package_name, ecosystem)` | Queries GitHub Advisory Database (GraphQL) for known vulnerabilities |
 | `osv_lookup(package_name, version, ecosystem)` | Queries OSV.dev for vulnerability records |
 
-### Repository inspection
+### Licensing
 | Tool | Description |
 |------|-------------|
-| `read_file(repo_path, relative_path)` | Reads a file from the cloned repo |
+| `check_licenses(repo_path)` | Collects licenses for all dependencies and flags disallowed licenses |
+
+### Dependency health
+| Tool | Description |
+|------|-------------|
+| `duplicate_packages(repo_path)` | Finds multiple installed versions of the same package |
+| `missing_dependencies(repo_path)` | Finds imported packages missing from `package.json` |
+| `dependency_size(repo_path)` | Estimates install size and identifies large dependencies |
+| `dependency_stats(repo_path)` | Reports total, direct, transitive, dev, optional, and peer dependency counts |
+
+### Version analysis
+| Tool | Description |
+|------|-------------|
+| `version_ranges(repo_path)` | Detects broad version ranges (`*`, `latest`, wide `^`/`>=`) |
+| `deprecated_packages(repo_path)` | Detects deprecated packages using npm metadata |
+| `breaking_updates(repo_path)` | Identifies available major-version upgrades |
+
+### Supply-chain risk ★
+| Tool | Description |
+|------|-------------|
+| `package_reputation(package_name)` | Reports package age, maintainers, release cadence, popularity via npm registry + GitHub API |
+| `unmaintained_packages(repo_path)` | Flags packages with no releases or commits for a long period |
+| `typosquat_detection(repo_path)` | Detects package names similar to popular packages |
+| `high_risk_packages(repo_path)` | Flags packages with unusual characteristics (single maintainer, very new, abandoned, etc.) |
+
+### Ad-hoc repository inspection
+| Tool | Description |
+|------|-------------|
+| `read_file(repo_path, relative_path)` | Reads a specific file from the cloned repo |
 | `list_directory(repo_path, relative_path)` | Lists files at a path in the cloned repo |
 
-### Package health
+### Monorepo
 | Tool | Description |
 |------|-------------|
-| `github_repo_info(owner, repo)` | Stars, last commit date, open issues, archived status from GitHub API |
+| `workspace_dependencies(repo_path)` | Lists dependencies by workspace/package for monorepo projects |
 
-Docker-based Trivy scanner is removed. Coverage equivalent is provided by `npm_audit` + `github_advisory` + `osv_lookup`.
+**Removed from original design:** Docker-based Trivy scanner. Coverage is provided by `npm_audit` + `github_advisory` + `osv_lookup`.
+
+**Not included (deferred):** `npm_sbom` (redundant with `npm_list`), `license_notices` (report generation, not investigation), `unused_dependencies` (noisy AST analysis), `dependency_graph` (prohibitively large output), `reachability_check` (complex static analysis — good follow-up iteration).
 
 ---
 
