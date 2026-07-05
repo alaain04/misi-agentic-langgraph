@@ -1,18 +1,24 @@
+import operator
 from typing import get_type_hints
 
 from src.main_graph.state import MainState
 
 
-def test_state_has_evidence_field():
+def test_tool_results_has_add_reducer():
     hints = get_type_hints(MainState, include_extras=True)
-    assert "evidence" in hints
+    tool_results_hint = hints["tool_results"]
+    metadata = getattr(tool_results_hint, "__metadata__", ())
+    assert operator.add in metadata
 
 
-def test_state_has_investigation_plan_field():
+def test_findings_has_add_reducer():
     hints = get_type_hints(MainState, include_extras=True)
-    assert "investigation_plan" in hints
+    findings_hint = hints["findings"]
+    metadata = getattr(findings_hint, "__metadata__", ())
+    assert operator.add in metadata
 
 
-def test_state_has_risk_findings_field():
-    hints = get_type_hints(MainState, include_extras=True)
-    assert "risk_findings" in hints
+def test_required_input_fields_present():
+    hints = get_type_hints(MainState)
+    for field in ("repo_url", "concern", "job_id", "autopilot"):
+        assert field in hints
