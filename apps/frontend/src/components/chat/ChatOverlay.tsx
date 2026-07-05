@@ -70,17 +70,17 @@ export function ChatOverlay({
       />
 
       {/* Panel */}
-      <div className="relative z-10 flex h-[70vh] w-full max-w-xl flex-col rounded-xl border border-[--color-border] bg-[--color-surface] shadow-2xl">
+      <div className="relative z-10 flex h-[70vh] w-full max-w-xl flex-col rounded-xl border border-(--color-border) bg-(--color-surface) shadow-2xl">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-[--color-border] px-5 py-4">
-          <span className="font-mono text-xs font-semibold tracking-widest text-[--color-accent] uppercase">
+        <div className="flex shrink-0 items-center justify-between border-b border-(--color-border) px-5 py-4">
+          <span className="font-mono text-xs font-semibold tracking-widest text-(--color-accent) uppercase">
             {headerLabel}
           </span>
           {isDismissible && (
             <button
               type="button"
               onClick={onClose}
-              className="font-mono text-xs text-[--color-muted] transition-colors hover:text-[--color-text]"
+              className="font-mono text-xs text-(--color-muted) transition-colors hover:text-(--color-text)"
               aria-label="Close"
             >
               ✕
@@ -91,7 +91,7 @@ export function ChatOverlay({
         {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
           {messages.length === 0 && (
-            <p className="py-8 text-center font-mono text-xs text-[--color-muted]">
+            <p className="py-8 text-center font-mono text-xs text-(--color-muted)">
               Waiting for agent…
             </p>
           )}
@@ -99,19 +99,19 @@ export function ChatOverlay({
             if (msg.role === 'human') {
               return (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[80%] rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
-                    <p className="font-mono text-xs text-[--color-text]">{msg.content}</p>
+                  <div className="max-w-[80%] rounded-lg border border-(--color-border) bg-(--color-surface-raised) px-4 py-3">
+                    <p className="font-mono text-xs text-(--color-text)">{msg.content}</p>
                   </div>
                 </div>
               )
             }
             const html = DOMPurify.sanitize(marked.parse(msg.content) as string)
             return (
-              <div key={i} className="rounded-lg border border-[--color-border] bg-[--color-surface-raised] px-4 py-3">
+              <div key={i} className="rounded-lg border border-(--color-border) bg-(--color-surface-raised) px-4 py-3">
                 <div
                   className={cn(
                     'prose prose-invert prose-sm max-w-none font-mono text-xs leading-relaxed',
-                    'text-[--color-text] [&_strong]:text-[--color-text] [&_li]:text-[--color-muted]',
+                    'text-(--color-text) [&_strong]:text-(--color-text) [&_li]:text-(--color-muted)',
                   )}
                   dangerouslySetInnerHTML={{ __html: html }}
                 />
@@ -119,7 +119,7 @@ export function ChatOverlay({
             )
           })}
           {isSending && (
-            <div className="flex items-center gap-2 font-mono text-xs text-[--color-muted]">
+            <div className="flex items-center gap-2 font-mono text-xs text-(--color-muted)">
               <Spinner size="sm" />
               Sending…
             </div>
@@ -129,15 +129,15 @@ export function ChatOverlay({
 
         {/* Quick actions — Gate 1 only */}
         {showQuickActions && (
-          <div className="shrink-0 flex flex-wrap items-center gap-2 border-t border-[--color-border] px-5 py-3">
-            <span className="font-mono text-[10px] tracking-widest text-[--color-muted] uppercase">
+          <div className="shrink-0 flex flex-wrap items-center gap-2 border-t border-(--color-border) px-5 py-3">
+            <span className="font-mono text-[10px] tracking-widest text-(--color-muted) uppercase">
               quick:
             </span>
             <button
               type="button"
               disabled={isSending}
               onClick={() => void handleSend('Yes, proceed with the plan')}
-              className="rounded border border-[--badge-done-border] px-2.5 py-1 font-mono text-[10px] text-[--badge-done-text] transition-colors hover:bg-[--badge-done-bg] disabled:opacity-40"
+              className="rounded border border-(--badge-done-border) px-2.5 py-1 font-mono text-[10px] text-(--badge-done-text) transition-colors hover:bg-(--badge-done-bg) disabled:opacity-40"
             >
               Yes, proceed
             </button>
@@ -145,7 +145,7 @@ export function ChatOverlay({
               type="button"
               disabled={isSending}
               onClick={() => void handleSend('Cancel this analysis')}
-              className="rounded border border-[--badge-failed-border] px-2.5 py-1 font-mono text-[10px] text-[--badge-failed-text] transition-colors hover:bg-[--badge-failed-bg] disabled:opacity-40"
+              className="rounded border border-(--badge-failed-border) px-2.5 py-1 font-mono text-[10px] text-(--badge-failed-text) transition-colors hover:bg-(--badge-failed-bg) disabled:opacity-40"
             >
               Cancel analysis
             </button>
@@ -153,9 +153,9 @@ export function ChatOverlay({
         )}
 
         {/* Input */}
-        <div className="shrink-0 border-t border-[--color-border] p-4">
+        <div className="shrink-0 border-t border-(--color-border) p-4">
           {sendError && (
-            <p className="font-mono text-[10px] text-[--color-error] mb-2">
+            <p className="font-mono text-[10px] text-(--color-error) mb-2">
               Failed to send — {sendError.message}
             </p>
           )}
@@ -171,9 +171,9 @@ export function ChatOverlay({
                   : 'Type your response…'
               }
               className={cn(
-                'flex-1 resize-none rounded border border-[--color-border] bg-[--color-surface-raised]',
-                'px-3 py-2 font-mono text-xs text-[--color-text] placeholder:text-[--color-muted]/40',
-                'transition-colors focus:border-[--color-accent] focus:outline-none',
+                'flex-1 resize-none rounded border border-(--color-border) bg-(--color-surface-raised)',
+                'px-3 py-2 font-mono text-xs text-(--color-text) placeholder:text-(--color-muted)/40',
+                'transition-colors focus:border-(--color-accent) focus:outline-none',
                 'disabled:cursor-not-allowed disabled:opacity-40',
               )}
               onKeyDown={(e) => {

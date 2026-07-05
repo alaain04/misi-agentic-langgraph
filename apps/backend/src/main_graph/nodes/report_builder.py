@@ -1,10 +1,13 @@
 """Deterministic assembly of analysis report from risk findings and contradictions."""
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from src.main_graph.state import MainState
 from src.models.risk_finding import RiskFinding
+
+logger = logging.getLogger(__name__)
 
 _SEVERITY_ORDER: dict[str, int] = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
@@ -65,4 +68,8 @@ def report_builder(state: MainState) -> dict:
         ],
     }
 
+    logger.info(
+        "report_builder: overall_risk=%s findings=%d recommendations=%d",
+        report["overall_risk_level"], len(findings), len(report["recommendations"]),
+    )
     return {"analysis_report": report}

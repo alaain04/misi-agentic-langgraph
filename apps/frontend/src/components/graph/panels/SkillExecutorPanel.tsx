@@ -8,23 +8,23 @@ export function SkillExecutorPanel({ artifacts }: PanelProps) {
   const steps = collector?.steps ?? []
 
   if (steps.length === 0) {
-    return <p className="font-mono text-xs text-[--color-muted]">No skills executed yet.</p>
+    return <p className="font-mono text-xs text-(--color-muted)">No skills executed yet.</p>
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <p className="font-mono text-xs tracking-widest text-[--color-muted] uppercase">
+        <p className="font-mono text-xs tracking-widest text-(--color-muted) uppercase">
           Skills executed
         </p>
-        <span className="rounded-full border border-[--color-border] bg-[--color-surface-raised] px-2 py-0.5 font-mono text-[10px] text-[--color-text]">
+        <span className="rounded-full border border-(--color-border) bg-(--color-surface-raised) px-2 py-0.5 font-mono text-[10px] text-(--color-text)">
           {steps.length}
         </span>
       </div>
       <ul className="space-y-1">
         {steps.map((step) => (
-          <li key={step} className="flex items-center gap-2 font-mono text-xs text-[--color-text]">
-            <span className="text-[10px] text-[--color-accent]">▸</span>
+          <li key={step} className="flex items-center gap-2 font-mono text-xs text-(--color-text)">
+            <span className="text-[10px] text-(--color-accent)">▸</span>
             {step}
           </li>
         ))}

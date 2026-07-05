@@ -48,7 +48,7 @@ run: ## Run the app in production mode
 	uv run uvicorn src.main:app --host 0.0.0.0 --port 8001
 
 dev: ## Run the app in development mode (hot-reload)
-	uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload --log-level debug
+	uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload --reload-dir src --log-level debug
 
 # ---------------------------------------------------------------------------
 # Docker

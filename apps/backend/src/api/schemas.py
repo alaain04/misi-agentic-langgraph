@@ -33,6 +33,7 @@ class AnalysisStatusResponse(BaseModel):
     metadata: JobMetadata
     completed_at: datetime | None = None
     results: dict | None = None
+    error: str | None = None
     artifacts: list[dict] = []
     graph: GraphInfo
 

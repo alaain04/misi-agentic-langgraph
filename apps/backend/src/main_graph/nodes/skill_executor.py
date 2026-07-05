@@ -51,4 +51,4 @@ async def skill_executor(state: MainState, config: RunnableConfig) -> dict:
         evidence = []
 
     logger.info("skill_executor: skill=%s dep=%s evidence_count=%d", skill_id, dep_name, len(evidence))
-    return {"evidence": evidence}
+    return {"evidence": evidence, "executed_skill_tasks": [f"{skill_id}:{dep_name}"]}

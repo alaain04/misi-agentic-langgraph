@@ -48,5 +48,9 @@ class MainState(TypedDict):
     review_iterations: NotRequired[int]
     analysis_report: NotRequired[dict[str, Any]]
 
+    # ── Step tracking ────────────────────────────────────────────────────────
+    discovery_steps: Annotated[list[str], operator.add]
+    executed_skill_tasks: Annotated[list[str], operator.add]
+
     # ── Control ──────────────────────────────────────────────────────────────
     cancelled: NotRequired[bool]

@@ -43,8 +43,8 @@ export default function ExecutionPage() {
   const handleNodeClick = useCallback((id: NodeId | null) => setSelectedNodeId(id), [])
 
   const chatDotClass = activeGate
-    ? 'bg-[--color-accent] animate-pulse'
-    : 'bg-[--color-muted]'
+    ? 'bg-(--color-accent) animate-pulse'
+    : 'bg-(--color-muted)'
 
   return (
     <main className="flex flex-col gap-4">
@@ -52,14 +52,14 @@ export default function ExecutionPage() {
       <div className="flex items-center gap-3">
         <Link
           to="/jobs"
-          className="shrink-0 font-mono text-xs tracking-widest text-[--color-muted] uppercase transition-colors hover:text-[--color-accent]"
+          className="shrink-0 font-mono text-xs tracking-widest text-(--color-muted) uppercase transition-colors hover:text-(--color-accent)"
         >
           ← Executions
         </Link>
-        <div className="h-px flex-1 bg-[--color-border]" />
+        <div className="h-px flex-1 bg-(--color-border)" />
         {concern && (
           <span
-            className="max-w-xs truncate font-mono text-xs text-[--color-muted]"
+            className="max-w-xs truncate font-mono text-xs text-(--color-muted)"
             title={concern}
           >
             {concern}
@@ -73,14 +73,14 @@ export default function ExecutionPage() {
           <button
             type="button"
             onClick={() => setChatOpen(true)}
-            className="flex items-center gap-1.5 rounded border border-[--color-border] bg-[--color-surface] px-3 py-1.5 font-mono text-xs text-[--color-muted] transition-colors hover:border-[--color-accent]/40 hover:text-[--color-text]"
+            className="flex items-center gap-1.5 rounded border border-(--color-border) bg-(--color-surface) px-3 py-1.5 font-mono text-xs text-(--color-muted) transition-colors hover:border-(--color-accent)/40 hover:text-(--color-text)"
             title={activeGate ? 'Response required' : 'View conversation'}
           >
             <span className={cn('h-1.5 w-1.5 rounded-full', chatDotClass)} />
             Chat
           </button>
         ) : (
-          <span className="rounded border border-[--color-accent]/30 bg-[--color-accent]/5 px-2.5 py-1 font-mono text-[10px] tracking-widest text-[--color-accent] uppercase">
+          <span className="rounded border border-(--color-accent)/30 bg-(--color-accent)/5 px-2.5 py-1 font-mono text-[10px] tracking-widest text-(--color-accent) uppercase">
             Autopilot
           </span>
         )}
@@ -91,28 +91,28 @@ export default function ExecutionPage() {
         <button
           type="button"
           onClick={() => setMetaExpanded((v) => !v)}
-          className="w-full rounded-lg border border-[--color-border] bg-[--color-surface] px-4 py-2.5 text-left transition-colors hover:bg-[--color-surface-raised]"
+          className="w-full rounded-lg border border-(--color-border) bg-(--color-surface) px-4 py-2.5 text-left transition-colors hover:bg-(--color-surface-raised)"
         >
           <div className="flex items-center gap-3">
-            <span className="font-mono text-[10px] tracking-widest text-[--color-muted] uppercase">
+            <span className="font-mono text-[10px] tracking-widest text-(--color-muted) uppercase">
               {metaExpanded ? '▾' : '▸'} Details
             </span>
             {!metaExpanded && (
-              <span className="font-mono text-xs text-[--color-muted] truncate">
+              <span className="font-mono text-xs text-(--color-muted) truncate">
                 {traceId}
               </span>
             )}
           </div>
           {metaExpanded && (
             <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 font-mono text-xs">
-              <dt className="tracking-widest text-[--color-muted] uppercase">Trace ID</dt>
-              <dd className="truncate text-[--color-text]">{traceId}</dd>
-              <dt className="tracking-widest text-[--color-muted] uppercase">Repo</dt>
-              <dd className="truncate text-[--color-text]">{data.metadata?.repo_url}</dd>
+              <dt className="tracking-widest text-(--color-muted) uppercase">Trace ID</dt>
+              <dd className="truncate text-(--color-text)">{traceId}</dd>
+              <dt className="tracking-widest text-(--color-muted) uppercase">Repo</dt>
+              <dd className="truncate text-(--color-text)">{data.metadata?.repo_url}</dd>
               {data.completed_at && (
                 <>
-                  <dt className="tracking-widest text-[--color-muted] uppercase">Completed</dt>
-                  <dd className="text-[--color-text]">{new Date(data.completed_at).toLocaleString()}</dd>
+                  <dt className="tracking-widest text-(--color-muted) uppercase">Completed</dt>
+                  <dd className="text-(--color-text)">{new Date(data.completed_at).toLocaleString()}</dd>
                 </>
               )}
             </dl>
@@ -129,8 +129,8 @@ export default function ExecutionPage() {
 
       {/* Error state */}
       {error && (
-        <div className="rounded-lg border border-[--color-error]/40 bg-[--color-error]/5 px-5 py-4">
-          <p className="font-mono text-sm text-[--color-error]">
+        <div className="rounded-lg border border-(--color-error)/40 bg-(--color-error)/5 px-5 py-4">
+          <p className="font-mono text-sm text-(--color-error)">
             <span className="font-semibold">Error: </span>{error.message}
           </p>
         </div>
@@ -148,25 +148,28 @@ export default function ExecutionPage() {
 
       {/* Status footer */}
       {status === 'done' && (
-        <div className="flex items-center justify-end rounded-lg border border-[--color-border] bg-[--color-surface] px-5 py-4">
+        <div className="flex items-center justify-end rounded-lg border border-(--color-border) bg-(--color-surface) px-5 py-4">
           <Link
             to={`/jobs/${traceId}/report`}
-            className="font-mono text-sm font-semibold text-[--color-accent] transition-colors hover:text-[--color-accent-hover]"
+            className="font-mono text-sm font-semibold text-(--color-accent) transition-colors hover:text-(--color-accent-hover)"
           >
             View full report →
           </Link>
         </div>
       )}
       {status === 'failed' && (
-        <div className="rounded-lg border border-[--color-error]/40 bg-[--color-error]/5 px-5 py-4">
-          <p className="font-mono text-sm text-[--color-error]">
-            Analysis failed. Check discovery steps for details.
+        <div className="rounded-lg border border-(--color-error)/40 bg-(--color-error)/5 px-5 py-4">
+          <p className="font-mono text-sm text-(--color-error)">
+            <span className="font-semibold">Analysis failed.</span>
+            {data?.error && (
+              <span className="mt-1 block font-mono text-xs opacity-80">{data.error}</span>
+            )}
           </p>
         </div>
       )}
       {status === 'cancelled' && (
-        <div className="rounded-lg border border-[--color-border] bg-[--color-surface] px-5 py-4">
-          <p className="font-mono text-sm text-[--color-muted]">Analysis was cancelled.</p>
+        <div className="rounded-lg border border-(--color-border) bg-(--color-surface) px-5 py-4">
+          <p className="font-mono text-sm text-(--color-muted)">Analysis was cancelled.</p>
         </div>
       )}
 

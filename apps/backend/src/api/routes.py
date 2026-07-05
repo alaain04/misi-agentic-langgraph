@@ -51,6 +51,7 @@ async def get_analysis_status(
         metadata=job.metadata,
         completed_at=job.completed_at,
         results=job.result,
+        error=job.error,
         artifacts=job.artifacts,
         graph=build_graph_info(job),
     )

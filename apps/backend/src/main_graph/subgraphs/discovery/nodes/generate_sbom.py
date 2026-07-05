@@ -78,7 +78,7 @@ async def generate_sbom(state: DiscoveryState, config: RunnableConfig) -> dict:
         logger.error("generate_sbom: all attempts failed err=%s", err[:300])
         entry = SbomEntry(repo_url=repo_url, scan_error=err[:300])
         result_id = await sbom_dao.save(entry)
-        return {"sbom_cyclonedx": {}, "sbom_result_id": result_id, "sbom_error": err[:300]}
+        return {"sbom_cyclonedx": {}, "sbom_result_id": result_id, "sbom_error": err[:300], "discovery_steps": ["generate_sbom"]}
 
     try:
         sbom = json.loads(out)
@@ -87,9 +87,9 @@ async def generate_sbom(state: DiscoveryState, config: RunnableConfig) -> dict:
         logger.error("generate_sbom: %s", msg)
         entry = SbomEntry(repo_url=repo_url, scan_error=msg)
         result_id = await sbom_dao.save(entry)
-        return {"sbom_cyclonedx": {}, "sbom_result_id": result_id, "sbom_error": msg}
+        return {"sbom_cyclonedx": {}, "sbom_result_id": result_id, "sbom_error": msg, "discovery_steps": ["generate_sbom"]}
 
     entry = SbomEntry(repo_url=repo_url, sbom_cyclonedx=sbom)
     result_id = await sbom_dao.save(entry)
     logger.info("generate_sbom: success pm=%s components=%d", pm, len(sbom.get("components", [])))
-    return {"sbom_cyclonedx": sbom, "sbom_result_id": result_id}
+    return {"sbom_cyclonedx": sbom, "sbom_result_id": result_id, "discovery_steps": ["generate_sbom"]}

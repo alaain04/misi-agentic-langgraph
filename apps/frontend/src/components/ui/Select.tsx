@@ -20,7 +20,7 @@ export function Select({ label, options, hint, error, className, id, ...props }:
     <div className="flex flex-col gap-1.5">
       <label
         htmlFor={selectId}
-        className="font-mono text-xs font-medium tracking-widest text-[--color-muted] uppercase"
+        className="font-mono text-xs font-medium tracking-widest text-(--color-muted) uppercase"
       >
         {label}
       </label>
@@ -28,12 +28,12 @@ export function Select({ label, options, hint, error, className, id, ...props }:
         <select
           id={selectId}
           className={cn(
-            'w-full appearance-none rounded border border-[--color-border] bg-[--color-surface-raised]',
-            'px-3 py-2 pr-9 font-mono text-sm text-[--color-text]',
+            'w-full appearance-none rounded border border-(--color-border) bg-(--color-surface-raised)',
+            'px-3 py-2 pr-9 font-mono text-sm text-(--color-text)',
             'cursor-pointer transition-colors duration-150',
-            'focus:border-[--color-accent] focus:ring-1 focus:ring-[--color-accent]/40 focus:outline-none',
+            'focus:border-(--color-accent) focus:ring-1 focus:ring-(--color-accent)/40 focus:outline-none',
             error &&
-              'border-[--color-error] focus:border-[--color-error] focus:ring-[--color-error]/40',
+              'border-(--color-error) focus:border-(--color-error) focus:ring-(--color-error)/40',
             className,
           )}
           {...props}
@@ -45,7 +45,7 @@ export function Select({ label, options, hint, error, className, id, ...props }:
           ))}
         </select>
         {/* Custom chevron */}
-        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[--color-muted]">
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-(--color-muted)">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path
               d="M2 4L6 8L10 4"
@@ -57,8 +57,8 @@ export function Select({ label, options, hint, error, className, id, ...props }:
           </svg>
         </span>
       </div>
-      {hint && !error && <p className="font-mono text-xs text-[--color-muted]/70">{hint}</p>}
-      {error && <p className="font-mono text-xs text-[--color-error]">{error}</p>}
+      {hint && !error && <p className="font-mono text-xs text-(--color-muted)/70">{hint}</p>}
+      {error && <p className="font-mono text-xs text-(--color-error)">{error}</p>}
     </div>
   )
 }

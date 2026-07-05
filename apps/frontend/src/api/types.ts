@@ -211,6 +211,7 @@ export interface StatusResponse {
   metadata: JobMetadata
   completed_at: string | null
   results: JobResult | null
+  error: string | null
   artifacts: Artifact[]
   graph: GraphInfo
 }

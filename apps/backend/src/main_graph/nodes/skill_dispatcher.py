@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from langgraph.types import Send
 
 from src.main_graph.constants import EVIDENCE_COLLECTOR
 from src.main_graph.skills.base import SkillContext
 from src.main_graph.skills.registry import SKILL_REGISTRY
 from src.main_graph.state import MainState
+
+logger = logging.getLogger(__name__)
 
 
 def _build_context_for_check(state: MainState, dep_name: str) -> SkillContext:
@@ -40,4 +44,8 @@ def skill_dispatcher(state: MainState) -> list[Send] | str:
             "current_hypothesis_id": assignment.hypothesis_id,
             "evidence": [],
         }))
-    return sends or EVIDENCE_COLLECTOR
+    if not sends:
+        logger.info("skill_dispatcher: no runnable skills, skipping to evidence_collector")
+        return EVIDENCE_COLLECTOR
+    logger.info("skill_dispatcher: dispatching %d skill tasks", len(sends))
+    return sends

@@ -87,14 +87,14 @@ export default function JobsListPage() {
     <main className="space-y-6">
       {/* Page header */}
       <div className="flex items-center gap-3">
-        <span className="font-mono text-xs font-semibold tracking-widest text-[--color-accent] uppercase">
+        <span className="font-mono text-xs font-semibold tracking-widest text-(--color-accent) uppercase">
           executions
         </span>
-        <div className="h-px flex-1 bg-[--color-border]" />
-        {data && <span className="font-mono text-xs text-[--color-muted]">{data.total} total</span>}
+        <div className="h-px flex-1 bg-(--color-border)" />
+        {data && <span className="font-mono text-xs text-(--color-muted)">{data.total} total</span>}
         <Link
           to="/new"
-          className="rounded border border-[--color-accent]/40 bg-[--color-accent]/5 px-3 py-1.5 font-mono text-xs text-[--color-accent] transition-colors hover:bg-[--color-accent]/10"
+          className="rounded border border-(--color-accent)/40 bg-(--color-accent)/5 px-3 py-1.5 font-mono text-xs text-(--color-accent) transition-colors hover:bg-(--color-accent)/10"
         >
           New analysis →
         </Link>
@@ -129,8 +129,8 @@ export default function JobsListPage() {
 
       {/* Error */}
       {error && !isLoading && (
-        <div className="rounded-lg border border-[--color-error]/40 bg-[--color-error]/5 px-5 py-4">
-          <p className="font-mono text-sm text-[--color-error]">
+        <div className="rounded-lg border border-(--color-error)/40 bg-(--color-error)/5 px-5 py-4">
+          <p className="font-mono text-sm text-(--color-error)">
             <span className="font-semibold">Error: </span>
             {error.message}
           </p>
@@ -139,27 +139,27 @@ export default function JobsListPage() {
 
       {/* Empty */}
       {!isLoading && !error && data && data.items.length === 0 && (
-        <div className="rounded-lg border border-[--color-border] bg-[--color-surface] px-6 py-12 text-center">
-          <p className="font-mono text-sm text-[--color-muted]">No executions found.</p>
+        <div className="rounded-lg border border-(--color-border) bg-(--color-surface) px-6 py-12 text-center">
+          <p className="font-mono text-sm text-(--color-muted)">No executions found.</p>
         </div>
       )}
 
       {/* Table */}
       {!isLoading && !error && data && data.items.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-[--color-border]">
+        <div className="overflow-hidden rounded-lg border border-(--color-border)">
           <table className="w-full font-mono text-sm">
             <thead>
-              <tr className="border-b border-[--color-border] bg-[--color-surface]">
-                <th className="px-4 py-3 text-left text-xs tracking-widest text-[--color-muted] uppercase">
+              <tr className="border-b border-(--color-border) bg-(--color-surface)">
+                <th className="px-4 py-3 text-left text-xs tracking-widest text-(--color-muted) uppercase">
                   Trace ID
                 </th>
-                <th className="px-4 py-3 text-left text-xs tracking-widest text-[--color-muted] uppercase">
+                <th className="px-4 py-3 text-left text-xs tracking-widest text-(--color-muted) uppercase">
                   Concern
                 </th>
-                <th className="hidden px-4 py-3 text-left text-xs tracking-widest text-[--color-muted] uppercase md:table-cell">
+                <th className="hidden px-4 py-3 text-left text-xs tracking-widest text-(--color-muted) uppercase md:table-cell">
                   Started
                 </th>
-                <th className="px-4 py-3 text-left text-xs tracking-widest text-[--color-muted] uppercase">
+                <th className="px-4 py-3 text-left text-xs tracking-widest text-(--color-muted) uppercase">
                   Status
                 </th>
               </tr>
@@ -171,22 +171,22 @@ export default function JobsListPage() {
                   onClick={() =>
                     navigate(item.status === 'done' ? `/jobs/${item.trace_id}/report` : `/jobs/${item.trace_id}`)
                   }
-                  className="cursor-pointer border-b border-[--color-border] bg-[--color-surface] transition-colors duration-100 last:border-b-0 hover:bg-white/[0.03]"
+                  className="cursor-pointer border-b border-(--color-border) bg-(--color-surface) transition-colors duration-100 last:border-b-0 hover:bg-white/[0.03]"
                 >
                   <td className="px-4 py-3">
-                    <span className="font-mono text-[--color-text]" title={item.trace_id}>
+                    <span className="font-mono text-(--color-text)" title={item.trace_id}>
                       {truncateTraceId(item.trace_id)}
                     </span>
                   </td>
                   <td className="max-w-xs px-4 py-3">
                     <span
-                      className="block truncate text-xs text-[--color-muted]"
+                      className="block truncate text-xs text-(--color-muted)"
                       title={item.concern}
                     >
                       {item.concern}
                     </span>
                   </td>
-                  <td className="hidden px-4 py-3 text-xs whitespace-nowrap text-[--color-muted] md:table-cell">
+                  <td className="hidden px-4 py-3 text-xs whitespace-nowrap text-(--color-muted) md:table-cell">
                     {formatDate(item.created_at)}
                   </td>
                   <td className="px-4 py-3">
@@ -210,7 +210,7 @@ export default function JobsListPage() {
           >
             ← prev
           </Button>
-          <span className="font-mono text-xs text-[--color-muted]">
+          <span className="font-mono text-xs text-(--color-muted)">
             page {page} of {data.pages}
           </span>
           <Button

@@ -244,7 +244,15 @@ async def investigation_planner_service(
     # instead of re-calling the LLM — avoids duplicate messages and wrong-plan bugs.
     artifact = await _get_artifact(dao, job_id, INVESTIGATION_PLANNER)
     stored_plan = _reconstruct_plan(artifact, concern)
-    plan = stored_plan if stored_plan is not None else await _run_planner(state)
+    if stored_plan is not None:
+        logger.info("investigation_planner: restoring plan from artifact (hypotheses=%d)", len(stored_plan.hypotheses))
+        plan = stored_plan
+    else:
+        plan = await _run_planner(state)
+        logger.info(
+            "investigation_planner: plan generated hypotheses=%d skill_assignments=%d",
+            len(plan.hypotheses), len(plan.skill_plan),
+        )
 
     while True:
         messages = artifact.get("messages", [])
@@ -282,6 +290,7 @@ async def investigation_planner_service(
                 logger.warning("investigation_planner: vector store add failed")
 
         intent = await _classify_intent(plan, user_input)
+        logger.info("investigation_planner: user intent=%s", intent)
         await dao.push_artifact_message(job_id, INVESTIGATION_PLANNER, {
             "role": "human",
             "content": user_input,

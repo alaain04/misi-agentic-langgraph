@@ -31,7 +31,7 @@ export function Modal({ open, onClose, children }: ModalProps) {
         aria-hidden="true"
       />
       {/* Panel */}
-      <div className="relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[--color-border] bg-[--color-surface] shadow-2xl">
+      <div className="relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-(--color-border) bg-(--color-surface) shadow-2xl">
         {children}
       </div>
     </div>

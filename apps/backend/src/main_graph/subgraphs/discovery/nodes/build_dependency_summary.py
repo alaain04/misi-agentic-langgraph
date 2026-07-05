@@ -1,6 +1,6 @@
-# backend/src/main_graph/subgraphs/discovery/nodes/build_dependency_summary.py
 """Node: build_dependency_summary — generate metadata and LLM summary from CycloneDX."""
 
+import logging
 from typing import Any
 
 from src.main_graph.subgraphs.discovery.state import (
@@ -8,6 +8,8 @@ from src.main_graph.subgraphs.discovery.state import (
     ProjectMetadata,
 )
 from src.utils.llm import Model, get_llm
+
+logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
@@ -96,6 +98,7 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
                 transitive_dependencies_count=0,
             ),
             "discovery_summary": f"Discovery failed: {error}",
+            "discovery_steps": ["build_dependency_summary"],
         }
 
     sbom: dict[str, Any] = state.get("sbom_cyclonedx", {})
@@ -126,7 +129,12 @@ async def build_dependency_summary(state: DiscoveryState) -> dict:
     )
     response = await _llm.ainvoke(prompt)
 
+    logger.info(
+        "build_dependency_summary: project=%s pm=%s direct=%d transitive=%d",
+        project_name, pm, direct_count, transitive_count,
+    )
     return {
         "project_metadata": metadata,
         "discovery_summary": response.content,
+        "discovery_steps": ["build_dependency_summary"],
     }

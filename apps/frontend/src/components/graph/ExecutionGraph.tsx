@@ -384,7 +384,7 @@ export function ExecutionGraph({
 
   return (
     <div ref={containerRef} className={cn('relative w-full', className)}>
-      <div className="overflow-hidden rounded-lg border border-[--color-border] bg-[--color-surface]">
+      <div className="overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface)">
         <svg
           ref={svgRef}
           className="w-full"
@@ -393,7 +393,7 @@ export function ExecutionGraph({
           role="img"
         />
       </div>
-      <p className="mt-1.5 text-right font-mono text-[10px] text-[--color-muted] select-none">
+      <p className="mt-1.5 text-right font-mono text-[10px] text-(--color-muted) select-none">
         scroll to zoom · click node to inspect
       </p>
     </div>

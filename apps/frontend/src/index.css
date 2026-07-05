@@ -2,7 +2,7 @@
 @import 'tailwindcss';
 
 /* ─── Tailwind v4 theme extension ────────────────────────────── */
-@theme {
+@theme inline {
   --font-display: 'Syne', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 

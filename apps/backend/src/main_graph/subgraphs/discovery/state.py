@@ -1,6 +1,7 @@
 """State schema for the discovery subgraph."""
 
-from typing import Any, NotRequired
+import operator
+from typing import Annotated, Any, NotRequired
 
 from typing_extensions import TypedDict
 
@@ -33,3 +34,4 @@ class DiscoveryState(TypedDict):
     project_metadata: NotRequired[ProjectMetadata]
     discovery_summary: NotRequired[str]
     discovery_error: NotRequired[str | None]
+    discovery_steps: Annotated[list[str], operator.add]

@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI
@@ -5,6 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router
 from src.utils.config import settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)-8s %(name)s: %(message)s",
+)
 
 if settings.langsmith_api_key:
     os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key

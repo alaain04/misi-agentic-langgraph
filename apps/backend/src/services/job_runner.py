@@ -73,14 +73,23 @@ async def _stream_graph(
     Returns the interrupt payload if the graph paused, or None if run to completion.
     """
     interrupt_payload = None
+    _skill_tasks: list[str] = []
 
     async for chunk in graph.astream(input_data, config, stream_mode="updates"):
         for node_name, node_update in chunk.items():
             if node_name == "__interrupt__":
                 interrupt_payload = node_update[0].value
+                logger.info("job=%s node=%s interrupted (awaiting user input)", job_id, node_name)
                 continue
 
-            if node_name == "discovery":
+            logger.info("job=%s node=%s completed", job_id, node_name)
+
+            if node_name == "skill_executor":
+                _skill_tasks.extend(node_update.get("executed_skill_tasks", []))
+            elif node_name == "discovery":
+                steps = node_update.get("discovery_steps", [])
+                if steps:
+                    await dao.update_artifact_data(job_id, "discovery", {"steps": steps})
                 if node_update.get("discovery_error") or node_update.get("sbom_error"):
                     await dao.complete_artifact(job_id, "discovery", "failed")
                 else:
@@ -90,6 +99,8 @@ async def _stream_graph(
                 await dao.complete_artifact(job_id, INVESTIGATION_PLANNER, "done")
             elif node_name == EVIDENCE_COLLECTOR:
                 await dao.start_artifact(job_id, EVIDENCE_COLLECTOR)
+                if _skill_tasks:
+                    await dao.update_artifact_data(job_id, EVIDENCE_COLLECTOR, {"steps": _skill_tasks})
                 await dao.complete_artifact(job_id, EVIDENCE_COLLECTOR, "done")
             elif node_name == EVIDENCE_CORRELATOR:
                 await dao.start_artifact(job_id, EVIDENCE_CORRELATOR)
