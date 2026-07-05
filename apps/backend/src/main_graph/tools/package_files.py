@@ -1,6 +1,7 @@
 """Local file and JSON analysis tools."""
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
@@ -105,7 +106,7 @@ async def install_scripts(repo_path: str) -> dict:
 @register("check_licenses", "Collects licenses for all dependencies and flags non-permissive licenses")
 async def check_licenses(repo_path: str) -> dict:
     nm_path = os.path.join(repo_path, "node_modules")
-    permissive = {"mit", "isc", "bsd-2-clause", "bsd-3-clause", "apache-2.0", "cc0-1.0", "0bsd", "unlicensed"}
+    permissive = {"mit", "isc", "bsd-2-clause", "bsd-3-clause", "apache-2.0", "cc0-1.0", "0bsd", "unlicense"}
     results = []
     if os.path.isdir(nm_path):
         for entry in os.listdir(nm_path)[:200]:
@@ -203,7 +204,6 @@ async def dependency_stats(repo_path: str) -> dict:
 
 @register("workspace_dependencies", "Lists dependencies per workspace for monorepo projects")
 async def workspace_dependencies(repo_path: str) -> dict:
-    import glob
     pkg = _load_pkg(repo_path)
     workspaces = pkg.get("workspaces", [])
     if not workspaces:
@@ -228,7 +228,8 @@ async def workspace_dependencies(repo_path: str) -> dict:
 @register("read_file", "Reads a specific file from the cloned repo")
 async def read_file(repo_path: str, relative_path: str) -> dict:
     full_path = os.path.normpath(os.path.join(repo_path, relative_path))
-    if not full_path.startswith(os.path.normpath(repo_path)):
+    repo_norm = os.path.normpath(repo_path)
+    if full_path != repo_norm and not full_path.startswith(repo_norm + os.sep):
         return {"error": "path traversal not allowed"}
     try:
         with open(full_path) as f:
@@ -243,7 +244,8 @@ async def read_file(repo_path: str, relative_path: str) -> dict:
 @register("list_directory", "Lists files at a path in the cloned repo")
 async def list_directory(repo_path: str, relative_path: str = ".") -> dict:
     full_path = os.path.normpath(os.path.join(repo_path, relative_path))
-    if not full_path.startswith(os.path.normpath(repo_path)):
+    repo_norm = os.path.normpath(repo_path)
+    if full_path != repo_norm and not full_path.startswith(repo_norm + os.sep):
         return {"error": "path traversal not allowed"}
     try:
         entries = os.listdir(full_path)
