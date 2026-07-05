@@ -3,17 +3,21 @@ import type { NodeId } from './graphDefinition'
 import type { PanelProps } from './panels/types'
 import { DiscoveryPanel } from './panels/DiscoveryPanel'
 import { PlannerPanel } from './panels/PlannerPanel'
+import { SkillExecutorPanel } from './panels/SkillExecutorPanel'
+import { CorrelatorPanel } from './panels/CorrelatorPanel'
+import { FindingReviewerPanel } from './panels/FindingReviewerPanel'
+import { ReportBuilderPanel } from './panels/ReportBuilderPanel'
 
-// Re-export so callers only need to import from this file
 export type { PanelProps }
-
 type PanelComponent = ComponentType<PanelProps>
 
-// Registry: nodeId → panel component
-// To add a new node panel: add one line here.
 export const NODE_PANEL_REGISTRY = new Map<NodeId, PanelComponent>([
-  ['discovery', DiscoveryPanel],
+  ['discovery',             DiscoveryPanel],
   ['investigation_planner', PlannerPanel],
+  ['skill_executor',        SkillExecutorPanel],
+  ['evidence_correlator',   CorrelatorPanel],
+  ['finding_reviewer',      FindingReviewerPanel],
+  ['report_builder',        ReportBuilderPanel],
 ])
 
 export function getPanelComponent(id: NodeId): PanelComponent | undefined {
