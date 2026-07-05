@@ -1,13 +1,11 @@
-"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo, install_deps, generate_sbom."""
+"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo, install_deps."""
 
 import json
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.main_graph.subgraphs.discovery.nodes.clone_repo import clone_repo
-from src.main_graph.subgraphs.discovery.nodes.generate_sbom import generate_sbom
 from src.main_graph.subgraphs.discovery.nodes.inspect_repo import inspect_repo
 from src.main_graph.subgraphs.discovery.nodes.install_deps import install_deps
 
@@ -15,16 +13,14 @@ _BASE_STATE = {
     "job_id": "test-job",
     "repo_url": "https://github.com/test/repo",
     "concern": "security",
+    "autopilot": False,
 }
 
-_SAMPLE_SBOM = {"bomFormat": "CycloneDX", "specVersion": "1.4", "components": []}
 
-
-def _config(container=None, sbom_dao=None):
+def _config(container=None):
     return {
         "configurable": {
             "container": container or AsyncMock(),
-            "sbom_dao": sbom_dao or AsyncMock(),
         }
     }
 
@@ -196,74 +192,3 @@ async def test_install_deps_retries_on_peer_conflict(tmp_path):
     ) or any(
         "--legacy-peer-deps" in str(a) for a in container.run.call_args_list[1].args
     )
-
-
-# ---------------------------------------------------------------------------
-# generate_sbom
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_generate_sbom_success():
-    container = AsyncMock()
-    container.run.return_value = (0, json.dumps(_SAMPLE_SBOM), "")
-    dao = AsyncMock()
-    dao.save.return_value = "sbom-id-1"
-
-    state = {
-        **_BASE_STATE,
-        "repo_path": "/tmp/test",
-        "detected_package_manager": "npm",
-        "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
-        "has_lock_file": True,
-    }
-    result = await generate_sbom(state, _config(container=container, sbom_dao=dao))
-
-    assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
-    assert result["sbom_result_id"] == "sbom-id-1"
-    assert "sbom_error" not in result
-    dao.save.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_generate_sbom_failure_sets_sbom_error():
-    container = AsyncMock()
-    container.run.return_value = (1, "", "npm error: command failed")
-    dao = AsyncMock()
-    dao.save.return_value = "err-id"
-
-    state = {
-        **_BASE_STATE,
-        "repo_path": "/tmp/test",
-        "detected_package_manager": "npm",
-        "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
-        "has_lock_file": False,
-    }
-    result = await generate_sbom(state, _config(container=container, sbom_dao=dao))
-
-    assert result["sbom_cyclonedx"] == {}
-    assert "sbom_error" in result
-    assert result["sbom_result_id"] == "err-id"
-
-
-@pytest.mark.asyncio
-async def test_generate_sbom_no_lock_uses_node_modules_command():
-    container = AsyncMock()
-    container.run.return_value = (0, json.dumps(_SAMPLE_SBOM), "")
-    dao = AsyncMock()
-    dao.save.return_value = "id"
-
-    state = {
-        **_BASE_STATE,
-        "repo_path": "/tmp/test",
-        "detected_package_manager": "npm",
-        "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
-        "has_lock_file": False,
-    }
-    await generate_sbom(state, _config(container=container, sbom_dao=dao))
-
-    cmd = container.run.call_args.kwargs.get("command") or container.run.call_args.args[1]
-    assert "--package-lock-only" not in cmd

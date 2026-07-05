@@ -83,5 +83,4 @@ def inspect_repo(state: DiscoveryState) -> dict:
         "package_manager_version": pm_version,
         "has_lock_file": has_lock_file,
         "docker_image": docker_image,
-        "discovery_steps": ["inspect_repo"],
     }

@@ -3,5 +3,4 @@
 CLONE_REPO = "clone_repo"
 INSPECT_REPO = "inspect_repo"
 INSTALL_DEPS = "install_deps"
-GENERATE_SBOM = "generate_sbom"
-BUILD_DEPENDENCY_SUMMARY = "build_dependency_summary"
+BUILD_PROJECT_CONTEXT = "build_project_context"
