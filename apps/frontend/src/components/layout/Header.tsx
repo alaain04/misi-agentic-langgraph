@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 
 const NAV_LINKS = [
-  { to: '/scan', label: 'Scan', end: false },
+  { to: '/new', label: 'New analysis', end: false },
   { to: '/jobs', label: 'Executions', end: false },
 ]
 

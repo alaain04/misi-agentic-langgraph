@@ -1,11 +1,12 @@
+// src/App.tsx
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { PageWrapper } from './components/layout/PageWrapper'
 import { Header } from './components/layout/Header'
 import { LandingPage } from './pages/LandingPage'
-import ScanPage from './pages/ScanPage'
+import NewAnalysisPage from './pages/NewAnalysisPage'
 import JobsListPage from './pages/JobsListPage'
-import JobDetailPage from './pages/JobDetailPage'
-import PlanPage from './pages/PlanPage'
+import ExecutionPage from './pages/ExecutionPage'
+import ReportPage from './pages/ReportPage'
 
 export function App() {
   return (
@@ -14,10 +15,10 @@ export function App() {
         <Header />
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/scan" element={<ScanPage />} />
+          <Route path="/new" element={<NewAnalysisPage />} />
           <Route path="/jobs" element={<JobsListPage />} />
-          <Route path="/jobs/:traceId/plan" element={<PlanPage />} />
-          <Route path="/jobs/:traceId" element={<JobDetailPage />} />
+          <Route path="/jobs/:traceId" element={<ExecutionPage />} />
+          <Route path="/jobs/:traceId/report" element={<ReportPage />} />
         </Routes>
       </PageWrapper>
     </BrowserRouter>
