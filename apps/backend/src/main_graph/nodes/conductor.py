@@ -79,7 +79,7 @@ async def conductor(state: MainState, config: RunnableConfig) -> dict:
 
     system = _SYSTEM.format(tool_descriptions=_format_tool_descriptions())
 
-    structured_llm = _llm.with_structured_output(ConductorDecision)
+    structured_llm = _llm.with_structured_output(ConductorDecision, method="function_calling")
     decision: ConductorDecision = await structured_llm.ainvoke([
         {"role": "system", "content": system},
         {"role": "user", "content": user_prompt},
