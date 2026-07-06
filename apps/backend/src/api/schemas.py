@@ -1,25 +1,8 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel
 
 from src.models.job import JobMetadata, JobStatus
-
-
-class GraphNodeInfo(BaseModel):
-    id: str
-    type: Literal["terminal", "backbone", "subgraph"]
-    order: int
-
-
-class GraphEdgeInfo(BaseModel):
-    source: str
-    target: str
-
-
-class GraphInfo(BaseModel):
-    nodes: list[GraphNodeInfo]
-    edges: list[GraphEdgeInfo]
 
 
 class AnalysisRequest(BaseModel):
@@ -36,8 +19,7 @@ class AnalysisStatusResponse(BaseModel):
     results: dict | None = None
     error: str | None = None
     artifacts: list[dict] = []
-    graph: GraphInfo
-    cost_usd: float | None = None
+    cost: float | None = None
 
 
 class ChatRequest(BaseModel):

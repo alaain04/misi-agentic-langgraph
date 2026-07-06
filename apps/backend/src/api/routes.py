@@ -11,7 +11,6 @@ from src.api.schemas import (
     JobListItem,
     JobsListResponse,
 )
-from src.api.service import build_graph_info
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.models.job import Job, JobMetadata, JobStatus
 from src.services.job_runner import resume_analysis, run_analysis
@@ -54,8 +53,7 @@ async def get_analysis_status(
         results=job.result,
         error=job.error,
         artifacts=job.artifacts,
-        graph=build_graph_info(job),
-        cost_usd=job.cost_usd,
+        cost=job.cost,
     )
 
 
