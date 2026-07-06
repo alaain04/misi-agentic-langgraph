@@ -1,9 +1,10 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.main_graph.constants import HITL_GATE
 from src.models.job import JobStatus
-from src.services.job_runner import resume_analysis, run_analysis
+from src.services.job_runner import _stream_graph, resume_analysis, run_analysis
 
 
 def _make_dao() -> AsyncMock:
@@ -64,3 +65,35 @@ async def test_resume_analysis_marks_failed_on_exception():
         await resume_analysis("job-2", "approve", dao)
 
     dao.mark_failed.assert_awaited_once_with("job-2", error="resume exploded")
+
+
+@pytest.mark.asyncio
+async def test_stream_graph_hitl_artifact_lifecycle():
+    """Interrupt sets HITL artifact to running + stores question; HITL_GATE node completes it."""
+    dao = AsyncMock()
+    job_id = "job-hitl"
+
+    async def hitl_lifecycle_stream(*args, **kwargs):
+        intr = MagicMock()
+        intr.value = {"question": "Should I continue?", "type": "checkpoint"}
+        yield {"__interrupt__": [intr]}
+        yield {HITL_GATE: {}}
+
+    mock_graph = MagicMock()
+    mock_graph.astream = hitl_lifecycle_stream
+
+    interrupted = await _stream_graph(mock_graph, {}, {}, dao, job_id)
+
+    assert interrupted is True
+    dao.start_artifact.assert_any_await(job_id, HITL_GATE)
+    dao.push_artifact_message.assert_awaited_once_with(
+        job_id,
+        HITL_GATE,
+        {
+            "role": "assistant",
+            "content": "Should I continue?",
+            "created_at": ANY,
+            "type": "checkpoint",
+        },
+    )
+    dao.complete_artifact.assert_any_await(job_id, HITL_GATE, "done")
