@@ -13,6 +13,7 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 export interface AnalysisRequest {
   repo_url: string
   concern: string
+  autopilot?: boolean
 }
 
 export interface JobMetadata {
@@ -122,6 +123,7 @@ export interface ArtifactMessage {
   role: 'assistant' | 'human'
   content: string
   created_at: string
+  type?: 'ask_user' | 'checkpoint'
   action?: 'approve' | 'change' | 'cancel'
 }
 
@@ -131,6 +133,55 @@ interface BaseArtifact {
   started_at: string
   completed_at: string | null
 }
+
+// ── New ReAct graph artifacts ──
+
+export interface PrepArtifact extends BaseArtifact {
+  node: 'prep'
+}
+
+export interface ToolCall {
+  tool: string
+  args: Record<string, unknown>
+}
+
+export interface ConductorIteration {
+  iteration: number
+  tool_calls: ToolCall[]
+  findings_count: number
+  finalize: boolean
+  reasoning: string
+  started_at: string
+}
+
+export interface ConductorArtifact extends BaseArtifact {
+  node: 'conductor'
+  iterations: ConductorIteration[]
+}
+
+export interface ToolError {
+  tool: string
+  error: string
+}
+
+export interface ToolRunnerIteration {
+  conductor_iteration: number
+  tools_run: string[]
+  errors: ToolError[]
+  started_at: string
+}
+
+export interface ToolRunnerArtifact extends BaseArtifact {
+  node: 'tool_runner'
+  iterations: ToolRunnerIteration[]
+}
+
+export interface HitlGateArtifact extends BaseArtifact {
+  node: 'hitl_gate'
+  messages: ArtifactMessage[]
+}
+
+// ── Legacy graph artifacts (kept for compatibility) ──
 
 export interface DiscoveryArtifact extends BaseArtifact {
   node: 'discovery'
@@ -178,30 +229,16 @@ export interface ReportArtifact extends BaseArtifact {
 }
 
 export type Artifact =
+  | PrepArtifact
+  | ConductorArtifact
+  | ToolRunnerArtifact
+  | HitlGateArtifact
   | DiscoveryArtifact
   | PlannerArtifact
   | CollectorArtifact
   | CorrelatorArtifact
   | ReviewerArtifact
   | ReportArtifact
-
-// ── Graph ──────────────────────────────────────────────────────────────────────
-
-export interface GraphNodeInfo {
-  id: string
-  type: 'terminal' | 'backbone' | 'subgraph'
-  order: number
-}
-
-export interface GraphEdgeInfo {
-  source: string
-  target: string
-}
-
-export interface GraphInfo {
-  nodes: GraphNodeInfo[]
-  edges: GraphEdgeInfo[]
-}
 
 // ── API responses ─────────────────────────────────────────────────────────────
 
@@ -213,7 +250,7 @@ export interface StatusResponse {
   results: JobResult | null
   error: string | null
   artifacts: Artifact[]
-  graph: GraphInfo
+  cost: number | null
 }
 
 export interface SubmitResponse {
