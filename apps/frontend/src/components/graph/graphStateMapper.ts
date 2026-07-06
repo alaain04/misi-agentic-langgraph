@@ -2,96 +2,151 @@
 import type {
   StatusResponse,
   Artifact,
-  DiscoveryArtifact,
-  PlannerArtifact,
-  CollectorArtifact,
-  ReviewerArtifact,
+  ConductorArtifact,
+  ConductorIteration,
+  ToolRunnerArtifact,
+  HitlGateArtifact,
   ReportArtifact,
 } from '../../api/types'
-import { GRAPH_NODES, GRAPH_EDGES, buildGraphDef } from './graphDefinition'
-import type { GraphRenderData, GraphNodeState, NodeStatus, NodeId } from './graphDefinition'
+import type { GraphRenderData, GraphNodeState, GraphEdgeDef, NodeStatus } from './graphDefinition'
 
 export function mapResponseToGraphState(response: StatusResponse | null): GraphRenderData {
   if (!response) {
-    const nodes = GRAPH_NODES.map(
-      (def): GraphNodeState => ({ id: def.id, def, status: 'idle', hasDetail: false }),
-    )
-    return { nodes, edges: filterEdges(nodes, GRAPH_EDGES) }
+    return {
+      nodes: [{
+        id: 'START',
+        def: { id: 'START', label: 'START', layer: 0, isSubgraph: false },
+        status: 'idle',
+        hasDetail: false,
+      }],
+      edges: [],
+    }
   }
-
-  const artifacts = response.artifacts ?? []
-  const { nodes: nodeDefs, edges } = response.graph
-    ? buildGraphDef(response.graph)
-    : { nodes: GRAPH_NODES, edges: GRAPH_EDGES }
-
-  const nodes = nodeDefs.map(
-    (def): GraphNodeState => ({
-      id: def.id,
-      def,
-      status: deriveStatus(def.id, response.status, artifacts),
-      hasDetail: hasDetail(def.id, artifacts),
-    }),
-  )
-
-  return { nodes, edges: filterEdges(nodes, edges) }
+  return buildGraphFromArtifacts(response.artifacts ?? [], response.status)
 }
 
-function deriveStatus(id: NodeId, jobStatus: StatusResponse['status'], artifacts: Artifact[]): NodeStatus {
-  if (id === 'START') return jobStatus === 'pending' ? 'idle' : 'done'
-  if (id === 'END') {
-    if (jobStatus === 'done') return 'done'
-    if (jobStatus === 'failed') return 'failed'
-    return 'idle'
+function buildGraphFromArtifacts(artifacts: Artifact[], jobStatus: StatusResponse['status']): GraphRenderData {
+  const conductorArt   = artifacts.find(a => a.node === 'conductor')     as ConductorArtifact | undefined
+  const toolRunnerArt  = artifacts.find(a => a.node === 'tool_runner')   as ToolRunnerArtifact | undefined
+  const prepArt        = artifacts.find(a => a.node === 'prep')
+  const hitlArt        = artifacts.find(a => a.node === 'hitl_gate')     as HitlGateArtifact | undefined
+  const reportArt      = artifacts.find(a => a.node === 'report_builder') as ReportArtifact | undefined
+
+  const allIterations  = [...(conductorArt?.iterations ?? [])].sort((a, b) => a.iteration - b.iteration)
+  const toolIterations = toolRunnerArt?.iterations ?? []
+
+  // Split conductor iterations around hitl_gate using timestamps
+  let preHitl  = allIterations
+  let postHitl: ConductorIteration[] = []
+  if (hitlArt) {
+    const hitlStart = hitlArt.started_at
+    preHitl  = allIterations.filter(it => it.started_at < hitlStart)
+    postHitl = allIterations.filter(it => it.started_at >= hitlStart)
   }
 
-  const artifact = artifacts.find((a) => a.node === id)
-  if (artifact) {
-    if (artifact.status === 'done') return 'done'
-    if (artifact.status === 'failed') return 'failed'
-    if (artifact.status === 'cancelled') return 'cancelled'
-    if (artifact.status === 'running') {
-      if (
-        (id === 'investigation_planner' || id === 'finding_reviewer') &&
-        'messages' in artifact &&
-        (artifact as PlannerArtifact | ReviewerArtifact).messages.length > 0
-      ) {
-        return 'awaiting'
+  const nodes: GraphNodeState[] = []
+  const edges: GraphEdgeDef[]   = []
+  let layer = 0
+
+  // START
+  nodes.push(makeNode('START', 'START', layer++, jobStatus === 'pending' ? 'idle' : 'done'))
+
+  // prep
+  nodes.push(makeNode('prep', 'prep', layer++, simpleArtifactStatus(prepArt, jobStatus)))
+  edges.push({ source: 'START', target: 'prep' })
+
+  let prevOutputIds: string[] = ['prep']
+
+  const appendIterations = (iterations: ConductorIteration[]) => {
+    for (let i = 0; i < iterations.length; i++) {
+      const iter = iterations[i]
+      const conductorId = `conductor:${iter.iteration}`
+      const isLastOverall = iter.iteration === allIterations[allIterations.length - 1]?.iteration
+      const conductorStatus: NodeStatus =
+        isLastOverall && (jobStatus === 'running' || jobStatus === 'processing') ? 'active' : 'done'
+
+      nodes.push(makeNode(conductorId, `conductor ${iter.iteration}`, layer++, conductorStatus, true))
+      prevOutputIds.forEach(id => edges.push({ source: id, target: conductorId }))
+
+      const iterTools = toolIterations.find(t => t.conductor_iteration === iter.iteration)
+      if (iterTools && iterTools.tools_run.length > 0) {
+        const toolIds: string[] = []
+        iterTools.tools_run.forEach((toolName, laneIdx) => {
+          const toolId = `tool:${toolName}:${iter.iteration}`
+          const hasError = iterTools.errors.some(e => e.tool === toolName)
+          nodes.push({
+            id: toolId,
+            def: { id: toolId, label: toolName, layer, isSubgraph: false, laneIndex: laneIdx },
+            status: hasError ? 'failed' : 'done',
+            hasDetail: true,
+          })
+          edges.push({ source: conductorId, target: toolId })
+          toolIds.push(toolId)
+        })
+        layer++
+        prevOutputIds = toolIds
+      } else {
+        prevOutputIds = [conductorId]
       }
-      return 'active'
     }
   }
 
-  if (jobStatus === 'cancelled') return 'cancelled'
-  return 'idle'
+  appendIterations(preHitl)
+
+  // hitl_gate
+  if (hitlArt) {
+    const hitlStatus: NodeStatus =
+      hitlArt.status === 'done' ? 'done'
+      : hitlArt.messages.length > 0 ? 'awaiting'
+      : 'active'
+    nodes.push(makeNode('hitl_gate', 'hitl_gate', layer++, hitlStatus, hitlArt.messages.length > 0))
+    prevOutputIds.forEach(id => edges.push({ source: id, target: 'hitl_gate' }))
+    prevOutputIds = ['hitl_gate']
+
+    if (postHitl.length > 0) {
+      appendIterations(postHitl)
+    }
+  }
+
+  // report_builder
+  if (reportArt) {
+    const reportStatus = simpleArtifactStatus(reportArt, jobStatus)
+    nodes.push(makeNode('report_builder', 'report_builder', layer++, reportStatus, !!(reportArt as ReportArtifact).output))
+    prevOutputIds.forEach(id => edges.push({ source: id, target: 'report_builder' }))
+    prevOutputIds = ['report_builder']
+  }
+
+  // END
+  if (jobStatus === 'done' || jobStatus === 'failed' || jobStatus === 'cancelled') {
+    const endStatus: NodeStatus =
+      jobStatus === 'done' ? 'done' : jobStatus === 'failed' ? 'failed' : 'cancelled'
+    nodes.push(makeNode('END', 'END', layer++, endStatus))
+    prevOutputIds.forEach(id => edges.push({ source: id, target: 'END' }))
+  }
+
+  return { nodes, edges }
 }
 
-function hasDetail(id: NodeId, artifacts: Artifact[]): boolean {
-  const artifact = artifacts.find((a) => a.node === id)
-  if (!artifact) return false
-  switch (id) {
-    case 'discovery':
-      return (artifact as DiscoveryArtifact).steps?.length > 0
-    case 'investigation_planner':
-      return (artifact as PlannerArtifact).messages.length > 0
-    case 'skill_executor': {
-      const collector = artifacts.find((a) => a.node === 'evidence_collector') as CollectorArtifact | undefined
-      return (collector?.steps?.length ?? 0) > 0
-    }
-    case 'evidence_correlator':
-      return !!(artifact as { data?: unknown }).data
-    case 'finding_reviewer':
-      return ((artifact as ReviewerArtifact).data?.risk_findings?.length ?? 0) > 0
-    case 'report_builder':
-      return !!(artifact as ReportArtifact).output
-    default:
-      return false
+function makeNode(
+  id: string,
+  label: string,
+  layer: number,
+  status: NodeStatus,
+  hasDetail = false,
+  laneIndex?: number,
+): GraphNodeState {
+  return {
+    id,
+    def: { id, label, layer, isSubgraph: false, laneIndex },
+    status,
+    hasDetail,
   }
 }
 
-function filterEdges(
-  nodes: GraphNodeState[],
-  edges: { source: NodeId; target: NodeId }[],
-) {
-  const ids = new Set(nodes.map((n) => n.id))
-  return edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+function simpleArtifactStatus(artifact: Artifact | undefined, jobStatus: StatusResponse['status']): NodeStatus {
+  if (!artifact) return jobStatus === 'cancelled' ? 'cancelled' : 'idle'
+  if (artifact.status === 'done')      return 'done'
+  if (artifact.status === 'failed')    return 'failed'
+  if (artifact.status === 'cancelled') return 'cancelled'
+  return 'active'
 }
