@@ -60,6 +60,7 @@ async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_i
                     })
 
             elif node_name == TOOL_RUNNER:
+                await dao.start_artifact(job_id, TOOL_RUNNER)
                 results = node_update.get("tool_results") or []
                 await dao.update_artifact_data(job_id, TOOL_RUNNER, {
                     "tools_run": [tr.tool for tr in results],
