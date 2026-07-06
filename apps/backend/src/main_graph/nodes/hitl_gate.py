@@ -15,6 +15,16 @@ from src.main_graph.state import MainState
 logger = logging.getLogger(__name__)
 
 
+def _finalize_summary(state: MainState) -> str:
+    findings = state.get("findings") or []
+    if not findings:
+        return "Investigation complete with no findings. Proceed to generate the report?"
+    lines = "\n".join(
+        f"- [{f.severity.upper()}] {f.dep_name}: {f.description}" for f in findings
+    )
+    return f"Investigation complete. Findings:\n\n{lines}\n\nProceed to generate the report?"
+
+
 async def hitl_gate(state: MainState, config: RunnableConfig) -> dict:
     """Interrupt the graph to ask the user a question, or pass through in autopilot."""
     decision = state.get("conductor_decision")
@@ -22,9 +32,17 @@ async def hitl_gate(state: MainState, config: RunnableConfig) -> dict:
         return {}
 
     autopilot = state.get("autopilot", False)
-    question = decision.ask_user or decision.checkpoint_message
 
-    if not question or autopilot:
+    if decision.ask_user or decision.checkpoint_message:
+        question = decision.ask_user or decision.checkpoint_message
+        msg_type = "ask_user" if decision.ask_user else "checkpoint"
+    elif decision.finalize:
+        question = _finalize_summary(state)
+        msg_type = "checkpoint"
+    else:
+        return {}
+
+    if autopilot:
         return {}
 
     job_id = state["job_id"]
@@ -36,10 +54,10 @@ async def hitl_gate(state: MainState, config: RunnableConfig) -> dict:
         "role": "assistant",
         "content": question,
         "created_at": created_at,
-        "type": "ask_user" if decision.ask_user else "checkpoint",
+        "type": msg_type,
     })
 
-    user_reply: str = interrupt({"question": question, "type": "ask_user" if decision.ask_user else "checkpoint"})
+    user_reply: str = interrupt({"question": question, "type": msg_type})
 
     await dao.push_artifact_message(job_id, HITL_GATE, {
         "role": "human",

@@ -30,12 +30,19 @@ def _after_conductor(state: MainState) -> str:
     if decision is None:
         return REPORT_BUILDER
     if decision.finalize:
-        return REPORT_BUILDER
+        return REPORT_BUILDER if state.get("autopilot") else HITL_GATE
     if decision.ask_user or decision.checkpoint_message:
         return HITL_GATE
     if decision.tool_calls:
         return TOOL_RUNNER
     return REPORT_BUILDER
+
+
+def _after_hitl(state: MainState) -> str:
+    decision = state.get("conductor_decision")
+    if decision and decision.finalize:
+        return REPORT_BUILDER
+    return CONDUCTOR
 
 
 def build_main_graph():
@@ -51,7 +58,7 @@ def build_main_graph():
     builder.add_conditional_edges(PREP, _after_prep, [CONDUCTOR, END])
     builder.add_conditional_edges(CONDUCTOR, _after_conductor, [TOOL_RUNNER, HITL_GATE, REPORT_BUILDER])
     builder.add_edge(TOOL_RUNNER, CONDUCTOR)
-    builder.add_edge(HITL_GATE, CONDUCTOR)
+    builder.add_conditional_edges(HITL_GATE, _after_hitl, [CONDUCTOR, REPORT_BUILDER])
     builder.add_edge(REPORT_BUILDER, END)
 
     return builder.compile(checkpointer=InMemorySaver())
