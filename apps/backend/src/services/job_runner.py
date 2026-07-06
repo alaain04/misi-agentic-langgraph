@@ -1,4 +1,6 @@
-"""Background task: run a job through the analysis pipeline."""
+"""Background task: run a job through the ReAct conductor pipeline."""
+from __future__ import annotations
+
 import logging
 import shutil
 
@@ -7,7 +9,9 @@ from langgraph.types import Command
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph import main_graph
 from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
+from src.main_graph.constants import CONDUCTOR, HITL_GATE, PREP, REPORT_BUILDER, TOOL_RUNNER
 from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
+from src.main_graph.tools.external_api import clear_cache
 from src.models.job import JobStatus
 
 logger = logging.getLogger(__name__)
@@ -25,36 +29,109 @@ def _build_config(job_id: str, dao: JobRepositoryPort) -> dict:
     }
 
 
+async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_id: str) -> bool:
+    """Stream graph updates and track artifacts. Returns True if interrupted."""
+    interrupted = False
+
+    async for chunk in graph.astream(input_data, config, stream_mode="updates"):
+        for node_name, node_update in chunk.items():
+            if node_name == "__interrupt__":
+                interrupted = True
+                continue
+
+            logger.info("job=%s node=%s completed", job_id, node_name)
+
+            if node_name == PREP:
+                if node_update.get("discovery_error"):
+                    await dao.complete_artifact(job_id, PREP, "failed")
+                else:
+                    await dao.complete_artifact(job_id, PREP, "done")
+                    await dao.start_artifact(job_id, CONDUCTOR)
+
+            elif node_name == CONDUCTOR:
+                decision = node_update.get("conductor_decision")
+                if decision:
+                    await dao.update_artifact_data(job_id, CONDUCTOR, {
+                        "iteration": node_update.get("conductor_iteration"),
+                        "tool_calls": [tc.model_dump() for tc in decision.tool_calls],
+                        "findings_count": len(node_update.get("findings") or []),
+                        "finalize": decision.finalize,
+                        "reasoning": decision.reasoning,
+                    })
+
+            elif node_name == TOOL_RUNNER:
+                results = node_update.get("tool_results") or []
+                await dao.update_artifact_data(job_id, TOOL_RUNNER, {
+                    "tools_run": [tr.tool for tr in results],
+                    "errors": [tr.tool for tr in results if tr.error],
+                })
+
+            elif node_name == HITL_GATE:
+                await dao.start_artifact(job_id, HITL_GATE)
+
+            elif node_name == REPORT_BUILDER:
+                await dao.start_artifact(job_id, REPORT_BUILDER)
+                if "analysis_report" in node_update:
+                    await dao.update_artifact_data(job_id, REPORT_BUILDER, {
+                        "output": node_update["analysis_report"]
+                    })
+                await dao.complete_artifact(job_id, REPORT_BUILDER, "done")
+
+    return interrupted
+
+
+async def _finalize(dao: JobRepositoryPort, job_id: str, config: dict) -> None:
+    clear_cache()
+    snapshot = await main_graph.aget_state(config)
+    values = snapshot.values
+    if repo_path := values.get("repo_path"):
+        shutil.rmtree(repo_path, ignore_errors=True)
+    if values.get("cancelled"):
+        await dao.mark_cancelled(job_id)
+    elif values.get("discovery_error"):
+        await dao.mark_failed(job_id, error=values["discovery_error"])
+    else:
+        await dao.save_result(job_id, {"analysis_report": values.get("analysis_report")})
+
+
 async def run_analysis(
     job_id: str,
     repo_url: str,
     concern: str,
+    autopilot: bool,
     dao: JobRepositoryPort,
-    autopilot: bool = False,
 ) -> None:
     await dao.update_status(job_id, JobStatus.running)
+    await dao.start_artifact(job_id, PREP)
     config = _build_config(job_id, dao)
+    clear_cache()
+
     try:
-        async for _ in main_graph.astream(
-            {"repo_url": repo_url, "concern": concern, "job_id": job_id,
-             "autopilot": autopilot, "messages": [], "tool_results": [], "findings": []},
+        interrupted = await _stream_graph(
+            main_graph,
+            {
+                "repo_url": repo_url,
+                "concern": concern,
+                "job_id": job_id,
+                "autopilot": autopilot,
+                "messages": [],
+                "tool_results": [],
+                "findings": [],
+            },
             config,
-            stream_mode="updates",
-        ):
-            pass
-        snapshot = await main_graph.aget_state(config)
-        if snapshot.values.get("cancelled"):
-            await dao.mark_cancelled(job_id)
-        elif snapshot.values.get("discovery_error"):
-            await dao.mark_failed(job_id, error=snapshot.values["discovery_error"])
-        else:
-            await dao.save_result(job_id, {"analysis_report": snapshot.values.get("analysis_report")})
+            dao,
+            job_id,
+        )
+        if interrupted:
+            await dao.update_status(job_id, JobStatus.awaiting_approval)
+            return
+        await _finalize(dao, job_id, config)
+        await dao.update_status(job_id, JobStatus.done)
+
     except Exception as exc:
         logger.exception("job=%s unhandled error", job_id)
+        clear_cache()
         await dao.mark_failed(job_id, error=str(exc))
-    finally:
-        if repo_path := (await main_graph.aget_state(config)).values.get("repo_path"):
-            shutil.rmtree(repo_path, ignore_errors=True)
 
 
 async def resume_analysis(
@@ -64,14 +141,22 @@ async def resume_analysis(
 ) -> None:
     await dao.update_status(job_id, JobStatus.processing)
     config = _build_config(job_id, dao)
+
     try:
-        async for _ in main_graph.astream(Command(resume=user_message), config, stream_mode="updates"):
-            pass
-        snapshot = await main_graph.aget_state(config)
-        if snapshot.values.get("cancelled"):
-            await dao.mark_cancelled(job_id)
-        else:
-            await dao.save_result(job_id, {"analysis_report": snapshot.values.get("analysis_report")})
+        interrupted = await _stream_graph(
+            main_graph,
+            Command(resume=user_message),
+            config,
+            dao,
+            job_id,
+        )
+        if interrupted:
+            await dao.update_status(job_id, JobStatus.awaiting_approval)
+            return
+        await _finalize(dao, job_id, config)
+        await dao.update_status(job_id, JobStatus.done)
+
     except Exception as exc:
         logger.exception("job=%s unhandled error on resume", job_id)
+        clear_cache()
         await dao.mark_failed(job_id, error=str(exc))

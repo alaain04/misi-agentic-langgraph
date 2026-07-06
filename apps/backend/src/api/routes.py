@@ -31,6 +31,7 @@ async def analyze(
             job_id=job.id,
             repo_url=job.metadata.repo_url,
             concern=job.metadata.concern,
+            autopilot=request.autopilot,
             dao=dao,
         )
     )

@@ -25,6 +25,7 @@ class GraphInfo(BaseModel):
 class AnalysisRequest(BaseModel):
     repo_url: str
     concern: str
+    autopilot: bool = False
 
 
 class AnalysisStatusResponse(BaseModel):
