@@ -17,7 +17,8 @@ def _load_pkg(repo_path: str) -> dict:
     try:
         with open(os.path.join(repo_path, "package.json")) as f:
             return json.load(f)
-    except Exception:
+    except Exception as exc:
+        logger.warning("failed to read package.json at %s: %s", repo_path, exc)
         return {}
 
 

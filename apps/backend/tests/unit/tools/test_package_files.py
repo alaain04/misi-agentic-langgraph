@@ -63,6 +63,20 @@ async def test_list_directory_returns_entries(repo):
     assert "package.json" in result["entries"]
 
 
+@pytest.mark.asyncio
+async def test_read_file_rejects_path_traversal(repo):
+    result = await TOOL_REGISTRY["read_file"](repo_path=repo, relative_path="../etc/passwd")
+    assert "error" in result
+    assert "path traversal" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_list_directory_rejects_path_traversal(repo):
+    result = await TOOL_REGISTRY["list_directory"](repo_path=repo, relative_path="../etc")
+    assert "error" in result
+    assert "path traversal" in result["error"]
+
+
 def test_all_package_file_tools_registered():
     expected = [
         "package_json", "package_lock", "version_ranges", "dependency_confusion",

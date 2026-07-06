@@ -64,7 +64,7 @@ async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_i
                 results = node_update.get("tool_results") or []
                 await dao.update_artifact_data(job_id, TOOL_RUNNER, {
                     "tools_run": [tr.tool for tr in results],
-                    "errors": [tr.tool for tr in results if tr.error],
+                    "errors": [{"tool": tr.tool, "error": tr.error} for tr in results if tr.error],
                 })
 
             elif node_name == HITL_GATE:

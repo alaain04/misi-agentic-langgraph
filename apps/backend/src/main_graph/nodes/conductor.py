@@ -47,7 +47,8 @@ def _format_tool_results(tool_results: list) -> str:
         return "No tool results yet."
     parts = []
     for tr in tool_results[-20:]:  # show last 20 to avoid context overflow
-        output_str = json.dumps(tr.output, indent=2)[:2000]
+        output_json = json.dumps(tr.output, indent=2)
+        output_str = output_json[:2000] + (" ... [truncated]" if len(output_json) > 2000 else "")
         parts.append(f"[{tr.id}] {tr.tool}({tr.args}) → {output_str}")
     return "\n\n".join(parts)
 

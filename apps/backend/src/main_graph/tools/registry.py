@@ -6,7 +6,6 @@ Each tool is: async (repo_path: str, **kwargs) -> dict
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 # Populated by each tool module at import time via register()
 TOOL_REGISTRY: dict[str, Callable[..., Awaitable[dict]]] = {}
