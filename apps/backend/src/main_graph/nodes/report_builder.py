@@ -1,75 +1,88 @@
-"""Deterministic assembly of analysis report from risk findings and contradictions."""
+"""Report builder — single LLM call that formats accumulated FindingNote entries into a report."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 
 from src.main_graph.state import MainState
-from src.models.risk_finding import RiskFinding
+from src.models.conductor import FindingNote
+from src.utils.llm import Model, get_llm, parse_llm_json
 
 logger = logging.getLogger(__name__)
 
-_SEVERITY_ORDER: dict[str, int] = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+_llm = get_llm(Model.GPT_5_4_MINI)
+
+_SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+_SYSTEM = """\
+You are a technical report writer. Given structured investigation findings, produce a JSON analysis report.
+
+Output ONLY valid JSON matching this exact shape:
+{
+  "executive_summary": "<2-4 sentence summary of overall risk>",
+  "overall_risk_level": "<critical|high|medium|low|none>",
+  "findings": [
+    {
+      "dep_name": "<package name>",
+      "severity": "<critical|high|medium|low|info>",
+      "description": "<concise description>",
+      "recommendation": "<actionable fix>",
+      "evidence_refs": ["<tool result id>"]
+    }
+  ],
+  "recommendations": ["<deduplicated list of top recommendations>"]
+}
+"""
 
 
-def _overall_risk_level(findings: list[RiskFinding]) -> str:
+def _format_findings(findings: list[FindingNote]) -> str:
+    return json.dumps(
+        [{"dep_name": f.dep_name, "severity": f.severity, "description": f.description, "evidence_refs": f.evidence_refs}
+         for f in findings],
+        indent=2,
+    )
+
+
+def _overall_risk(findings: list[FindingNote]) -> str:
     if not findings:
         return "none"
     return max(findings, key=lambda f: _SEVERITY_ORDER.get(f.severity, 0)).severity
 
 
-def _aggregate_recommendations(sorted_findings: list[RiskFinding]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for f in sorted_findings:
-        if f.recommendation and f.recommendation not in seen:
-            seen.add(f.recommendation)
-            result.append(f.recommendation)
-    return result
+async def report_builder(state: MainState) -> dict:
+    findings = state.get("findings") or []
+    concern = state.get("concern", "")
 
+    if not findings:
+        report = {
+            "concern": concern,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "overall_risk_level": "none",
+            "executive_summary": "No significant findings were identified during the investigation.",
+            "findings": [],
+            "recommendations": [],
+        }
+        return {"analysis_report": report}
 
-def _finding_to_dict(f: RiskFinding) -> dict:
-    return {
-        "dep_name": f.dep_name,
-        "risk_score": f.risk_score,
-        "confidence": f.confidence,
-        "severity": f.severity,
-        "summary": f.summary,
-        "recommendation": f.recommendation,
-        "alternatives": f.alternatives,
-        "supporting_evidence_count": len(f.supporting_evidence),
-        "contradictions_count": len(f.contradictions),
-        "missing_evidence": f.missing_evidence,
-    }
+    sorted_findings = sorted(findings, key=lambda f: _SEVERITY_ORDER.get(f.severity, 0), reverse=True)
 
+    response = await _llm.ainvoke([
+        {"role": "system", "content": _SYSTEM},
+        {"role": "user", "content": f"Concern: {concern}\n\nFindings:\n{_format_findings(sorted_findings)}"},
+    ])
 
-def report_builder(state: MainState) -> dict:
-    findings = state.get("risk_findings") or []
-    contradictions = state.get("contradictions") or []
-
-    sorted_findings = sorted(findings, key=lambda f: f.risk_score, reverse=True)
+    try:
+        report_data = parse_llm_json(response.content or "")
+    except Exception:
+        report_data = {"executive_summary": response.content, "findings": [], "recommendations": []}
 
     report = {
-        "concern": state.get("concern", ""),
+        "concern": concern,
         "generated_at": datetime.now(UTC).isoformat(),
-        "overall_risk_level": _overall_risk_level(findings),
-        "summary": {
-            "total_deps": len(findings),
-            "critical": sum(1 for f in findings if f.severity == "critical"),
-            "high": sum(1 for f in findings if f.severity == "high"),
-            "medium": sum(1 for f in findings if f.severity == "medium"),
-            "low": sum(1 for f in findings if f.severity == "low"),
-        },
-        "findings": [_finding_to_dict(f) for f in sorted_findings],
-        "recommendations": _aggregate_recommendations(sorted_findings),
-        "contradictions": [
-            {"description": c.description, "resolution": c.resolution}
-            for c in contradictions
-        ],
+        "overall_risk_level": _overall_risk(findings),
+        **report_data,
     }
 
-    logger.info(
-        "report_builder: overall_risk=%s findings=%d recommendations=%d",
-        report["overall_risk_level"], len(findings), len(report["recommendations"]),
-    )
+    logger.info("report_builder: findings=%d overall_risk=%s", len(findings), report["overall_risk_level"])
     return {"analysis_report": report}
