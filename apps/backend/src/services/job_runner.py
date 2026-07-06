@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from datetime import UTC, datetime
 
 from langgraph.types import Command
 
@@ -34,11 +35,21 @@ def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) ->
 async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_id: str) -> bool:
     """Stream graph updates and track artifacts. Returns True if interrupted."""
     interrupted = False
+    current_conductor_iteration = 0
 
     async for chunk in graph.astream(input_data, config, stream_mode="updates"):
         for node_name, node_update in chunk.items():
             if node_name == "__interrupt__":
                 interrupted = True
+                for intr in node_update:
+                    val = intr.value
+                    await dao.start_artifact(job_id, HITL_GATE)
+                    await dao.push_artifact_message(job_id, HITL_GATE, {
+                        "role": "assistant",
+                        "content": val.get("question", ""),
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "type": val.get("type", "checkpoint"),
+                    })
                 continue
 
             logger.info("job=%s node=%s completed", job_id, node_name)
@@ -51,26 +62,30 @@ async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_i
                     await dao.start_artifact(job_id, CONDUCTOR)
 
             elif node_name == CONDUCTOR:
+                current_conductor_iteration = node_update.get("conductor_iteration") or 0
                 decision = node_update.get("conductor_decision")
                 if decision:
-                    await dao.update_artifact_data(job_id, CONDUCTOR, {
-                        "iteration": node_update.get("conductor_iteration"),
+                    await dao.push_artifact_item(job_id, CONDUCTOR, "iterations", {
+                        "iteration": current_conductor_iteration,
                         "tool_calls": [tc.model_dump() for tc in decision.tool_calls],
                         "findings_count": len(node_update.get("findings") or []),
                         "finalize": decision.finalize,
                         "reasoning": decision.reasoning,
+                        "started_at": datetime.now(UTC).isoformat(),
                     })
 
             elif node_name == TOOL_RUNNER:
                 await dao.start_artifact(job_id, TOOL_RUNNER)
                 results = node_update.get("tool_results") or []
-                await dao.update_artifact_data(job_id, TOOL_RUNNER, {
+                await dao.push_artifact_item(job_id, TOOL_RUNNER, "iterations", {
+                    "conductor_iteration": current_conductor_iteration,
                     "tools_run": [tr.tool for tr in results],
                     "errors": [{"tool": tr.tool, "error": tr.error} for tr in results if tr.error],
+                    "started_at": datetime.now(UTC).isoformat(),
                 })
 
             elif node_name == HITL_GATE:
-                await dao.start_artifact(job_id, HITL_GATE)
+                await dao.complete_artifact(job_id, HITL_GATE, "done")
 
             elif node_name == REPORT_BUILDER:
                 await dao.start_artifact(job_id, REPORT_BUILDER)
@@ -126,7 +141,7 @@ async def run_analysis(
             dao,
             job_id,
         )
-        await dao.save_cost(job_id, cost_cb.cost_usd())
+        await dao.save_cost(job_id, cost_cb.cost())
         if interrupted:
             await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
@@ -136,7 +151,7 @@ async def run_analysis(
     except Exception as exc:
         logger.exception("job=%s unhandled error", job_id)
         clear_cache()
-        await dao.save_cost(job_id, cost_cb.cost_usd())
+        await dao.save_cost(job_id, cost_cb.cost())
         await dao.mark_failed(job_id, error=str(exc))
 
 
@@ -157,7 +172,7 @@ async def resume_analysis(
             dao,
             job_id,
         )
-        await dao.save_cost(job_id, cost_cb.cost_usd())
+        await dao.save_cost(job_id, cost_cb.cost())
         if interrupted:
             await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
@@ -167,5 +182,5 @@ async def resume_analysis(
     except Exception as exc:
         logger.exception("job=%s unhandled error on resume", job_id)
         clear_cache()
-        await dao.save_cost(job_id, cost_cb.cost_usd())
+        await dao.save_cost(job_id, cost_cb.cost())
         await dao.mark_failed(job_id, error=str(exc))

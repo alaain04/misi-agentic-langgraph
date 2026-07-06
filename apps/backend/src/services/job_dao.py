@@ -125,6 +125,13 @@ class JobDAO(JobRepositoryPort):
                 }}},
             )
 
+    async def push_artifact_item(self, job_id: str, node: str, field: str, item: dict) -> None:
+        """Append an item to an array field inside an existing artifact entry."""
+        await self._col.update_one(
+            {"_id": job_id, "artifacts.node": node},
+            {"$push": {f"artifacts.$.{field}": item}},
+        )
+
     async def update_artifact_data(self, job_id: str, node: str, data: dict) -> None:
         """Merge extra fields into an existing artifact entry."""
         update_fields = {f"artifacts.$.{k}": v for k, v in data.items()}
@@ -133,8 +140,8 @@ class JobDAO(JobRepositoryPort):
             {"$set": update_fields},
         )
 
-    async def save_cost(self, job_id: str, cost_usd: float) -> None:
-        await self._col.update_one({"_id": job_id}, {"$set": {"cost_usd": cost_usd}})
+    async def save_cost(self, job_id: str, cost: float) -> None:
+        await self._col.update_one({"_id": job_id}, {"$set": {"cost": cost}})
 
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})

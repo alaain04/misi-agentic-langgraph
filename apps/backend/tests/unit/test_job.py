@@ -39,3 +39,15 @@ def test_job_dao_implements_port():
     from src.services.job_dao import JobDAO
 
     assert issubclass(JobDAO, JobRepositoryPort)
+
+
+def test_job_dao_implements_push_artifact_item():
+    import inspect
+
+    from src.domain.ports.job_repository_port import JobRepositoryPort
+    from src.services.job_dao import JobDAO
+
+    assert hasattr(JobDAO, "push_artifact_item")
+    assert inspect.iscoroutinefunction(JobDAO.push_artifact_item)
+    # Port must declare it too
+    assert "push_artifact_item" in {m for m in dir(JobRepositoryPort) if not m.startswith("_")}
