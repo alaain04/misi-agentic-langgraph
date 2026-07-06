@@ -56,28 +56,25 @@ class JobDAO(JobRepositoryPort):
         )
 
     async def start_artifact(self, job_id: str, node: str) -> None:
-        """Insert or update an artifact entry as 'running'."""
+        """Insert or update an artifact entry as 'running'.
+
+        Preserves started_at on subsequent calls so HITL timestamp-based
+        pre/post-gate partitioning is not corrupted by multi-interrupt flows.
+        """
         now = datetime.now(UTC)
-        artifact = {
-            "node": node,
-            "status": "running",
-            "started_at": now,
-            "completed_at": None,
-        }
         result = await self._col.update_one(
             {"_id": job_id, "artifacts.node": node},
-            {
-                "$set": {
-                    "artifacts.$.status": "running",
-                    "artifacts.$.started_at": now,
-                    "artifacts.$.completed_at": None,
-                }
-            },
+            {"$set": {"artifacts.$.status": "running"}},
         )
         if result.matched_count == 0:
             await self._col.update_one(
                 {"_id": job_id},
-                {"$push": {"artifacts": artifact}},
+                {"$push": {"artifacts": {
+                    "node": node,
+                    "status": "running",
+                    "started_at": now,
+                    "completed_at": None,
+                }}},
             )
 
     async def complete_artifact(self, job_id: str, node: str, status: str) -> None:

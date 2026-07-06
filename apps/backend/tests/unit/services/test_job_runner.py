@@ -2,7 +2,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.constants import HITL_GATE
+from src.main_graph.constants import CONDUCTOR, HITL_GATE, TOOL_RUNNER
 from src.models.job import JobStatus
 from src.services.job_runner import _stream_graph, resume_analysis, run_analysis
 
@@ -97,3 +97,53 @@ async def test_stream_graph_hitl_artifact_lifecycle():
         },
     )
     dao.complete_artifact.assert_any_await(job_id, HITL_GATE, "done")
+
+
+@pytest.mark.asyncio
+async def test_stream_graph_conductor_tool_runner_accumulation():
+    """CONDUCTOR chunk pushes conductor iteration; TOOL_RUNNER chunk pushes tool_runner iteration with correct conductor_iteration."""
+    dao = AsyncMock()
+    job_id = "job-accum"
+
+    decision = MagicMock()
+    decision.tool_calls = []
+    decision.finalize = False
+    decision.reasoning = "let's go"
+
+    tool_result = MagicMock()
+    tool_result.tool = "npm_audit"
+    tool_result.error = None
+
+    async def accumulation_stream(*args, **kwargs):
+        yield {CONDUCTOR: {"conductor_iteration": 2, "conductor_decision": decision, "findings": []}}
+        yield {TOOL_RUNNER: {"tool_results": [tool_result]}}
+
+    mock_graph = MagicMock()
+    mock_graph.astream = accumulation_stream
+
+    await _stream_graph(mock_graph, {}, {}, dao, job_id)
+
+    dao.push_artifact_item.assert_any_await(
+        job_id,
+        CONDUCTOR,
+        "iterations",
+        {
+            "iteration": 2,
+            "tool_calls": [],
+            "findings_count": 0,
+            "finalize": False,
+            "reasoning": "let's go",
+            "started_at": ANY,
+        },
+    )
+    dao.push_artifact_item.assert_any_await(
+        job_id,
+        TOOL_RUNNER,
+        "iterations",
+        {
+            "conductor_iteration": 2,
+            "tools_run": ["npm_audit"],
+            "errors": [],
+            "started_at": ANY,
+        },
+    )

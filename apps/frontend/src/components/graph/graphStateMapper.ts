@@ -133,11 +133,10 @@ function makeNode(
   layer: number,
   status: NodeStatus,
   hasDetail = false,
-  laneIndex?: number,
 ): GraphNodeState {
   return {
     id,
-    def: { id, label, layer, isSubgraph: false, laneIndex },
+    def: { id, label, layer, isSubgraph: false },
     status,
     hasDetail,
   }
