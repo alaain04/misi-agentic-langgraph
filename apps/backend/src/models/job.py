@@ -29,6 +29,7 @@ class Job(BaseModel):
     result: dict | None = None
     error: str | None = None
     artifacts: list[dict] = Field(default_factory=list)
+    cost_usd: float | None = None
 
     def to_doc(self) -> dict:
         doc = self.model_dump()

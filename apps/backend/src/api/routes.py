@@ -55,6 +55,7 @@ async def get_analysis_status(
         error=job.error,
         artifacts=job.artifacts,
         graph=build_graph_info(job),
+        cost_usd=job.cost_usd,
     )
 
 

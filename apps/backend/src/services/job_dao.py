@@ -133,6 +133,9 @@ class JobDAO(JobRepositoryPort):
             {"$set": update_fields},
         )
 
+    async def save_cost(self, job_id: str, cost_usd: float) -> None:
+        await self._col.update_one({"_id": job_id}, {"$set": {"cost_usd": cost_usd}})
+
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})
         jobs = []

@@ -37,6 +37,9 @@ class JobRepositoryPort(ABC):
     ) -> None: ...
 
     @abstractmethod
+    async def save_cost(self, job_id: str, cost_usd: float) -> None: ...
+
+    @abstractmethod
     async def get_pending(self) -> list[Job]: ...
 
     @abstractmethod

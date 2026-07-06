@@ -13,11 +13,12 @@ from src.main_graph.constants import CONDUCTOR, HITL_GATE, PREP, REPORT_BUILDER,
 from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
 from src.main_graph.tools.external_api import clear_cache
 from src.models.job import JobStatus
+from src.utils.cost import CostCallback
 
 logger = logging.getLogger(__name__)
 
 
-def _build_config(job_id: str, dao: JobRepositoryPort) -> dict:
+def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) -> dict:
     container = DockerContainerAdapter()
     return {
         "configurable": {
@@ -25,7 +26,8 @@ def _build_config(job_id: str, dao: JobRepositoryPort) -> dict:
             "job_repo": dao,
             "container": container,
             "docker_tool": make_docker_tool(container),
-        }
+        },
+        "callbacks": [cost_cb],
     }
 
 
@@ -104,7 +106,8 @@ async def run_analysis(
 ) -> None:
     await dao.update_status(job_id, JobStatus.running)
     await dao.start_artifact(job_id, PREP)
-    config = _build_config(job_id, dao)
+    cost_cb = CostCallback()
+    config = _build_config(job_id, dao, cost_cb)
     clear_cache()
 
     try:
@@ -123,6 +126,7 @@ async def run_analysis(
             dao,
             job_id,
         )
+        await dao.save_cost(job_id, cost_cb.cost_usd())
         if interrupted:
             await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
@@ -132,6 +136,7 @@ async def run_analysis(
     except Exception as exc:
         logger.exception("job=%s unhandled error", job_id)
         clear_cache()
+        await dao.save_cost(job_id, cost_cb.cost_usd())
         await dao.mark_failed(job_id, error=str(exc))
 
 
@@ -141,7 +146,8 @@ async def resume_analysis(
     dao: JobRepositoryPort,
 ) -> None:
     await dao.update_status(job_id, JobStatus.processing)
-    config = _build_config(job_id, dao)
+    cost_cb = CostCallback()
+    config = _build_config(job_id, dao, cost_cb)
 
     try:
         interrupted = await _stream_graph(
@@ -151,6 +157,7 @@ async def resume_analysis(
             dao,
             job_id,
         )
+        await dao.save_cost(job_id, cost_cb.cost_usd())
         if interrupted:
             await dao.update_status(job_id, JobStatus.awaiting_approval)
             return
@@ -160,4 +167,5 @@ async def resume_analysis(
     except Exception as exc:
         logger.exception("job=%s unhandled error on resume", job_id)
         clear_cache()
+        await dao.save_cost(job_id, cost_cb.cost_usd())
         await dao.mark_failed(job_id, error=str(exc))
