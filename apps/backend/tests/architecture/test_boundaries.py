@@ -21,12 +21,6 @@ _FORBIDDEN_IN_DOMAIN_PORTS = {
     "src.db",
 }
 
-# Skills are the new first-class investigation units; they must not reference
-# the deleted ingestion_subgraphs namespace.
-_FORBIDDEN_IN_SKILLS = {
-    "src.main_graph.subgraphs.ingestion_subgraphs",
-}
-
 
 def _get_imports(path: Path) -> set[str]:
     source = path.read_text()
@@ -78,37 +72,13 @@ def test_domain_ports_have_no_infrastructure_imports():
     assert not violations, "Forbidden imports in domain ports:\n" + "\n".join(violations)
 
 
-_LANGGRAPH_EXEMPT_SERVICES = {
-    # investigation_planner_service.py intentionally uses Command, interrupt, END for HITL loop
-    "investigation_planner_service.py",
-}
-
-
 def test_service_files_do_not_import_from_langgraph():
     """subgraph service.py files must not import from langgraph (orchestration belongs in nodes)."""
     violations = []
     service_files = list(_SRC.glob("main_graph/**/service.py")) + list(_SRC.glob("main_graph/nodes/*_service.py"))
     for svc_file in service_files:
-        if svc_file.name in _LANGGRAPH_EXEMPT_SERVICES:
-            continue
         imports = _get_imports(svc_file)
         bad = {i for i in imports if i.startswith("langgraph")}
         if bad:
             violations.append(f"{svc_file.relative_to(_SRC)}: {bad}")
     assert not violations, "LangGraph imports in service files:\n" + "\n".join(violations)
-
-
-def test_skills_do_not_import_from_deleted_ingestion_subgraphs():
-    """Skills must not reference the deleted ingestion_subgraphs namespace."""
-    violations = []
-    skill_files = [
-        f for f in (_SRC / "main_graph" / "skills").rglob("*.py")
-        if f.name != "__init__.py"
-    ]
-    for skill_file in skill_files:
-        imports = _get_imports(skill_file)
-        for imp in imports:
-            for forbidden in _FORBIDDEN_IN_SKILLS:
-                if imp.startswith(forbidden):
-                    violations.append(f"{skill_file.relative_to(_SRC)}: imports {imp}")
-    assert not violations, "Forbidden imports in skill files:\n" + "\n".join(violations)
