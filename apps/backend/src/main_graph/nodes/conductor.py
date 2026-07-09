@@ -33,6 +33,7 @@ Rules:
 - Emit FindingNote entries for every risk you observe in tool results.
 - In autopilot mode, never set ask_user or checkpoint_message.
 - After 10 iterations, you MUST finalize regardless of confidence.
+- When emitting a FindingNote, populate the evidence list with one entry per supporting tool result. Set tool to the tool name, url to any advisory URL, CVE permalink, or OSV link present in the output (null if none), and log_snippet to the most relevant excerpt (max 400 characters).
 
 Available tools:
 {tool_descriptions}

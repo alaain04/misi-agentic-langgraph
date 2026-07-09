@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.main_graph.nodes.report_builder import report_builder
-from src.models.conductor import FindingNote
+from src.models.conductor import EvidenceRef, FindingNote
 
 
 def _make_state(findings=None, concern="security"):
@@ -28,8 +28,10 @@ async def test_report_builder_returns_none_risk_when_no_findings():
 @pytest.mark.asyncio
 async def test_report_builder_calls_llm_with_findings():
     findings = [
-        FindingNote(dep_name="lodash", severity="high", description="vuln", evidence_refs=["tr-1"]),
-        FindingNote(dep_name="express", severity="medium", description="outdated", evidence_refs=[]),
+        FindingNote(dep_name="lodash", severity="high", description="vuln", evidence=[
+            EvidenceRef(tool="npm_audit", url="https://example.com/cve-1", log_snippet="critical issue in lodash")
+        ]),
+        FindingNote(dep_name="express", severity="medium", description="outdated", evidence=[]),
     ]
     mock_response = MagicMock()
     mock_response.content = '{"executive_summary": "High risk.", "overall_risk_level": "high", "findings": [], "recommendations": ["upgrade lodash"]}'

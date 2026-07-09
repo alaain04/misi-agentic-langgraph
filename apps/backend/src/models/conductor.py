@@ -7,11 +7,17 @@ class ToolCall(BaseModel):
     reason: str
 
 
+class EvidenceRef(BaseModel):
+    tool: str
+    url: str | None
+    log_snippet: str
+
+
 class FindingNote(BaseModel):
     dep_name: str
     severity: str  # "critical" | "high" | "medium" | "low" | "info"
     description: str
-    evidence_refs: list[str]
+    evidence: list[EvidenceRef]
 
 
 class ToolResult(BaseModel):

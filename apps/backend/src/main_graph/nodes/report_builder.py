@@ -28,7 +28,7 @@ Output ONLY valid JSON matching this exact shape:
       "severity": "<critical|high|medium|low|info>",
       "description": "<concise description>",
       "recommendation": "<actionable fix>",
-      "evidence_refs": ["<tool result id>"]
+      "evidence": [{"tool": "<tool>", "url": "<url or null>", "log_snippet": "<excerpt>"}]
     }
   ],
   "recommendations": ["<deduplicated list of top recommendations>"]
@@ -38,8 +38,15 @@ Output ONLY valid JSON matching this exact shape:
 
 def _format_findings(findings: list[FindingNote]) -> str:
     return json.dumps(
-        [{"dep_name": f.dep_name, "severity": f.severity, "description": f.description, "evidence_refs": f.evidence_refs}
-         for f in findings],
+        [
+            {
+                "dep_name": f.dep_name,
+                "severity": f.severity,
+                "description": f.description,
+                "evidence": [e.model_dump() for e in f.evidence],
+            }
+            for f in findings
+        ],
         indent=2,
     )
 

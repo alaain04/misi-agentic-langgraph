@@ -63,7 +63,7 @@ async def test_conductor_suppresses_ask_user_in_autopilot():
 
 @pytest.mark.asyncio
 async def test_conductor_accumulates_findings():
-    new_finding = FindingNote(dep_name="lodash", severity="high", description="vuln", evidence_refs=[])
+    new_finding = FindingNote(dep_name="lodash", severity="high", description="vuln", evidence=[])
     decision = ConductorDecision(
         tool_calls=[], findings=[new_finding], ask_user=None,
         checkpoint_message=None, finalize=True, reasoning="r",

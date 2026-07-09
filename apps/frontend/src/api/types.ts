@@ -10,6 +10,12 @@ export type JobStatus =
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
+export interface EvidenceRef {
+  tool: string
+  url: string | null
+  log_snippet: string
+}
+
 export interface AnalysisRequest {
   repo_url: string
   concern: string
@@ -84,6 +90,7 @@ export interface ReportFinding {
   supporting_evidence_count: number
   contradictions_count: number
   missing_evidence: string[]
+  evidence?: EvidenceRef[]
 }
 
 export interface RiskFinding extends ReportFinding {
