@@ -39,9 +39,7 @@ export function FindingReviewerPanel({ artifacts }: PanelProps) {
                 </span>
                 <div className="min-w-0">
                   <p className="font-mono text-xs font-semibold text-(--color-text)">{f.dep_name}</p>
-                  <p className="font-mono text-[10px] text-(--color-muted)">
-                    score: {f.risk_score.toFixed(1)}/10
-                  </p>
+                  <p className="font-mono text-[10px] text-(--color-muted)">{f.description}</p>
                 </div>
               </li>
             ))}

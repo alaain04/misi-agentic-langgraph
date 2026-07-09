@@ -81,46 +81,24 @@ export interface ContradictionReport {
 
 export interface ReportFinding {
   dep_name: string
-  risk_score: number
-  confidence: number
   severity: Severity
-  summary: string
+  description: string
   recommendation: string | null
-  alternatives: string[]
-  supporting_evidence_count: number
-  contradictions_count: number
-  missing_evidence: string[]
   evidence?: EvidenceRef[]
-}
-
-export interface RiskFinding extends ReportFinding {
-  hypotheses: Hypothesis[]
-  supporting_evidence: string[]
-  contradictions: ContradictionReport[]
 }
 
 export interface AnalysisReport {
   concern: string
   generated_at: string
   overall_risk_level: Severity | 'none'
-  summary: {
-    total_deps: number
-    critical: number
-    high: number
-    medium: number
-    low: number
-  }
+  executive_summary: string
   findings: ReportFinding[]
   recommendations: string[]
-  contradictions: { description: string; resolution: string }[]
 }
 
 export interface JobResult {
-  discovery: DiscoveryResult
-  risk_findings: RiskFinding[]
   analysis_report: AnalysisReport | null
-  review_approved: boolean | null
-  review_iterations: number | null
+  discovery?: DiscoveryResult | null
 }
 
 // ── Artifacts ──────────────────────────────────────────────────────────────────
@@ -226,7 +204,7 @@ export interface CorrelatorArtifact extends BaseArtifact {
 
 export interface ReviewerArtifact extends BaseArtifact {
   node: 'finding_reviewer'
-  data?: { risk_findings: RiskFinding[] }
+  data?: { risk_findings: ReportFinding[] }
   output?: { review_approved: boolean; reviewer_feedback: string | null }
   messages: ArtifactMessage[]
 }

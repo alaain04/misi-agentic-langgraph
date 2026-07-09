@@ -21,9 +21,15 @@ export function ReportBuilderPanel({ artifacts }: PanelProps) {
           {report.overall_risk_level}
         </p>
         <p className="mt-1 font-mono text-xs text-(--color-muted)">
-          {report.summary.total_deps} dependencies analysed
+          {report.findings.length} finding{report.findings.length !== 1 ? 's' : ''}
         </p>
       </div>
+
+      {report.executive_summary && (
+        <p className="font-mono text-xs leading-relaxed text-(--color-muted)">
+          {report.executive_summary}
+        </p>
+      )}
 
       {traceId && (
         <Link
