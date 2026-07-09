@@ -83,6 +83,9 @@ async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_i
                     "errors": [{"tool": tr.tool, "error": tr.error} for tr in results if tr.error],
                     "started_at": datetime.now(UTC).isoformat(),
                 })
+                for tr in results:
+                    if tr.tool == "npm_list" and not tr.error:
+                        await dao.save_dep_tree(job_id, tr.output)
 
             elif node_name == HITL_GATE:
                 await dao.complete_artifact(job_id, HITL_GATE, "done")

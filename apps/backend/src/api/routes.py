@@ -8,6 +8,7 @@ from src.api.schemas import (
     AnalysisRequest,
     AnalysisStatusResponse,
     ChatRequest,
+    DepTreeResponse,
     JobListItem,
     JobsListResponse,
 )
@@ -59,6 +60,17 @@ async def get_analysis_status(
         artifacts=job.artifacts,
         cost=job.cost,
     )
+
+
+@router.get("/analyze/{trace_id}/dep-tree", response_model=DepTreeResponse)
+async def get_dep_tree(
+    trace_id: str,
+    dao: JobRepositoryPort = Depends(get_job_repo),
+):
+    tree = await dao.get_dep_tree(trace_id)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="dependency tree not yet available")
+    return DepTreeResponse(job_id=trace_id, tree=tree)
 
 
 @router.post("/analyze/{trace_id}/chat", status_code=202)

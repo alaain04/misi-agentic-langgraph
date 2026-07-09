@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 class JobDAO(JobRepositoryPort):
     def __init__(self):
         self._col = get_db()["jobs"]
+        self._dep_trees_col = get_db()["dep_trees"]
 
     async def create(self, job: Job) -> Job:
         await self._col.insert_one(job.to_doc())
@@ -139,6 +140,17 @@ class JobDAO(JobRepositoryPort):
 
     async def save_cost(self, job_id: str, cost: float) -> None:
         await self._col.update_one({"_id": job_id}, {"$set": {"cost": cost}})
+
+    async def save_dep_tree(self, job_id: str, tree: dict) -> None:
+        await self._dep_trees_col.replace_one(
+            {"_id": job_id},
+            {"_id": job_id, "created_at": datetime.now(UTC), "tree": tree},
+            upsert=True,
+        )
+
+    async def get_dep_tree(self, job_id: str) -> dict | None:
+        doc = await self._dep_trees_col.find_one({"_id": job_id})
+        return doc["tree"] if doc else None
 
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})

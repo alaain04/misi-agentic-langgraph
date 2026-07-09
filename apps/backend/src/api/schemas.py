@@ -40,3 +40,8 @@ class JobsListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+class DepTreeResponse(BaseModel):
+    job_id: str
+    tree: dict

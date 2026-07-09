@@ -147,3 +147,48 @@ async def test_stream_graph_conductor_tool_runner_accumulation():
             "started_at": ANY,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_stream_graph_saves_dep_tree_when_npm_list_succeeds():
+    """When TOOL_RUNNER emits an npm_list result with no error, dep tree is saved."""
+    dao = _make_dao()
+    job_id = "job-deptree"
+
+    npm_tree = {"name": "my-app", "dependencies": {"lodash": {"version": "4.17.21"}}}
+    tool_result = MagicMock()
+    tool_result.tool = "npm_list"
+    tool_result.error = None
+    tool_result.output = npm_tree
+
+    async def tree_stream(*args, **kwargs):
+        yield {TOOL_RUNNER: {"tool_results": [tool_result]}}
+
+    mock_graph = MagicMock()
+    mock_graph.astream = tree_stream
+
+    await _stream_graph(mock_graph, {}, {}, dao, job_id)
+
+    dao.save_dep_tree.assert_awaited_once_with(job_id, npm_tree)
+
+
+@pytest.mark.asyncio
+async def test_stream_graph_skips_dep_tree_when_npm_list_errors():
+    """When npm_list result has an error, dep tree is not saved."""
+    dao = _make_dao()
+    job_id = "job-deptree-err"
+
+    tool_result = MagicMock()
+    tool_result.tool = "npm_list"
+    tool_result.error = "npm command failed"
+    tool_result.output = {}
+
+    async def error_stream(*args, **kwargs):
+        yield {TOOL_RUNNER: {"tool_results": [tool_result]}}
+
+    mock_graph = MagicMock()
+    mock_graph.astream = error_stream
+
+    await _stream_graph(mock_graph, {}, {}, dao, job_id)
+
+    dao.save_dep_tree.assert_not_awaited()

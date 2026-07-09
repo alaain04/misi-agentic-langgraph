@@ -53,3 +53,9 @@ class JobRepositoryPort(ABC):
         status: JobStatus | None = None,
         trace_id: str | None = None,
     ) -> tuple[list[Job], int]: ...
+
+    @abstractmethod
+    async def save_dep_tree(self, job_id: str, tree: dict) -> None: ...
+
+    @abstractmethod
+    async def get_dep_tree(self, job_id: str) -> dict | None: ...
