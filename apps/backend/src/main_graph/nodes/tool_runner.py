@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -25,7 +26,11 @@ async def _run_tool(tc: ToolCall, repo_path: str) -> ToolResult:
             duration_ms=0,
         )
     try:
-        output = await fn(repo_path=repo_path, **tc.args)
+        sig = inspect.signature(fn)
+        kwargs = dict(tc.args)
+        if "repo_path" in sig.parameters:
+            kwargs["repo_path"] = repo_path
+        output = await fn(**kwargs)
         return ToolResult(
             id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
             output=output, error=None,

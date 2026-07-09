@@ -79,3 +79,35 @@ async def test_tool_runner_sets_duration_ms():
     with patch("src.main_graph.nodes.tool_runner.TOOL_REGISTRY", {"npm_list": AsyncMock(return_value={})}):
         result = await tool_runner(_make_state([tc]), config={})
     assert result["tool_results"][0].duration_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_tool_runner_does_not_inject_repo_path_for_tools_without_it():
+    """Tools that don't declare repo_path should not receive it as a kwarg."""
+    received_kwargs: dict = {}
+
+    async def no_repo_tool(package_name: str) -> dict:
+        received_kwargs["package_name"] = package_name
+        return {"ok": True}
+
+    tc = ToolCall(tool="no_repo_tool", args={"package_name": "lodash"}, reason="test")
+    with patch("src.main_graph.nodes.tool_runner.TOOL_REGISTRY", {"no_repo_tool": no_repo_tool}):
+        result = await tool_runner(_make_state([tc]), config={})
+    assert result["tool_results"][0].error is None
+    assert received_kwargs == {"package_name": "lodash"}
+
+
+@pytest.mark.asyncio
+async def test_tool_runner_injects_repo_path_for_tools_that_declare_it():
+    """Tools that declare repo_path should receive it."""
+    received_kwargs: dict = {}
+
+    async def file_tool(repo_path: str, extra: str = "") -> dict:
+        received_kwargs["repo_path"] = repo_path
+        return {"ok": True}
+
+    tc = ToolCall(tool="file_tool", args={}, reason="test")
+    with patch("src.main_graph.nodes.tool_runner.TOOL_REGISTRY", {"file_tool": file_tool}):
+        result = await tool_runner(_make_state([tc], repo_path="/tmp/myrepo"), config={})
+    assert result["tool_results"][0].error is None
+    assert received_kwargs["repo_path"] == "/tmp/myrepo"
