@@ -6,7 +6,7 @@ function makeResponse(overrides: Partial<StatusResponse>): StatusResponse {
   return {
     trace_id: 'test-id',
     status: 'running',
-    metadata: { repo_url: 'https://github.com/x/y', concern: 'security' },
+    metadata: { repo_url: 'https://github.com/x/y', concern: 'security', autopilot: false },
     completed_at: null,
     results: null,
     error: null,

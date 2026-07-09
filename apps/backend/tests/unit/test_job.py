@@ -51,3 +51,15 @@ def test_job_dao_implements_push_artifact_item():
     assert inspect.iscoroutinefunction(JobDAO.push_artifact_item)
     # Port must declare it too
     assert "push_artifact_item" in {m for m in dir(JobRepositoryPort) if not m.startswith("_")}
+
+
+def test_job_metadata_stores_autopilot():
+    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="security", autopilot=True))
+    assert job.metadata.autopilot is True
+    doc = job.to_doc()
+    assert doc["metadata"]["autopilot"] is True
+
+
+def test_job_metadata_autopilot_defaults_false():
+    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="security"))
+    assert job.metadata.autopilot is False

@@ -19,6 +19,7 @@ export interface AnalysisRequest {
 export interface JobMetadata {
   repo_url: string
   concern: string
+  autopilot: boolean
 }
 
 export interface JobListItem {
