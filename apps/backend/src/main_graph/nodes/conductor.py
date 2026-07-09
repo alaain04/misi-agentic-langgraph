@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.state import MainState
@@ -47,9 +48,12 @@ def _format_tool_results(tool_results: list) -> str:
         return "No tool results yet."
     parts = []
     for tr in tool_results[-20:]:  # show last 20 to avoid context overflow
-        output_json = json.dumps(tr.output, indent=2)
-        output_str = output_json[:2000] + (" ... [truncated]" if len(output_json) > 2000 else "")
-        parts.append(f"[{tr.id}] {tr.tool}({tr.args}) → {output_str}")
+        if tr.error:
+            result_str = f"ERROR: {tr.error}"
+        else:
+            output_json = json.dumps(tr.output, indent=2)
+            result_str = output_json[:2000] + (" ... [truncated]" if len(output_json) > 2000 else "")
+        parts.append(f"[{tr.id}] {tr.tool}({tr.args}) → {result_str}")
     return "\n\n".join(parts)
 
 
@@ -62,6 +66,16 @@ def _format_findings(findings: list) -> str:
     )
 
 
+def _format_messages(messages: list) -> str:
+    if not messages:
+        return "No conversation history."
+    parts = []
+    for m in messages:
+        role = "assistant" if isinstance(m, AIMessage) else "user"
+        parts.append(f"[{role}]: {m.content}")
+    return "\n".join(parts)
+
+
 async def conductor(state: MainState, config: RunnableConfig) -> dict:
     iteration = (state.get("conductor_iteration") or 0) + 1
 
@@ -71,7 +85,7 @@ async def conductor(state: MainState, config: RunnableConfig) -> dict:
         f"Package manager: {state.get('detected_package_manager', 'unknown')}\n\n"
         f"Tool results so far:\n{_format_tool_results(state.get('tool_results') or [])}\n\n"
         f"Findings accumulated:\n{_format_findings(state.get('findings') or [])}\n\n"
-        f"Conversation history: {len(state.get('messages') or [])} messages\n\n"
+        f"Conversation history:\n{_format_messages(state.get('messages') or [])}\n\n"
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"
     )
     if state.get("autopilot"):
