@@ -1,6 +1,7 @@
 """Conductor node — ReAct loop brain."""
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 
@@ -11,7 +12,7 @@ from src.main_graph.state import MainState
 import src.main_graph.tools.npm_cli  # noqa: F401 — trigger registration
 import src.main_graph.tools.package_files  # noqa: F401
 import src.main_graph.tools.external_api  # noqa: F401
-from src.main_graph.tools.registry import TOOL_DESCRIPTIONS
+from src.main_graph.tools.registry import TOOL_DESCRIPTIONS, TOOL_REGISTRY
 from src.models.conductor import ConductorDecision
 from src.utils.llm import Model, get_llm
 
@@ -36,6 +37,11 @@ Rules:
 - When emitting a FindingNote, populate the evidence list with one entry per supporting tool result. Set tool to the tool name, url to any advisory URL, CVE permalink, or OSV link present in the output (null if none), and log_snippet to the most relevant excerpt (max 400 characters).
 - For any finding involving a transitive dependency (a package NOT listed in package.json dependencies or devDependencies): call resolve_transitive_parent to identify which direct dep brings it in, then recommend updating that direct dep. Never recommend updating a transitive dep directly.
 - If no safe version of the responsible direct dep exists, call web_search to find an alternative package and include the alternative in your recommendation.
+- Do not finalize until you have seen results from high_risk_packages AND unmaintained_packages — these scan all declared dependencies and are mandatory coverage tools. Only after their results should you call package_reputation for individual packages that were flagged.
+
+Iteration strategy:
+- Iteration 1: always call package_json (to know the full dep list), high_risk_packages, and unmaintained_packages together. These three give you the complete triage basis without cherry-picking.
+- Iterations 2+: call package_reputation or other targeted tools only for packages that were flagged by the bulk tools. Do not call package_reputation for packages not flagged unless the concern specifically asks for it.
 
 Interpreting single-maintainer signals:
 - npm maintainer_count == 1 does NOT automatically mean high bus factor risk. npm org accounts (e.g. "nestjscore", "types") register as a single maintainer name but represent teams.
@@ -48,8 +54,24 @@ Available tools:
 """
 
 
+def _tool_signature(name: str) -> str:
+    """Return 'name(param: type, ...)' — excludes injected repo_path."""
+    fn = TOOL_REGISTRY.get(name)
+    if fn is None:
+        return name
+    params = [
+        str(p)
+        for k, p in inspect.signature(fn).parameters.items()
+        if k != "repo_path"
+    ]
+    return f"{name}({', '.join(params)})"
+
+
 def _format_tool_descriptions() -> str:
-    return "\n".join(f"- {name}: {desc}" for name, desc in TOOL_DESCRIPTIONS.items())
+    return "\n".join(
+        f"- {_tool_signature(name)}: {desc}"
+        for name, desc in TOOL_DESCRIPTIONS.items()
+    )
 
 
 def _format_tool_results(tool_results: list) -> str:
