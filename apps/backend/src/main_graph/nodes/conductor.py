@@ -29,13 +29,19 @@ Each iteration you MUST output a ConductorDecision with exactly one primary acti
 3. tool_calls non-empty — run these tools in parallel and observe results next iteration
 
 Rules:
-- Never repeat a tool call with identical arguments.
+- Never repeat a tool call with identical arguments. The prompt shows a "Tools already called" list — check it before every tool_call you plan.
 - Emit FindingNote entries for every risk you observe in tool results.
 - In autopilot mode, never set ask_user or checkpoint_message.
 - After 10 iterations, you MUST finalize regardless of confidence.
 - When emitting a FindingNote, populate the evidence list with one entry per supporting tool result. Set tool to the tool name, url to any advisory URL, CVE permalink, or OSV link present in the output (null if none), and log_snippet to the most relevant excerpt (max 400 characters).
 - For any finding involving a transitive dependency (a package NOT listed in package.json dependencies or devDependencies): call resolve_transitive_parent to identify which direct dep brings it in, then recommend updating that direct dep. Never recommend updating a transitive dep directly.
 - If no safe version of the responsible direct dep exists, call web_search to find an alternative package and include the alternative in your recommendation.
+
+Interpreting single-maintainer signals:
+- npm maintainer_count == 1 does NOT automatically mean high bus factor risk. npm org accounts (e.g. "nestjscore", "types") register as a single maintainer name but represent teams.
+- Cross-reference weekly_downloads and last_modified before rating severity. A package with >500k weekly downloads AND a last_modified within the past 6 months is actively maintained even if npm shows 1 maintainer. Rate such packages low severity at most.
+- Reserve medium/high severity for packages with BOTH single-maintainer AND (weekly_downloads < 10k OR last release > 12 months ago).
+- Do not flag a package as "unmaintained" unless its last_modified is more than 12 months ago.
 
 Available tools:
 {tool_descriptions}
@@ -60,6 +66,20 @@ def _format_tool_results(tool_results: list) -> str:
     return "\n\n".join(parts)
 
 
+def _format_calls_made(tool_results: list) -> str:
+    """Compact deduped list of every (tool, args) pair already executed."""
+    if not tool_results:
+        return "None yet."
+    seen: list[str] = []
+    dedupe: set[str] = set()
+    for tr in tool_results:
+        key = f"{tr.tool}({json.dumps(tr.args, sort_keys=True)})"
+        if key not in dedupe:
+            dedupe.add(key)
+            seen.append(key)
+    return "\n".join(f"- {s}" for s in seen)
+
+
 def _format_findings(findings: list) -> str:
     if not findings:
         return "No findings yet."
@@ -82,11 +102,13 @@ def _format_messages(messages: list) -> str:
 async def conductor(state: MainState, config: RunnableConfig) -> dict:
     iteration = (state.get("conductor_iteration") or 0) + 1
 
+    tool_results = state.get("tool_results") or []
     user_prompt = (
         f"Concern: {state['concern']}\n\n"
         f"Project context:\n{state.get('project_context', '')}\n\n"
         f"Package manager: {state.get('detected_package_manager', 'unknown')}\n\n"
-        f"Tool results so far:\n{_format_tool_results(state.get('tool_results') or [])}\n\n"
+        f"Tools already called (do NOT repeat these exact calls):\n{_format_calls_made(tool_results)}\n\n"
+        f"Tool results so far:\n{_format_tool_results(tool_results)}\n\n"
         f"Findings accumulated:\n{_format_findings(state.get('findings') or [])}\n\n"
         f"Conversation history:\n{_format_messages(state.get('messages') or [])}\n\n"
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"

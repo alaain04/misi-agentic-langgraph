@@ -41,6 +41,23 @@ async def _npm_metadata(package_name: str) -> dict:
         return {"error": str(exc)}
 
 
+async def _npm_weekly_downloads(package_name: str) -> int | None:
+    key = f"npm_dl:{package_name}"
+    if key in _cache:
+        return _cache[key]
+    try:
+        encoded = package_name.replace("/", "%2F")
+        data = await asyncio.wait_for(
+            _get(f"https://api.npmjs.org/downloads/point/last-week/{encoded}"),
+            _TIMEOUT,
+        )
+        count = data.get("downloads")
+        _cache[key] = count
+        return count
+    except Exception:
+        return None
+
+
 @register("github_advisory", "Queries GitHub Advisory Database (GraphQL) for known vulnerabilities in a package")
 async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
     key = f"advisory:{ecosystem}:{package_name}"
@@ -100,9 +117,12 @@ async def osv_lookup(package_name: str, version: str = "", ecosystem: str = "npm
         return {"error": str(exc), "vulnerabilities": []}
 
 
-@register("package_reputation", "Reports package age, maintainers, release cadence, and popularity via npm registry")
+@register("package_reputation", "Reports package age, maintainers, release cadence, popularity, and weekly downloads via npm registry")
 async def package_reputation(package_name: str) -> dict:
-    meta = await _npm_metadata(package_name)
+    meta, weekly_downloads = await asyncio.gather(
+        _npm_metadata(package_name),
+        _npm_weekly_downloads(package_name),
+    )
     if "error" in meta:
         return meta
     time_data = meta.get("time", {})
@@ -119,6 +139,7 @@ async def package_reputation(package_name: str) -> dict:
         "latest_version": latest_ver,
         "maintainer_count": len(maintainers),
         "maintainers": [m.get("name") for m in maintainers],
+        "weekly_downloads": weekly_downloads,
     }
 
 
