@@ -1,3 +1,5 @@
+import json
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -40,3 +42,59 @@ async def test_npm_outdated_parses_output():
 def test_tools_are_registered():
     for name in ("npm_list", "npm_audit", "npm_outdated"):
         assert name in TOOL_REGISTRY
+
+
+@pytest.fixture
+def repo_with_pkg(tmp_path):
+    pkg = {
+        "name": "my-app",
+        "dependencies": {"express": "^4.18.0"},
+        "devDependencies": {"jest": "^29.0.0"},
+    }
+    (tmp_path / "package.json").write_text(json.dumps(pkg))
+    return str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_resolve_transitive_parent_direct_dep(repo_with_pkg):
+    """express is a direct dep — is_direct should be True."""
+    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=("{}", ""))):
+        result = await TOOL_REGISTRY["resolve_transitive_parent"](
+            repo_path=repo_with_pkg, package_name="express"
+        )
+    assert result["is_direct"] is True
+    assert result["brought_in_by"] == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_transitive_parent_transitive_dep(repo_with_pkg):
+    """accepts is a transitive dep brought in by express."""
+    npm_tree = json.dumps({
+        "name": "my-app",
+        "dependencies": {
+            "express": {
+                "version": "4.18.2",
+                "dependencies": {
+                    "accepts": {"version": "1.3.8", "dependencies": {}}
+                }
+            }
+        }
+    })
+    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(npm_tree, ""))):
+        result = await TOOL_REGISTRY["resolve_transitive_parent"](
+            repo_path=repo_with_pkg, package_name="accepts"
+        )
+    assert result["is_direct"] is False
+    assert "express" in result["brought_in_by"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_transitive_parent_unknown_package(repo_with_pkg):
+    """Package not found anywhere returns empty parents."""
+    npm_tree = json.dumps({"name": "my-app", "dependencies": {}})
+    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(npm_tree, ""))):
+        result = await TOOL_REGISTRY["resolve_transitive_parent"](
+            repo_path=repo_with_pkg, package_name="ghost-package"
+        )
+    assert result["is_direct"] is False
+    assert result["brought_in_by"] == []
