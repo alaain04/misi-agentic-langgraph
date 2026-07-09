@@ -109,10 +109,32 @@ export default function ExecutionPage() {
               <dd className="truncate text-(--color-text)">{traceId}</dd>
               <dt className="tracking-widest text-(--color-muted) uppercase">Repo</dt>
               <dd className="truncate text-(--color-text)">{data.metadata?.repo_url}</dd>
+              <dt className="tracking-widest text-(--color-muted) uppercase">Concern</dt>
+              <dd className="text-(--color-text)">{data.metadata?.concern}</dd>
+              <dt className="tracking-widest text-(--color-muted) uppercase">Autopilot</dt>
+              <dd className="text-(--color-text)">{data.metadata?.autopilot ? 'Yes' : 'No'}</dd>
               {data.completed_at && (
                 <>
                   <dt className="tracking-widest text-(--color-muted) uppercase">Completed</dt>
                   <dd className="text-(--color-text)">{new Date(data.completed_at).toLocaleString()}</dd>
+                </>
+              )}
+              {(() => {
+                const prepStart = data.artifacts?.find((a) => a.node === 'prep')?.started_at
+                if (!prepStart || !data.completed_at) return null
+                const secs = Math.round((new Date(data.completed_at).getTime() - new Date(prepStart).getTime()) / 1000)
+                const display = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
+                return (
+                  <>
+                    <dt className="tracking-widest text-(--color-muted) uppercase">Duration</dt>
+                    <dd className="text-(--color-text)">{display}</dd>
+                  </>
+                )
+              })()}
+              {data.cost != null && (
+                <>
+                  <dt className="tracking-widest text-(--color-muted) uppercase">Cost</dt>
+                  <dd className="text-(--color-text)">${data.cost.toFixed(4)}</dd>
                 </>
               )}
             </dl>
