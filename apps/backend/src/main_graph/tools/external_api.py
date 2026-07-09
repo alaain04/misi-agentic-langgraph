@@ -10,6 +10,7 @@ import httpx
 
 from src.main_graph.tools.package_files import _all_deps, _load_pkg
 from src.main_graph.tools.registry import register
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -213,3 +214,24 @@ async def high_risk_packages(repo_path: str) -> dict:
         if reasons:
             flagged.append({"package": dep, "reasons": reasons})
     return {"high_risk": flagged, "checked": min(len(deps), 30)}
+
+
+@register("web_search", "Searches the web for package alternatives, security advisories, or migration guides")
+async def web_search(query: str) -> dict:
+    if not settings.tavily_api_key:
+        return {"error": "TAVILY_API_KEY not configured", "results": []}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.post(
+                "https://api.tavily.com/search",
+                json={"api_key": settings.tavily_api_key, "query": query, "max_results": 5},
+            )
+            r.raise_for_status()
+            data = r.json()
+        results = [
+            {"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("content", "")}
+            for item in data.get("results", [])
+        ]
+        return {"query": query, "results": results}
+    except Exception as exc:
+        return {"error": str(exc), "results": []}

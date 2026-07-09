@@ -34,6 +34,8 @@ Rules:
 - In autopilot mode, never set ask_user or checkpoint_message.
 - After 10 iterations, you MUST finalize regardless of confidence.
 - When emitting a FindingNote, populate the evidence list with one entry per supporting tool result. Set tool to the tool name, url to any advisory URL, CVE permalink, or OSV link present in the output (null if none), and log_snippet to the most relevant excerpt (max 400 characters).
+- For any finding involving a transitive dependency (a package NOT listed in package.json dependencies or devDependencies): call resolve_transitive_parent to identify which direct dep brings it in, then recommend updating that direct dep. Never recommend updating a transitive dep directly.
+- If no safe version of the responsible direct dep exists, call web_search to find an alternative package and include the alternative in your recommendation.
 
 Available tools:
 {tool_descriptions}
