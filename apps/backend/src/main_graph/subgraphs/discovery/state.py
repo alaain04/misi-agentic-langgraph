@@ -1,6 +1,6 @@
 """State schema for the discovery subgraph."""
 
-from typing import Any, NotRequired
+from typing import NotRequired
 
 from typing_extensions import TypedDict
 
@@ -17,18 +17,17 @@ class DiscoveryState(TypedDict):
     job_id: str
     repo_url: str
     concern: str
+    autopilot: bool
 
-    # set by discovery_orchestrator
+    # Set by nodes
     repo_path: NotRequired[str]
     manifest_files: NotRequired[list[str]]
     detected_package_manager: NotRequired[str]
     package_manager_version: NotRequired[str]
+    has_lock_file: NotRequired[bool]
     docker_image: NotRequired[str]
-    sbom_cyclonedx: NotRequired[dict[str, Any]]
-    sbom_result_id: NotRequired[str]
-    sbom_error: NotRequired[str | None]
 
-    # outputs
+    # Outputs
     project_metadata: NotRequired[ProjectMetadata]
-    discovery_summary: NotRequired[str]
+    project_context: NotRequired[str]
     discovery_error: NotRequired[str | None]

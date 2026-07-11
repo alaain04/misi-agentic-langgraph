@@ -81,33 +81,28 @@ function computePositions(nodes: GraphNodeState[], containerWidth: number): Map<
 
 function statusStrokeColor(
   status: NodeStatus,
-  colors: { border: string; accent: string; done: string; error: string; running: string },
+  colors: { border: string; accent: string; done: string; error: string; running: string; awaiting: string; cancelled: string },
 ): string {
   switch (status) {
-    case 'active':
-      return colors.running
-    case 'done':
-      return colors.done
-    case 'failed':
-      return colors.error
-    default:
-      return colors.border
+    case 'active':    return colors.running
+    case 'awaiting':  return colors.awaiting
+    case 'done':      return colors.done
+    case 'failed':    return colors.error
+    case 'cancelled': return colors.cancelled
+    default:          return colors.border
   }
 }
 
 function statusDotFill(
   status: NodeStatus,
-  colors: { accent: string; done: string; error: string; running: string },
+  colors: { accent: string; done: string; error: string; running: string; awaiting: string },
 ): string {
   switch (status) {
-    case 'active':
-      return colors.running
-    case 'done':
-      return colors.done
-    case 'failed':
-      return colors.error
-    default:
-      return 'transparent'
+    case 'active':   return colors.running
+    case 'awaiting': return colors.awaiting
+    case 'done':     return colors.done
+    case 'failed':   return colors.error
+    default:         return 'transparent'
   }
 }
 
@@ -152,14 +147,16 @@ export function ExecutionGraph({
     if (!container || !svgEl) return
 
     const colors = {
-      border: cssVar(container, '--color-border'),
-      text: cssVar(container, '--color-text'),
-      muted: cssVar(container, '--color-muted'),
-      accent: cssVar(container, '--color-accent'),
-      surface: cssVar(container, '--color-surface-raised'),
-      error: cssVar(container, '--color-error'),
-      done: '#34c785', // green
-      running: '#eab308', // yellow-500
+      border:    cssVar(container, '--color-border'),
+      text:      cssVar(container, '--color-text'),
+      muted:     cssVar(container, '--color-muted'),
+      accent:    cssVar(container, '--color-accent'),
+      surface:   cssVar(container, '--color-surface-raised'),
+      error:     cssVar(container, '--color-error'),
+      done:      '#34c785',
+      running:   '#eab308',
+      awaiting:  '#f5a623',   // amber — same hue as accent, used for pulsing border
+      cancelled: '#3f4152',   // muted dark grey
     }
 
     const width = container.clientWidth || 900
@@ -198,6 +195,8 @@ export function ExecutionGraph({
       .text(
         '@keyframes nodePulse { 0%,100%{opacity:1} 50%{opacity:0.3} }' +
           '.node-pulse { animation: nodePulse 1.8s ease-in-out infinite; }' +
+          '@keyframes borderPulse { 0%,100%{stroke-opacity:1} 50%{stroke-opacity:0.3} }' +
+          '.node-awaiting { animation: borderPulse 1.4s ease-in-out infinite; }' +
           '@keyframes edgeFlow { from { stroke-dashoffset: 20 } to { stroke-dashoffset: 0 } }' +
           '.edge-flow { animation: edgeFlow 0.6s linear infinite; }',
       )
@@ -335,6 +334,10 @@ export function ExecutionGraph({
           .attr('stroke-width', strokeWidth)
           .attr('filter', filterAttr)
 
+        if (node.status === 'awaiting') {
+          g.select('rect').attr('class', 'node-awaiting')
+        }
+
         // Label
         g.append('text')
           .attr('text-anchor', 'middle')
@@ -365,6 +368,10 @@ export function ExecutionGraph({
           dot.attr('opacity', 0)
         } else if (node.status === 'active') {
           dot.attr('class', 'node-pulse')
+        } else if (node.status === 'awaiting') {
+          dot.attr('class', 'node-pulse')  // also pulse
+        } else if (node.status === 'cancelled') {
+          dot.attr('opacity', 0.3)
         }
       }
     }
@@ -377,7 +384,7 @@ export function ExecutionGraph({
 
   return (
     <div ref={containerRef} className={cn('relative w-full', className)}>
-      <div className="overflow-hidden rounded-lg border border-[--color-border] bg-[--color-surface]">
+      <div className="overflow-hidden rounded-lg border border-(--color-border) bg-(--color-surface)">
         <svg
           ref={svgRef}
           className="w-full"
@@ -386,7 +393,7 @@ export function ExecutionGraph({
           role="img"
         />
       </div>
-      <p className="mt-1.5 text-right font-mono text-[10px] text-[--color-muted] select-none">
+      <p className="mt-1.5 text-right font-mono text-[10px] text-(--color-muted) select-none">
         scroll to zoom · click node to inspect
       </p>
     </div>

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Workers service
     workers_url: str = "http://localhost:8001"
 
+    # Tavily (web search for conductor)
+    tavily_api_key: str = ""
+
     # Analysis parameters
     lookback_days: int = 90
     reviewer_batch_size: int = 20

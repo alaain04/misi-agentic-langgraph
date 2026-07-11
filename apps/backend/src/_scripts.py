@@ -367,7 +367,7 @@ def curl_test():
 
 
 def dev():
-    sys.exit(subprocess.call(["uvicorn", "src.main:app", "--reload"]))
+    sys.exit(subprocess.call(["uvicorn", "src.main:app", "--reload", "--reload-dir", "src"]))
 
 
 def lint():

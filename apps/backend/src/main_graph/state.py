@@ -1,52 +1,35 @@
-# backend/src/main_graph/state.py
 import operator
-from typing import Annotated, Any, NotRequired
+from typing import Annotated, NotRequired
 
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from src.main_graph.subgraphs.discovery.state import ProjectMetadata
-from src.models.evidence import Evidence
-from src.models.investigation_plan import InvestigationPlan
-from src.models.risk_finding import ContradictionReport, RiskFinding
+from src.models.conductor import ConductorDecision, FindingNote, ToolResult
 
 
 class MainState(TypedDict):
-    # ── Inputs ──────────────────────────────────────────────────────────────
+    # Inputs
     repo_url: str
     concern: str
     job_id: str
+    autopilot: bool
 
-    # ── Discovery (unchanged) ────────────────────────────────────────────────
+    # Prep outputs
     repo_path: NotRequired[str]
     project_metadata: NotRequired[ProjectMetadata]
     manifest_files: NotRequired[list[str]]
-    discovery_summary: NotRequired[str]
+    detected_package_manager: NotRequired[str]
+    project_context: NotRequired[str]
     discovery_error: NotRequired[str | None]
-    sbom_cyclonedx: NotRequired[dict[str, Any]]
-    sbom_result_id: NotRequired[str]
-    sbom_error: NotRequired[str | None]
-    lock_generation_error: NotRequired[str | None]
 
-    # ── Investigation plan ───────────────────────────────────────────────────
-    investigation_plan: NotRequired[InvestigationPlan]
+    # Conductor loop
+    conductor_decision: NotRequired[ConductorDecision]
+    tool_results: Annotated[list[ToolResult], operator.add]
+    findings: Annotated[list[FindingNote], operator.add]
+    conductor_iteration: NotRequired[int]
     messages: Annotated[list, add_messages]
 
-    # ── Evidence (fan-in reducer) ────────────────────────────────────────────
-    evidence: Annotated[list[Evidence], operator.add]
-
-    # ── Skill execution (Send() fields) ─────────────────────────────────────
-    current_skill_id: NotRequired[str]
-    current_dep_name: NotRequired[str]
-    current_hypothesis_id: NotRequired[str]
-
-    # ── Correlation outputs ──────────────────────────────────────────────────
-    risk_findings: NotRequired[list[RiskFinding]]
-    contradictions: NotRequired[list[ContradictionReport]]
-    reviewer_feedback: NotRequired[str]
-    review_approved: NotRequired[bool]
-    review_iterations: NotRequired[int]
-    analysis_report: NotRequired[dict[str, Any]]
-
-    # ── Control ──────────────────────────────────────────────────────────────
+    # Output
+    analysis_report: NotRequired[dict]
     cancelled: NotRequired[bool]

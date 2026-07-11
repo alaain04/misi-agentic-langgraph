@@ -1,65 +1,67 @@
-"""Main graph — 8-node cognitive investigation pipeline."""
+"""Main graph — ReAct conductor loop."""
+from __future__ import annotations
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from src.main_graph.constants import (
-    DISCOVERY,
-    EVIDENCE_COLLECTOR,
-    EVIDENCE_CORRELATOR,
-    FINDING_REVIEWER,
-    INVESTIGATION_PLANNER,
+    CONDUCTOR,
+    HITL_GATE,
+    PREP,
     REPORT_BUILDER,
-    SKILL_EXECUTOR,
+    TOOL_RUNNER,
 )
-from src.main_graph.nodes.evidence_collector import evidence_collector
-from src.main_graph.nodes.evidence_correlator import evidence_correlator
-from src.main_graph.nodes.finding_reviewer import finding_reviewer
-from src.main_graph.nodes.investigation_planner import investigation_planner
+from src.main_graph.nodes.conductor import conductor
+from src.main_graph.nodes.hitl_gate import hitl_gate
 from src.main_graph.nodes.report_builder import report_builder
-from src.main_graph.nodes.skill_dispatcher import skill_dispatcher
-from src.main_graph.nodes.skill_executor import skill_executor
+from src.main_graph.nodes.tool_runner import tool_runner
 from src.main_graph.state import MainState
 from src.main_graph.subgraphs.discovery import discovery_subgraph
 
-_MAX_REVIEW_ITERATIONS = 2
 
-
-def _after_discovery(state: MainState) -> str:
-    if state.get("discovery_error") or state.get("sbom_error"):
+def _after_prep(state: MainState) -> str:
+    if state.get("discovery_error"):
         return END
-    return INVESTIGATION_PLANNER
+    return CONDUCTOR
 
 
-def _reviewer_route(state: MainState) -> str:
-    if state.get("reviewer_feedback") and (state.get("review_iterations") or 0) < _MAX_REVIEW_ITERATIONS:
-        return EVIDENCE_CORRELATOR
+def _after_conductor(state: MainState) -> str:
+    decision = state.get("conductor_decision")
+    if decision is None:
+        return REPORT_BUILDER
+    if decision.finalize:
+        return REPORT_BUILDER if state.get("autopilot") else HITL_GATE
+    if decision.ask_user or decision.checkpoint_message:
+        return HITL_GATE
+    if decision.tool_calls:
+        return TOOL_RUNNER
     return REPORT_BUILDER
+
+
+def _after_hitl(state: MainState) -> str:
+    decision = state.get("conductor_decision")
+    if decision and decision.finalize:
+        return REPORT_BUILDER
+    return CONDUCTOR
 
 
 def build_main_graph():
     builder = StateGraph(MainState)
 
-    builder.add_node(DISCOVERY, discovery_subgraph)
-    builder.add_node(INVESTIGATION_PLANNER, investigation_planner)
-    builder.add_node(SKILL_EXECUTOR, skill_executor)
-    builder.add_node(EVIDENCE_COLLECTOR, evidence_collector)
-    builder.add_node(EVIDENCE_CORRELATOR, evidence_correlator)
-    builder.add_node(FINDING_REVIEWER, finding_reviewer)
+    builder.add_node(PREP, discovery_subgraph)
+    builder.add_node(CONDUCTOR, conductor)
+    builder.add_node(TOOL_RUNNER, tool_runner)
+    builder.add_node(HITL_GATE, hitl_gate)
     builder.add_node(REPORT_BUILDER, report_builder)
 
-    builder.add_edge(START, DISCOVERY)
-    builder.add_conditional_edges(DISCOVERY, _after_discovery, [INVESTIGATION_PLANNER, END])
-    builder.add_conditional_edges(INVESTIGATION_PLANNER, skill_dispatcher, [SKILL_EXECUTOR, EVIDENCE_COLLECTOR])
-    builder.add_edge(SKILL_EXECUTOR, EVIDENCE_COLLECTOR)
-    builder.add_edge(EVIDENCE_COLLECTOR, EVIDENCE_CORRELATOR)
-    builder.add_edge(EVIDENCE_CORRELATOR, FINDING_REVIEWER)
-    builder.add_conditional_edges(FINDING_REVIEWER, _reviewer_route, [EVIDENCE_CORRELATOR, REPORT_BUILDER])
+    builder.add_edge(START, PREP)
+    builder.add_conditional_edges(PREP, _after_prep, [CONDUCTOR, END])
+    builder.add_conditional_edges(CONDUCTOR, _after_conductor, [TOOL_RUNNER, HITL_GATE, REPORT_BUILDER])
+    builder.add_edge(TOOL_RUNNER, CONDUCTOR)
+    builder.add_conditional_edges(HITL_GATE, _after_hitl, [CONDUCTOR, REPORT_BUILDER])
     builder.add_edge(REPORT_BUILDER, END)
 
-    return builder.compile(
-        checkpointer=InMemorySaver(),
-    )
+    return builder.compile(checkpointer=InMemorySaver())
 
 
 main_graph = build_main_graph()

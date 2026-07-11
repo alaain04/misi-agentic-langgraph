@@ -1,134 +1,194 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo, install_deps."""
+
+import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.discovery.nodes.discovery_orchestrator import (
-    OrchestratorResult,
-    discovery_orchestrator,
-)
-
-_SAMPLE_SBOM = {"bomFormat": "CycloneDX", "components": []}
+from src.main_graph.subgraphs.discovery.nodes.clone_repo import clone_repo
+from src.main_graph.subgraphs.discovery.nodes.inspect_repo import inspect_repo
+from src.main_graph.subgraphs.discovery.nodes.install_deps import install_deps
 
 _BASE_STATE = {
     "job_id": "test-job",
     "repo_url": "https://github.com/test/repo",
     "concern": "security",
+    "autopilot": False,
 }
 
-_SUCCESS_RESULT = OrchestratorResult(
-    repo_path="/tmp/debug_job_test-job",
-    detected_package_manager="npm",
-    package_manager_version="latest",
-    manifest_files=["package.json", "package-lock.json"],
-    docker_image="node:22-alpine",
-    sbom_cyclonedx=_SAMPLE_SBOM,
-    sbom_error=None,
-    discovery_error=None,
-)
+
+def _config(container=None):
+    return {
+        "configurable": {
+            "container": container or AsyncMock(),
+        }
+    }
 
 
-def _config(sbom_dao):
-    return {"configurable": {"sbom_dao": sbom_dao, "docker_tool": MagicMock()}}
+# ---------------------------------------------------------------------------
+# clone_repo
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_success_writes_all_state_fields():
-    dao = AsyncMock()
-    dao.save.return_value = "result-id-1"
+async def test_clone_repo_success(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (0, "", "")
 
-    with patch(
-        "src.main_graph.subgraphs.discovery.nodes.discovery_orchestrator.create_agent"
-    ) as mock_create:
-        mock_agent = AsyncMock()
-        mock_agent.ainvoke.return_value = {"structured_response": _SUCCESS_RESULT}
-        mock_create.return_value = mock_agent
+    with patch("src.main_graph.subgraphs.discovery.nodes.clone_repo.os.makedirs"):
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.clone_repo.os.path.abspath",
+            return_value=str(tmp_path),
+        ):
+            result = await clone_repo(_BASE_STATE, _config(container=container))
 
-        result = await discovery_orchestrator(_BASE_STATE, _config(dao))
+    assert result["repo_path"] == str(tmp_path)
+    assert "discovery_error" not in result
+    container.run.assert_awaited_once()
 
-    assert result["sbom_cyclonedx"] == _SAMPLE_SBOM
-    assert result["sbom_result_id"] == "result-id-1"
+
+@pytest.mark.asyncio
+async def test_clone_repo_failure_sets_discovery_error(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (128, "", "repository not found")
+
+    with patch("src.main_graph.subgraphs.discovery.nodes.clone_repo.os.makedirs"):
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.clone_repo.os.path.abspath",
+            return_value=str(tmp_path),
+        ):
+            result = await clone_repo(_BASE_STATE, _config(container=container))
+
+    assert result["discovery_error"] == "repository not found"
+    assert result["repo_path"] == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# inspect_repo
+# ---------------------------------------------------------------------------
+
+
+def test_inspect_repo_with_package_lock(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "myapp", "engines": {"node": ">=20"}})
+    )
+    (tmp_path / "package-lock.json").write_text("{}")
+
+    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+
     assert result["detected_package_manager"] == "npm"
+    assert result["has_lock_file"] is True
+    assert result["docker_image"] == "node:20-alpine"
+    assert "package-lock.json" in result["manifest_files"]
+
+
+def test_inspect_repo_with_pnpm_lock(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "myapp", "packageManager": "pnpm@9.0.0"})
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'")
+
+    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+
+    assert result["detected_package_manager"] == "pnpm"
+    assert result["has_lock_file"] is True
+    assert result["package_manager_version"] == "9.0.0"
+
+
+def test_inspect_repo_pnpm_v11_requires_node22(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"packageManager": "pnpm@11.0.0", "engines": {"node": ">=18"}})
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+
+    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+
     assert result["docker_image"] == "node:22-alpine"
-    assert result["manifest_files"] == ["package.json", "package-lock.json"]
-    assert "discovery_error" not in result
-    assert "sbom_error" not in result
-    dao.save.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_sbom_error_included_in_state():
-    dao = AsyncMock()
-    dao.save.return_value = "err-id"
-    error_result = OrchestratorResult(
-        repo_path="/tmp/debug_job_test-job",
-        detected_package_manager="npm",
-        package_manager_version="latest",
-        manifest_files=["package.json"],
-        docker_image="node:22-alpine",
-        sbom_cyclonedx={},
-        sbom_error="ERESOLVE: could not resolve dependency tree",
-        discovery_error=None,
+def test_inspect_repo_no_lock_file(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"name": "myapp"}))
+
+    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+
+    assert result["has_lock_file"] is False
+    assert result["detected_package_manager"] == "npm"
+
+
+def test_inspect_repo_packagemanager_field_sets_pm_when_no_lock(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"packageManager": "pnpm@8.1.0+sha512.abc"})
     )
 
-    with patch(
-        "src.main_graph.subgraphs.discovery.nodes.discovery_orchestrator.create_agent"
-    ) as mock_create:
-        mock_agent = AsyncMock()
-        mock_agent.ainvoke.return_value = {"structured_response": error_result}
-        mock_create.return_value = mock_agent
+    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
 
-        result = await discovery_orchestrator(_BASE_STATE, _config(dao))
+    assert result["detected_package_manager"] == "pnpm"
+    assert result["package_manager_version"] == "8.1.0"
+    assert result["has_lock_file"] is False
 
-    assert result["sbom_cyclonedx"] == {}
-    assert result["sbom_error"] == "ERESOLVE: could not resolve dependency tree"
-    assert result["sbom_result_id"] == "err-id"
-    assert "discovery_error" not in result
+
+# ---------------------------------------------------------------------------
+# install_deps
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_discovery_error_included_in_state():
-    dao = AsyncMock()
-    dao.save.return_value = "clone-fail-id"
-    clone_fail_result = OrchestratorResult(
-        repo_path="/tmp/debug_job_test-job",
-        detected_package_manager="npm",
-        package_manager_version="latest",
-        manifest_files=[],
-        docker_image="node:lts-alpine",
-        sbom_cyclonedx={},
-        sbom_error=None,
-        discovery_error="git clone failed: repository not found",
+async def test_install_deps_creates_lock_file(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (0, "", "")
+    lock_path = tmp_path / "package-lock.json"
+    lock_path.write_text("{}")  # simulate install created it
+
+    state = {
+        **_BASE_STATE,
+        "repo_path": str(tmp_path),
+        "detected_package_manager": "npm",
+        "package_manager_version": "latest",
+        "docker_image": "node:20-alpine",
+    }
+    result = await install_deps(state, _config(container=container))
+
+    assert result["has_lock_file"] is True
+
+
+@pytest.mark.asyncio
+async def test_install_deps_no_lock_created(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (0, "", "")
+
+    state = {
+        **_BASE_STATE,
+        "repo_path": str(tmp_path),
+        "detected_package_manager": "npm",
+        "package_manager_version": "latest",
+        "docker_image": "node:20-alpine",
+    }
+    result = await install_deps(state, _config(container=container))
+
+    assert result["has_lock_file"] is False
+
+
+@pytest.mark.asyncio
+async def test_install_deps_retries_on_peer_conflict(tmp_path):
+    container = AsyncMock()
+    container.run.side_effect = [
+        (1, "", "npm error ERESOLVE: could not resolve peer dependency"),
+        (0, "", ""),
+    ]
+
+    state = {
+        **_BASE_STATE,
+        "repo_path": str(tmp_path),
+        "detected_package_manager": "npm",
+        "package_manager_version": "latest",
+        "docker_image": "node:20-alpine",
+    }
+    await install_deps(state, _config(container=container))
+
+    assert container.run.await_count == 2
+    _, kwargs = container.run.call_args_list[1]
+    assert "--legacy-peer-deps" in container.run.call_args_list[1].kwargs.get(
+        "command", container.run.call_args_list[1].args[1] if container.run.call_args_list[1].args else ""
+    ) or any(
+        "--legacy-peer-deps" in str(a) for a in container.run.call_args_list[1].args
     )
-
-    with patch(
-        "src.main_graph.subgraphs.discovery.nodes.discovery_orchestrator.create_agent"
-    ) as mock_create:
-        mock_agent = AsyncMock()
-        mock_agent.ainvoke.return_value = {"structured_response": clone_fail_result}
-        mock_create.return_value = mock_agent
-
-        result = await discovery_orchestrator(_BASE_STATE, _config(dao))
-
-    assert result["discovery_error"] == "git clone failed: repository not found"
-    assert result["sbom_cyclonedx"] == {}
-
-
-@pytest.mark.asyncio
-async def test_agent_exception_returns_discovery_error():
-    dao = AsyncMock()
-    dao.save.return_value = "crash-id"
-
-    with patch(
-        "src.main_graph.subgraphs.discovery.nodes.discovery_orchestrator.create_agent"
-    ) as mock_create:
-        mock_agent = AsyncMock()
-        mock_agent.ainvoke.side_effect = RuntimeError("agent crashed")
-        mock_create.return_value = mock_agent
-
-        result = await discovery_orchestrator(_BASE_STATE, _config(dao))
-
-    assert "discovery_error" in result
-    assert "agent crashed" in result["discovery_error"]
-    assert result["sbom_cyclonedx"] == {}
-    assert result["sbom_result_id"] == "crash-id"
-    dao.save.assert_awaited_once()

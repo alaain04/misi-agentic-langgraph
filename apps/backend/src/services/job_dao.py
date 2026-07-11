@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 class JobDAO(JobRepositoryPort):
     def __init__(self):
         self._col = get_db()["jobs"]
+        self._dep_trees_col = get_db()["dep_trees"]
 
     async def create(self, job: Job) -> Job:
         await self._col.insert_one(job.to_doc())
@@ -56,28 +57,25 @@ class JobDAO(JobRepositoryPort):
         )
 
     async def start_artifact(self, job_id: str, node: str) -> None:
-        """Insert or update an artifact entry as 'running'."""
+        """Insert or update an artifact entry as 'running'.
+
+        Preserves started_at on subsequent calls so HITL timestamp-based
+        pre/post-gate partitioning is not corrupted by multi-interrupt flows.
+        """
         now = datetime.now(UTC)
-        artifact = {
-            "node": node,
-            "status": "running",
-            "started_at": now,
-            "completed_at": None,
-        }
         result = await self._col.update_one(
             {"_id": job_id, "artifacts.node": node},
-            {
-                "$set": {
-                    "artifacts.$.status": "running",
-                    "artifacts.$.started_at": now,
-                    "artifacts.$.completed_at": None,
-                }
-            },
+            {"$set": {"artifacts.$.status": "running"}},
         )
         if result.matched_count == 0:
             await self._col.update_one(
                 {"_id": job_id},
-                {"$push": {"artifacts": artifact}},
+                {"$push": {"artifacts": {
+                    "node": node,
+                    "status": "running",
+                    "started_at": now,
+                    "completed_at": None,
+                }}},
             )
 
     async def complete_artifact(self, job_id: str, node: str, status: str) -> None:
@@ -125,6 +123,13 @@ class JobDAO(JobRepositoryPort):
                 }}},
             )
 
+    async def push_artifact_item(self, job_id: str, node: str, field: str, item: dict) -> None:
+        """Append an item to an array field inside an existing artifact entry."""
+        await self._col.update_one(
+            {"_id": job_id, "artifacts.node": node},
+            {"$push": {f"artifacts.$.{field}": item}},
+        )
+
     async def update_artifact_data(self, job_id: str, node: str, data: dict) -> None:
         """Merge extra fields into an existing artifact entry."""
         update_fields = {f"artifacts.$.{k}": v for k, v in data.items()}
@@ -132,6 +137,20 @@ class JobDAO(JobRepositoryPort):
             {"_id": job_id, "artifacts.node": node},
             {"$set": update_fields},
         )
+
+    async def save_cost(self, job_id: str, cost: float) -> None:
+        await self._col.update_one({"_id": job_id}, {"$set": {"cost": cost}})
+
+    async def save_dep_tree(self, job_id: str, tree: dict) -> None:
+        await self._dep_trees_col.replace_one(
+            {"_id": job_id},
+            {"_id": job_id, "created_at": datetime.now(UTC), "tree": tree},
+            upsert=True,
+        )
+
+    async def get_dep_tree(self, job_id: str) -> dict | None:
+        doc = await self._dep_trees_col.find_one({"_id": job_id})
+        return doc["tree"] if doc else None
 
     async def get_pending(self) -> list[Job]:
         cursor = self._col.find({"status": JobStatus.pending})

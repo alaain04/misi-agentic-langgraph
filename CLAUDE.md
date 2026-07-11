@@ -10,7 +10,13 @@ apps/
   frontend/  # React + TypeScript + Vite web client
   workers/   # Python NATS JetStream entity-fetch consumer
 docs/
-  api.md     # REST API reference (backend endpoints + TypeScript types)
+  api.md              # REST API entry point (endpoints + links to domain docs)
+  backend/
+    analysis.md       # POST /analyze, GET /analyze/{trace_id}, full response shapes
+    jobs.md           # GET /jobs, JobStatus enum
+    hitl.md           # Human-in-the-loop gates, POST /analyze/{trace_id}/chat
+    artifacts.md      # Per-node artifact shapes (live execution tracking)
+    report.md         # AnalysisReport + RiskFinding shapes
 http-docs/   # Runnable HTTP request files (httpYac / REST Client)
 ```
 
@@ -26,7 +32,11 @@ Before working on any component, read its documentation:
 
 **Frontend** (`apps/frontend/`)
 - [Code conventions](apps/frontend/docs/code-conventions.md)
-- [API reference](docs/api.md) — REST contract consumed by this client
+- [API entry point](docs/api.md) — endpoints overview and job lifecycle
+- [Analysis flow](docs/backend/analysis.md) — start job, poll status, full response shapes
+- [HITL chat](docs/backend/hitl.md) — handling awaiting_approval state and /chat
+- [Artifacts](docs/backend/artifacts.md) — per-node progress data for pipeline visualization
+- [Report](docs/backend/report.md) — final analysis_report shape
 
 **Workers** (`apps/workers/`)
 - [Architecture](apps/workers/docs/architecture.md) — hexagonal layers, ports, adapters, NATS JetStream, MongoDB

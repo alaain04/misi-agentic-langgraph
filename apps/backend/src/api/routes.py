@@ -8,10 +8,10 @@ from src.api.schemas import (
     AnalysisRequest,
     AnalysisStatusResponse,
     ChatRequest,
+    DepTreeResponse,
     JobListItem,
     JobsListResponse,
 )
-from src.api.service import build_graph_info
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.models.job import Job, JobMetadata, JobStatus
 from src.services.job_runner import resume_analysis, run_analysis
@@ -24,13 +24,18 @@ async def analyze(
     request: AnalysisRequest,
     dao: JobRepositoryPort = Depends(get_job_repo),
 ):
-    job = Job(metadata=JobMetadata(repo_url=request.repo_url, concern=request.concern))
+    job = Job(metadata=JobMetadata(
+        repo_url=request.repo_url,
+        concern=request.concern,
+        autopilot=request.autopilot,
+    ))
     await dao.create(job)
     asyncio.create_task(
         run_analysis(
             job_id=job.id,
             repo_url=job.metadata.repo_url,
             concern=job.metadata.concern,
+            autopilot=request.autopilot,
             dao=dao,
         )
     )
@@ -51,9 +56,21 @@ async def get_analysis_status(
         metadata=job.metadata,
         completed_at=job.completed_at,
         results=job.result,
+        error=job.error,
         artifacts=job.artifacts,
-        graph=build_graph_info(job),
+        cost=job.cost,
     )
+
+
+@router.get("/analyze/{trace_id}/dep-tree", response_model=DepTreeResponse)
+async def get_dep_tree(
+    trace_id: str,
+    dao: JobRepositoryPort = Depends(get_job_repo),
+):
+    tree = await dao.get_dep_tree(trace_id)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="dependency tree not yet available")
+    return DepTreeResponse(job_id=trace_id, tree=tree)
 
 
 @router.post("/analyze/{trace_id}/chat", status_code=202)

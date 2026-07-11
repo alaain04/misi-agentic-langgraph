@@ -18,6 +18,7 @@ class JobStatus(StrEnum):
 class JobMetadata(BaseModel):
     repo_url: str
     concern: str
+    autopilot: bool = False
 
 
 class Job(BaseModel):
@@ -29,6 +30,7 @@ class Job(BaseModel):
     result: dict | None = None
     error: str | None = None
     artifacts: list[dict] = Field(default_factory=list)
+    cost: float | None = None
 
     def to_doc(self) -> dict:
         doc = self.model_dump()

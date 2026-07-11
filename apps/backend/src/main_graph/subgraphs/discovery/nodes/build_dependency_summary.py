@@ -1,132 +1,74 @@
-# backend/src/main_graph/subgraphs/discovery/nodes/build_dependency_summary.py
-"""Node: build_dependency_summary — generate metadata and LLM summary from CycloneDX."""
+"""Node: build_project_context — lightweight LLM summary from package.json."""
+from __future__ import annotations
 
-from typing import Any
+import json
+import logging
+import os
 
-from src.main_graph.subgraphs.discovery.state import (
-    DiscoveryState,
-    ProjectMetadata,
-)
+from src.main_graph.subgraphs.discovery.state import DiscoveryState, ProjectMetadata
 from src.utils.llm import Model, get_llm
 
-_llm = get_llm(Model.GPT_5_4)
+logger = logging.getLogger(__name__)
 
+_llm = get_llm(Model.GPT_4O_MINI)
 
-def _get_sbom_attribute(sbom: dict[str, Any], attribute: str) -> str:
-    return sbom.get("metadata", {}).get("component", {}).get(attribute, "unknown")
-
-
-def _count_deps(sbom: dict[str, Any]) -> tuple[int, int]:
-    """Return (direct_count, transitive_count) using the CycloneDX dependencies section."""
-    root_ref = sbom.get("metadata", {}).get("component", {}).get("bom-ref", "")
-    all_refs = {c.get("bom-ref") for c in sbom.get("components", []) if c.get("bom-ref")}
-    direct_refs: set[str] = set()
-    for entry in sbom.get("dependencies", []):
-        if entry.get("ref") == root_ref:
-            direct_refs = {r for r in entry.get("dependsOn", []) if r in all_refs}
-            break
-    direct = len(direct_refs)
-    transitive = len(all_refs) - direct
-    return direct, transitive
-
-
-def _extract_components(sbom: dict[str, Any], limit: int = 80) -> tuple[list[str], int]:
-    """Return (component_strings, total_count) from SBOM components."""
-    components = sbom.get("components", [])
-    total = len(components)
-    entries = []
-    for c in components[:limit]:
-        name = c.get("name", "")
-        version = c.get("version", "")
-        purl = c.get("purl", "")
-        label = f"{name}@{version}" if version else name
-        if purl and purl.startswith("pkg:"):
-            ecosystem = purl.split(":")[1].split("/")[0]
-            if ecosystem not in ("npm",):
-                label += f" ({ecosystem})"
-        entries.append(label)
-    return entries, total
-
-
-def _build_prompt(
-    project_name: str,
-    project_version: str,
-    concern: str,
-    components: list[str],
-    total_count: int,
-    lock_note: str = "",
-) -> str:
-    shown = len(components)
-    truncation_note = (
-        f" (showing {shown} of {total_count})" if total_count > shown else ""
-    )
-    component_list = "\n".join(f"  - {c}" for c in components) or "  (none)"
-    version_label = f" v{project_version}" if project_version else ""
-
-    return f"""\
-You are analyzing the Node.js project's software bill of materials (SBOM).
-
-Project: {project_name}{version_label}
-Analysis concern: {concern}
-
-Packages in SBOM{truncation_note}:
-{component_list}{lock_note}
-
-Write a concise summary (2-5 sentences / no more than 150 words) that:
-- Identifies packages from the SBOM that are most relevant to the concern: "{concern}"
-- Explains the potential impact those packages have on this specific project
-- Flags any notable risks, compatibility issues, or dependencies that
-  stand out given the concern
-- Avoids generic ecosystem commentary; focus on what these specific
-  packages mean for this project
-
+_SYSTEM = """\
+You are analyzing a Node.js project. Given its package.json contents and the user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
+- Names the project and its stated purpose
+- Lists key dependency groups most relevant to the concern
+- Flags anything immediately notable (scripts, workspaces, unusual dependencies)
 Output only the summary text.\
 """
 
 
-async def build_dependency_summary(state: DiscoveryState) -> dict:
-    """Generate project metadata and an LLM summary from CycloneDX SBOM data."""
-    error = state.get("discovery_error") or state.get("sbom_error")
+def _read_package_json(repo_path: str) -> dict:
+    path = os.path.join(repo_path, "package.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _count_deps(pkg: dict) -> tuple[int, int]:
+    direct = len(pkg.get("dependencies", {})) + len(pkg.get("devDependencies", {}))
+    return direct, 0  # transitive unknown without running npm
+
+
+async def build_project_context(state: DiscoveryState) -> dict:
+    error = state.get("discovery_error")
     if error:
         return {
             "project_metadata": ProjectMetadata(
-                name="unknown",
-                package_manager="unknown",
-                direct_dependencies_count=0,
-                transitive_dependencies_count=0,
+                name="unknown", package_manager="unknown",
+                direct_dependencies_count=0, transitive_dependencies_count=0,
             ),
-            "discovery_summary": f"Discovery failed: {error}",
+            "project_context": f"Discovery failed: {error}",
         }
 
-    sbom: dict[str, Any] = state.get("sbom_cyclonedx", {})
-    concern: str = state.get("concern", "")
-
-    pm = state.get("detected_package_manager")
-    project_name = _get_sbom_attribute(sbom, "name")
-    project_version = _get_sbom_attribute(sbom, "version")
-    components, total_count = _extract_components(sbom)
-    direct_count, transitive_count = _count_deps(sbom)
+    repo_path = state.get("repo_path", "")
+    concern = state.get("concern", "")
+    pkg = _read_package_json(repo_path)
+    pm = state.get("detected_package_manager", "npm")
+    direct, transitive = _count_deps(pkg)
 
     metadata = ProjectMetadata(
-        name=project_name,
+        name=pkg.get("name", "unknown"),
         package_manager=pm,
-        direct_dependencies_count=direct_count,
-        transitive_dependencies_count=transitive_count,
+        direct_dependencies_count=direct,
+        transitive_dependencies_count=transitive,
     )
 
-    lock_note = ""
-    if state.get("sbom_error"):
-        lock_note = (
-            f"\nNote: SBOM generation encountered an error ({state['sbom_error']}); "
-            "dependency list may be incomplete."
-        )
+    pkg_summary = json.dumps(
+        {k: pkg.get(k) for k in ("name", "version", "description", "scripts", "dependencies", "devDependencies", "workspaces")
+         if pkg.get(k)},
+        indent=2,
+    )[:3000]  # cap to avoid token overflow
 
-    prompt = _build_prompt(
-        project_name, project_version, concern, components, total_count, lock_note
-    )
-    response = await _llm.ainvoke(prompt)
+    response = await _llm.ainvoke([
+        {"role": "system", "content": _SYSTEM},
+        {"role": "user", "content": f"Concern: {concern}\n\npackage.json:\n{pkg_summary}"},
+    ])
 
-    return {
-        "project_metadata": metadata,
-        "discovery_summary": response.content,
-    }
+    logger.info("build_project_context: project=%s pm=%s direct=%d", metadata["name"], pm, direct)
+    return {"project_metadata": metadata, "project_context": response.content}

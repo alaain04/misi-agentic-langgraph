@@ -1,11 +1,6 @@
-from src.main_graph.subgraphs.discovery.nodes.build_dependency_summary import (
-    build_dependency_summary,
-)
-from src.main_graph.subgraphs.discovery.nodes.discovery_orchestrator import (
-    discovery_orchestrator,
-)
+from .build_dependency_summary import build_project_context
+from .clone_repo import clone_repo
+from .inspect_repo import inspect_repo
+from .install_deps import install_deps
 
-__all__ = [
-    "discovery_orchestrator",
-    "build_dependency_summary",
-]
+__all__ = ["clone_repo", "inspect_repo", "install_deps", "build_project_context"]

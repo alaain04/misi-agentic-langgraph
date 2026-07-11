@@ -1,4 +1,6 @@
 """Node name constants for the discovery subgraph."""
 
-DISCOVERY_ORCHESTRATOR = "discovery_orchestrator"
-BUILD_DEPENDENCY_SUMMARY = "build_dependency_summary"
+CLONE_REPO = "clone_repo"
+INSPECT_REPO = "inspect_repo"
+INSTALL_DEPS = "install_deps"
+BUILD_PROJECT_CONTEXT = "build_project_context"
