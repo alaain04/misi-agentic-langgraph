@@ -19,6 +19,7 @@ interface ChatOverlayProps {
 }
 
 const GATE_LABELS: Record<Gate, string> = {
+  hitl_gate:             'Agent Checkpoint',
   investigation_planner: 'Investigation Plan Review',
   finding_reviewer:      'Risk Findings Review',
 }

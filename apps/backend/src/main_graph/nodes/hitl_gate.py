@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -14,15 +15,35 @@ from src.main_graph.state import MainState
 
 logger = logging.getLogger(__name__)
 
+_SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+
 
 def _finalize_summary(state: MainState) -> str:
     findings = state.get("findings") or []
     if not findings:
         return "Investigation complete with no findings. Proceed to generate the report?"
-    lines = "\n".join(
-        f"- [{f.severity.upper()}] {f.dep_name}: {f.description}" for f in findings
+
+    seen: set[tuple] = set()
+    unique = []
+    for f in findings:
+        key = (f.dep_name, f.severity.lower(), f.description)
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+
+    counts = Counter(f.severity.lower() for f in unique)
+    count_line = " | ".join(
+        f"{s.upper()}: {counts[s]}" for s in _SEVERITY_ORDER if counts.get(s)
     )
-    return f"Investigation complete. Findings:\n\n{lines}\n\nProceed to generate the report?"
+
+    notable = [f for f in unique if f.severity.lower() in ("critical", "high")]
+    lines = "\n".join(f"- [{f.severity.upper()}] {f.dep_name}: {f.description}" for f in notable)
+
+    summary = f"Investigation complete. {len(unique)} unique findings — {count_line}."
+    if lines:
+        summary += f"\n\nKey findings:\n{lines}"
+    summary += "\n\nProceed to generate the report?"
+    return summary
 
 
 async def hitl_gate(state: MainState, config: RunnableConfig) -> dict:
@@ -48,14 +69,6 @@ async def hitl_gate(state: MainState, config: RunnableConfig) -> dict:
     job_id = state["job_id"]
     svc = get_services(config)
     dao = svc["job_repo"]
-
-    created_at = datetime.now(UTC).isoformat()
-    await dao.push_artifact_message(job_id, HITL_GATE, {
-        "role": "assistant",
-        "content": question,
-        "created_at": created_at,
-        "type": msg_type,
-    })
 
     user_reply: str = interrupt({"question": question, "type": msg_type})
 

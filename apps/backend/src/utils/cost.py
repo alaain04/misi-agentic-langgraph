@@ -18,7 +18,7 @@ class CostCallback(BaseCallbackHandler):
 
     def __init__(self) -> None:
         super().__init__()
-        self._cost_usd: float = 0.0
+        self._cost: float = 0.0
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
 
@@ -28,7 +28,7 @@ class CostCallback(BaseCallbackHandler):
         completion = usage.get("completion_tokens", 0)
         model = (response.llm_output or {}).get("model_name", "")
         input_rate, output_rate = _PRICING.get(model, _FALLBACK_RATE)
-        self._cost_usd += (prompt * input_rate + completion * output_rate) / 1_000_000
+        self._cost += (prompt * input_rate + completion * output_rate) / 1_000_000
         self.prompt_tokens += prompt
         self.completion_tokens += completion
 
@@ -36,5 +36,5 @@ class CostCallback(BaseCallbackHandler):
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
-    def cost_usd(self) -> float:
-        return round(self._cost_usd, 6)
+    def cost(self) -> float:
+        return round(self._cost, 6)
