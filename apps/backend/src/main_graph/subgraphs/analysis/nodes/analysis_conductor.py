@@ -5,6 +5,7 @@ import logging
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
+from src.main_graph.subgraphs.analysis.agents.registry import get_agent_descriptions
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.models.results import AnalysisConductorDecision, PrepResult
 from src.utils.llm import Model, get_llm
@@ -14,24 +15,42 @@ logger = logging.getLogger(__name__)
 _MAX_ITERATIONS = 4
 _llm = get_llm(Model.GPT_5_4_MINI)
 
-_SYSTEM = """\
-You are a dependency risk investigation conductor. Given a user concern and project context,
-you dispatch domain specialist agents to gather evidence.
+
+def _build_system(max_iter: int) -> str:
+    roster = "\n".join(
+        f"- {k}: {v}" for k, v in get_agent_descriptions().items()
+    )
+    return f"""\
+You are a dependency risk investigation conductor for a Node.js project.
+Your job: given a user concern and project context, dispatch the right specialist agents
+to collect evidence, then finalize once you have enough to produce a risk report.
 
 Output an AnalysisConductorDecision:
-- dispatches: list of AgentDispatch (agents to launch in parallel)
-- finalize: true when you have dispatched enough agents and collected sufficient evidence
-- reasoning: explain your strategy
+- dispatches: list of AgentDispatch (agents to run in parallel this iteration)
+- finalize: true when evidence is sufficient to produce a complete risk report
+- reasoning: explain which gaps remain and why you are or are not finalizing
 
-Available agent types: vulnerability_agent, maintenance_agent, supply_chain_agent, web_research_agent
+Available agents:
+{roster}
 
-Rules:
-- First iteration: always dispatch at least 2 agents relevant to the concern.
-- Subsequent iterations: review bundle summaries; dispatch follow-up agents only if gaps remain.
-- Set finalize=true when confidence across all bundles is sufficient (usually after 1-2 rounds).
-- Limit packages_to_focus to the most relevant packages (max 10) per dispatch.
-- Use web_research_agent for concerns not covered by the static agents.
-- After {max_iter} iterations, set finalize=true.
+Dispatch strategy:
+- Map the concern to the agents whose description matches it best.
+  * "vulnerability" / "CVE" / "exploit" → vulnerability_agent first
+  * "outdated" / "unmaintained" / "deprecated" → maintenance_agent first
+  * "supply chain" / "typosquat" / "malicious" → supply_chain_agent first
+  * Recent news, novel threats, or anything not covered above → web_research_agent
+- First iteration: dispatch at least 2 agents that directly address the concern.
+- Subsequent iterations: only dispatch follow-up agents when a specific gap remains
+  (e.g. a flagged package not yet inspected, a lead from one agent worth pursuing).
+  Do not re-dispatch the same agent with the same hypothesis — that is wasted effort.
+
+Packages to focus: pick the most directly relevant packages from the dependency list
+(max 10 per dispatch). Prefer direct dependencies over transitive ones.
+
+Finalize when:
+- All agents relevant to the concern have reported with confidence >= 0.6, OR
+- Two rounds of agents produced consistent findings with no new leads, OR
+- Iteration {max_iter} is reached.
 """
 
 
@@ -67,7 +86,7 @@ async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> di
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"
     )
 
-    system = _SYSTEM.format(max_iter=_MAX_ITERATIONS)
+    system = _build_system(_MAX_ITERATIONS)
     structured = _llm.with_structured_output(AnalysisConductorDecision, method="function_calling")
     decision: AnalysisConductorDecision = await structured.ainvoke([
         {"role": "system", "content": system},

@@ -14,11 +14,12 @@ logger = logging.getLogger(__name__)
 _MAX_ITERATIONS = 6
 _llm = get_llm(Model.GPT_5_4_MINI)
 
-_SYSTEM = """\
+_SYSTEM_GENERIC = """\
 You are a domain specialist investigating dependency risks for a Node.js project.
 Your domain: {domain}
 Hypothesis to investigate: {hypothesis}
 Packages to focus on: {packages}
+Project context: {context}
 
 Each iteration output a DomainAgentDecision:
 - tool_calls: tools to run in parallel (empty when done)
@@ -84,23 +85,25 @@ async def run_react_loop(
     dispatch: AgentDispatch,
     prep: PrepResult,
     tools: list,
+    system_prompt: str | None = None,
 ) -> EvidenceBundle:
     tool_map = {getattr(t, "name", t.__name__): t for t in tools}
     tool_results: list[ToolResult] = []
     decision: DomainAgentDecision | None = None
 
     structured = _llm.with_structured_output(DomainAgentDecision, method="function_calling")
+    template = system_prompt or _SYSTEM_GENERIC
 
     for iteration in range(_MAX_ITERATIONS):
         prompt = (
-            f"Concern context: {prep.discovery_summary}\n\n"
             f"Tool results so far:\n{_format_results(tool_results)}\n\n"
             f"Iteration: {iteration + 1}/{_MAX_ITERATIONS}"
         )
-        system = _SYSTEM.format(
+        system = template.format(
             domain=dispatch.domain,
             hypothesis=dispatch.hypothesis,
             packages=", ".join(dispatch.packages_to_focus) or "all dependencies",
+            context=prep.discovery_summary[:500],
             tool_descriptions=_format_tools(tools),
             max_iter=_MAX_ITERATIONS,
         )
