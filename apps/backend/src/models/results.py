@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from src.models.conductor import FindingNote, ToolCall, ToolResult
+from src.models.conductor import FindingNote, ToolCall
 
 
 class PrepResult(BaseModel):
