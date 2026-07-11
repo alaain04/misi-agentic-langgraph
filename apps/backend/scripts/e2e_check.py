@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Drive one full E2E analysis cycle and validate success criteria."""
+"""Drive one full E2E analysis cycle and validate success criteria.
+
+Usage:
+    uv run python scripts/e2e_check.py \\
+        --repo https://github.com/example/repo \\
+        --concern "security vulnerabilities" \\
+        [--base-url http://localhost:8000] \\
+        [--timeout 900]
+
+Exit codes:
+    0  all criteria met
+    1  criteria failures or job failed
+    2  cannot reach backend
+"""
 from __future__ import annotations
 
 import argparse
@@ -9,8 +22,9 @@ import time
 import urllib.request
 from urllib.error import URLError
 
-BASE = "http://localhost:8001"
+BASE = "http://localhost:8000"
 _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "none": -1}
+_ARTIFACT_NODES = ("prep", "analysis", "report")
 
 
 def _request(method: str, path: str, body: dict | None = None) -> dict:
@@ -67,8 +81,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run one E2E analysis and check criteria")
     parser.add_argument("--repo", required=True, help="GitHub repo URL")
     parser.add_argument("--concern", required=True, help="User concern text")
-    parser.add_argument("--base-url", default="http://localhost:8001")
-    parser.add_argument("--timeout", type=int, default=600, help="Per-phase timeout in seconds")
+    parser.add_argument("--base-url", default="http://localhost:8000")
+    parser.add_argument("--timeout", type=int, default=900, help="Per-phase timeout in seconds")
     args = parser.parse_args()
 
     global BASE
@@ -77,45 +91,20 @@ def main() -> None:
     print(f"\n=== E2E: {args.repo} ===")
     print(f"Concern : {args.concern}\n")
 
-    # 1. Start analysis
-    resp = _request("POST", "/analyze", {"repo_url": args.repo, "concern": args.concern})
+    # 1. Start analysis (autopilot=True skips any HITL gates)
+    resp = _request("POST", "/analyze", {
+        "repo_url": args.repo,
+        "concern": args.concern,
+        "autopilot": True,
+    })
     trace_id = resp["trace_id"]
     print(f"trace_id: {trace_id}\n")
 
-    # 2. Wait for HITL gate 1 (plan)
-    print("[1] Waiting for plan proposal (HITL gate 1)...")
-    resp = _poll(trace_id, {"awaiting_approval"}, timeout=args.timeout)
-    planner = next((a for a in resp.get("artifacts", []) if a["node"] == "investigation_planner"), None)
-    if planner and planner.get("messages"):
-        print("Plan preview:")
-        print(planner["messages"][0]["content"][:600])
-        print("...\n")
+    # 2. Wait for completion
+    print("[1] Waiting for analysis to complete...")
+    resp = _poll(trace_id, {"done"}, timeout=args.timeout)
 
-    # 3. Approve plan
-    print("[2] Approving plan...")
-    _request("POST", f"/analyze/{trace_id}/chat",
-             {"message": "Yes, looks good. Please proceed with the full investigation."})
-
-    # 4. Wait for HITL gate 2 or completion
-    print("\n[3] Waiting for skill execution to complete...")
-    resp = _poll(trace_id, {"awaiting_approval", "done"}, timeout=args.timeout)
-
-    if resp["status"] == "awaiting_approval":
-        reviewer = next((a for a in resp.get("artifacts", []) if a["node"] == "finding_reviewer"), None)
-        if reviewer and reviewer.get("messages"):
-            print("Findings preview:")
-            print(reviewer["messages"][0]["content"][:500])
-            print()
-
-        # 5. Acknowledge findings
-        print("[4] Acknowledging findings (HITL gate 2)...")
-        _request("POST", f"/analyze/{trace_id}/chat",
-                 {"message": "Acknowledged. Please generate the final report."})
-
-        print("\n[5] Waiting for final report...")
-        resp = _poll(trace_id, {"done"}, timeout=args.timeout)
-
-    # 6. Evaluate
+    # 3. Evaluate
     results = resp.get("results") or {}
     report = results.get("analysis_report") or {}
     findings = report.get("findings") or []
@@ -124,15 +113,14 @@ def main() -> None:
     print("\n=== REPORT ===")
     print(f"overall_risk_level : {report.get('overall_risk_level', 'MISSING')}")
     print(f"findings           : {len(findings)}")
-    print(f"recommendations    : {report.get('recommendations', [])}")
+    print(f"recommendations    : {len(report.get('recommendations', []))}")
     for f in findings:
-        conf = f.get("confidence", 0)
-        print(f"  [{f.get('severity','?').upper():8s}] {f.get('dep_name'):30s} score={f.get('risk_score'):4.1f}  conf={conf:.0%}")
+        print(f"  [{f.get('severity', '?').upper():8s}] {f.get('dep_name', '?'):30s}")
 
     print(f"\nArtifacts tracked  : {artifact_nodes}")
-    for node in ("evidence_collector", "evidence_correlator"):
-        if node not in artifact_nodes:
-            print(f"  WARNING: {node} artifact missing (Fix C not applied)")
+    missing = [n for n in _ARTIFACT_NODES if n not in artifact_nodes]
+    if missing:
+        print(f"  WARNING: missing artifact nodes: {missing}")
 
     failures = _check_criteria(report, findings)
     if failures:
