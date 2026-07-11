@@ -27,7 +27,13 @@ class DiscoveryState(TypedDict):
     has_lock_file: NotRequired[bool]
     docker_image: NotRequired[str]
 
+    # New: set by index_repository
+    vector_store_id: NotRequired[str]
+
     # Outputs
     project_metadata: NotRequired[ProjectMetadata]
     project_context: NotRequired[str]
     discovery_error: NotRequired[str | None]
+
+    # New output: ID written back to MainState
+    prep_result_id: NotRequired[str]
