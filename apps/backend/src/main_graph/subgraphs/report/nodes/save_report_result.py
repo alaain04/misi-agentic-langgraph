@@ -66,7 +66,15 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
         data = parse_llm_json(response.content or "")
         findings = [ReportFinding(**f) for f in data.get("findings", [])]
     except Exception:
-        findings = []
+        findings = [
+            ReportFinding(
+                dep_name=f.dep_name,
+                severity=f.severity,
+                description=f.description,
+                recommendation="Review manually",
+            )
+            for f in analysis.findings
+        ]
         data = {}
 
     overall = max(

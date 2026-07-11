@@ -43,6 +43,28 @@ async def test_run_react_loop_returns_bundle_on_finalize():
     assert len(bundle.findings) == 1
 
 
+@pytest.mark.asyncio
+async def test_run_react_loop_accepts_bare_async_functions():
+    """Bare async functions (no .name attr) from registry must not crash run_react_loop."""
+    from src.main_graph.subgraphs.analysis.agents.base_agent import run_react_loop
+
+    async def npm_audit(repo_path: str) -> dict:
+        return {"vulnerabilities": []}
+
+    final_decision = DomainAgentDecision(
+        tool_calls=[], findings=[],
+        summary="No issues", confidence=0.8, finalize=True, reasoning="done",
+    )
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=final_decision)
+
+    with patch("src.main_graph.subgraphs.analysis.agents.base_agent._llm", mock_llm):
+        bundle = await run_react_loop(_dispatch(), _prep(), [npm_audit])
+
+    assert isinstance(bundle, EvidenceBundle)
+    assert bundle.domain == "vulnerabilities"
+
+
 def test_agent_registry_has_expected_domains():
     from src.main_graph.subgraphs.analysis.agents.registry import AGENT_REGISTRY
     assert "vulnerability_agent" in AGENT_REGISTRY

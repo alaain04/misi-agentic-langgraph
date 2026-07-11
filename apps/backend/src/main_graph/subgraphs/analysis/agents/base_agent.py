@@ -43,7 +43,7 @@ def _format_tools(tools: list) -> str:
     lines = []
     for t in tools:
         desc = getattr(t, "description", "") or ""
-        lines.append(f"- {t.name}: {desc}")
+        lines.append(f"- {getattr(t, 'name', t.__name__)}: {desc}")
     return "\n".join(lines) or "No tools available."
 
 
@@ -85,7 +85,7 @@ async def run_react_loop(
     prep: PrepResult,
     tools: list,
 ) -> EvidenceBundle:
-    tool_map = {t.name: t for t in tools}
+    tool_map = {getattr(t, "name", t.__name__): t for t in tools}
     tool_results: list[ToolResult] = []
     decision: DomainAgentDecision | None = None
 
