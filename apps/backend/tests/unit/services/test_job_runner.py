@@ -21,6 +21,7 @@ async def test_run_analysis_marks_failed_on_exception():
     with (
         patch("src.services.job_runner.main_graph") as mock_graph,
         patch("src.services.job_runner.clear_cache"),
+        patch("src.services.job_runner.get_result_dao"),
     ):
         mock_graph.astream = bad_stream
         await run_analysis("job-1", "https://github.com/x/y", "security", autopilot=False, dao=dao)

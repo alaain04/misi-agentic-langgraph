@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import shutil
 
+from langgraph.types import Command
+
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph import main_graph
 from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
@@ -104,6 +106,34 @@ async def run_analysis(
 
     except Exception as exc:
         logger.exception("job=%s unhandled error", job_id)
+        clear_cache()
+        await dao.save_cost(job_id, cost_cb.cost())
+        await dao.mark_failed(job_id, error=str(exc))
+
+
+async def resume_analysis(
+    job_id: str,
+    user_message: str,
+    dao: JobRepositoryPort,
+) -> None:
+    await dao.update_status(job_id, JobStatus.processing)
+    cost_cb = CostCallback()
+    config = _build_config(job_id, dao, cost_cb)
+
+    try:
+        await _stream_graph(
+            main_graph,
+            Command(resume=user_message),
+            config,
+            dao,
+            job_id,
+        )
+        await dao.save_cost(job_id, cost_cb.cost())
+        await _finalize(dao, job_id, config)
+        await dao.update_status(job_id, JobStatus.done)
+
+    except Exception as exc:
+        logger.exception("job=%s unhandled error on resume", job_id)
         clear_cache()
         await dao.save_cost(job_id, cost_cb.cost())
         await dao.mark_failed(job_id, error=str(exc))
