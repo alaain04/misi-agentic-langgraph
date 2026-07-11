@@ -24,6 +24,7 @@ def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) ->
             "job_repo": dao,
             "container": container,
             "docker_tool": make_docker_tool(container),
+            "result_dao": get_result_dao(),
         },
         "callbacks": [cost_cb],
     }
@@ -42,7 +43,8 @@ async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_i
 
             elif node_name == ANALYSIS:
                 await dao.complete_artifact(job_id, ANALYSIS, "done")
-                await dao.start_artifact(job_id, REPORT)
+                if node_update.get("analysis_result_id"):
+                    await dao.start_artifact(job_id, REPORT)
 
             elif node_name == REPORT:
                 report_result_id = node_update.get("report_result_id")
