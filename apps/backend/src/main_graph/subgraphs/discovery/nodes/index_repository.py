@@ -7,10 +7,11 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src.main_graph.tools.search_code import set_vector_store, _SOURCE_EXTENSIONS
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
-_embeddings = OpenAIEmbeddings(api_key="placeholder")  # replaced by settings at runtime
+_embeddings = OpenAIEmbeddings(api_key=settings.openai_api_key)
 _splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
 
 _MAX_FILES = 200

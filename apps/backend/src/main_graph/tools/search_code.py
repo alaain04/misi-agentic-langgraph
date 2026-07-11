@@ -2,10 +2,13 @@ from __future__ import annotations
 import logging
 from langchain_core.tools import tool
 from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_openai import OpenAIEmbeddings
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
 _store_cache: dict[str, InMemoryVectorStore] = {}
+_embeddings = OpenAIEmbeddings(api_key=settings.openai_api_key)
 
 _SOURCE_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".mts", ".cts"}
 
