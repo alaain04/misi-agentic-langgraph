@@ -1,5 +1,3 @@
 PREP = "prep"
-CONDUCTOR = "conductor"
-TOOL_RUNNER = "tool_runner"
-HITL_GATE = "hitl_gate"
-REPORT_BUILDER = "report_builder"
+ANALYSIS = "analysis"
+REPORT = "report"

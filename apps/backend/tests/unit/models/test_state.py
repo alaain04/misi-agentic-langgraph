@@ -1,24 +1,24 @@
-import operator
 from typing import get_type_hints
+
+from langgraph.graph.message import add_messages
 
 from src.main_graph.state import MainState
 
 
-def test_tool_results_has_add_reducer():
+def test_messages_has_add_messages_reducer():
     hints = get_type_hints(MainState, include_extras=True)
-    tool_results_hint = hints["tool_results"]
-    metadata = getattr(tool_results_hint, "__metadata__", ())
-    assert operator.add in metadata
-
-
-def test_findings_has_add_reducer():
-    hints = get_type_hints(MainState, include_extras=True)
-    findings_hint = hints["findings"]
-    metadata = getattr(findings_hint, "__metadata__", ())
-    assert operator.add in metadata
+    messages_hint = hints["messages"]
+    metadata = getattr(messages_hint, "__metadata__", ())
+    assert add_messages in metadata
 
 
 def test_required_input_fields_present():
     hints = get_type_hints(MainState)
     for field in ("repo_url", "concern", "job_id", "autopilot"):
+        assert field in hints
+
+
+def test_result_id_fields_present():
+    hints = get_type_hints(MainState)
+    for field in ("prep_result_id", "analysis_result_id", "report_result_id"):
         assert field in hints

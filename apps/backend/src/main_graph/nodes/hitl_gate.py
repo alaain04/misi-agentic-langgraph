@@ -10,8 +10,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
 from src.main_graph.config import get_services
-from src.main_graph.constants import HITL_GATE
 from src.main_graph.state import MainState
+
+_HITL_GATE = "hitl_gate"
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ async def hitl_gate(state: MainState, config: RunnableConfig) -> dict:
 
     user_reply: str = interrupt({"question": question, "type": msg_type})
 
-    await dao.push_artifact_message(job_id, HITL_GATE, {
+    await dao.push_artifact_message(job_id, _HITL_GATE, {
         "role": "human",
         "content": user_reply,
         "created_at": datetime.now(UTC).isoformat(),
