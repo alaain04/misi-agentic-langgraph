@@ -121,7 +121,7 @@ async def _react_loop(
     prep: PrepResult,
     tools: list,
     system_prompt: str,
-) -> EvidenceBundle:
+) -> tuple[EvidenceBundle, list[str], int]:
     tool_map = {(getattr(t, "name", None) or getattr(t, "__name__", repr(t))): t for t in tools}
     tool_results: list[ToolResult] = []
     decision: DomainAgentDecision | None = None
@@ -131,6 +131,7 @@ async def _react_loop(
     structured = _llm.with_structured_output(DomainAgentDecision, method="function_calling")
 
     for iteration in range(_MAX_ITERATIONS):
+        react_iterations = iteration + 1
         prompt = (
             f"Tool results so far:\n{_format_results(tool_results)}\n\n"
             f"Iteration: {iteration + 1}/{_MAX_ITERATIONS}"
@@ -182,7 +183,7 @@ async def _react_loop(
             )
             tool_results.extend(new_results)
 
-    return EvidenceBundle(
+    bundle = EvidenceBundle(
         domain=dispatch.domain,
         hypothesis=dispatch.hypothesis,
         packages_to_focus=dispatch.packages_to_focus,
@@ -191,6 +192,7 @@ async def _react_loop(
         confidence=confidence,
         verification_note=note,
     )
+    return bundle, [tr.tool for tr in tool_results], react_iterations
 
 
 class BaseAgent(ABC):
@@ -207,5 +209,5 @@ class BaseAgent(ABC):
             tools.append(make_search_code_tool(prep.vector_store_id))
         return tools
 
-    async def run(self, dispatch: AgentDispatch, prep: PrepResult) -> EvidenceBundle:
+    async def run(self, dispatch: AgentDispatch, prep: PrepResult) -> tuple[EvidenceBundle, list[str], int]:
         return await _react_loop(dispatch, prep, self.get_tools(prep), self.system_prompt)

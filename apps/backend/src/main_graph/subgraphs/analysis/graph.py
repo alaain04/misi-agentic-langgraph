@@ -37,6 +37,7 @@ def _after_conductor(state: AnalysisState):
                 **state,
                 "current_dispatch": dispatch_dict,
                 "bundle_ids": [],
+                "agent_calls": [],
             })
         )
     return sends

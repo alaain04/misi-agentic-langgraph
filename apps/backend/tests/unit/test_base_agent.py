@@ -42,9 +42,11 @@ async def test_vulnerability_agent_run_extracts_all_audit_findings():
 
     with patch.object(vulnerability_agent, "npm_audit", audit), \
          patch.object(vulnerability_agent.settings, "vuln_min_severity", "high"):
-        bundle = await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep())
+        bundle, tools_used, react_iterations = await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep())
 
     assert isinstance(bundle, EvidenceBundle)
+    assert tools_used == ["npm_audit"]
+    assert react_iterations == 1
     assert bundle.confidence == 1.0
     assert bundle.packages_to_focus == []  # not sampled — whole tree
     names = {f.dep_name for f in bundle.findings}
@@ -68,10 +70,12 @@ async def test_agent_run_accepts_bare_async_functions():
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=final_decision)
 
     with patch("src.main_graph.subgraphs.analysis.agents.base_agent._llm", mock_llm):
-        bundle = await _react_loop(_dispatch(), _prep(), [npm_audit], "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}")
+        bundle, tools_used, react_iterations = await _react_loop(_dispatch(), _prep(), [npm_audit], "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}")
 
     assert isinstance(bundle, EvidenceBundle)
     assert bundle.domain == "vulnerabilities"
+    assert tools_used == []
+    assert react_iterations == 1
 
 
 def test_registry_has_expected_agents():
@@ -113,13 +117,15 @@ async def test_react_loop_self_corrects_then_passes():
 
     with patch.object(base_agent, "_llm", mock_llm), \
          patch.object(base_agent, "critique_findings", critic):
-        bundle = await base_agent._react_loop(
+        bundle, tools_used, react_iterations = await base_agent._react_loop(
             _dispatch(), _prep(), [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.confidence == 0.85
     assert bundle.verification_note is None
+    assert tools_used == ["verification_feedback"]
+    assert react_iterations == 2
     assert critic.await_count == 2  # rejected once, re-verified after self-correction
     assert mock_llm.with_structured_output.return_value.ainvoke.await_count == 2
 
@@ -141,7 +147,7 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
     with patch.object(base_agent, "_llm", mock_llm), \
          patch.object(base_agent, "_MAX_ITERATIONS", 2), \
          patch.object(base_agent, "critique_findings", critic):
-        bundle = await base_agent._react_loop(
+        bundle, tools_used, react_iterations = await base_agent._react_loop(
             _dispatch(), _prep(), [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
@@ -149,6 +155,8 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
     assert bundle.findings == [finding]  # kept, not pruned
     assert bundle.confidence == 0.1
     assert bundle.verification_note == "express finding unsupported"
+    assert tools_used == ["verification_feedback"]
+    assert react_iterations == 2
 
 
 @pytest.mark.asyncio
@@ -164,13 +172,15 @@ async def test_react_loop_critic_failure_degrades_to_pass():
 
     with patch.object(base_agent, "_llm", mock_llm), \
          patch.object(base_agent, "critique_findings", critic):
-        bundle = await base_agent._react_loop(
+        bundle, tools_used, react_iterations = await base_agent._react_loop(
             _dispatch(), _prep(), [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.confidence == 0.9
     assert bundle.verification_note is None
+    assert tools_used == []
+    assert react_iterations == 1
 
 
 @pytest.mark.asyncio
@@ -189,13 +199,15 @@ async def test_react_loop_survives_malformed_decision_then_recovers():
 
     with patch.object(base_agent, "_llm", mock_llm), \
          patch.object(base_agent, "critique_findings", critic):
-        bundle = await base_agent._react_loop(
+        bundle, tools_used, react_iterations = await base_agent._react_loop(
             _dispatch(), _prep(), [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.findings == [finding]
     assert bundle.confidence == 0.9
+    assert tools_used == []
+    assert react_iterations == 2
     assert mock_llm.with_structured_output.return_value.ainvoke.await_count == 2
 
 
@@ -211,10 +223,12 @@ async def test_react_loop_skips_critic_when_no_findings():
 
     with patch.object(base_agent, "_llm", mock_llm), \
          patch.object(base_agent, "critique_findings", critic):
-        bundle = await base_agent._react_loop(
+        bundle, tools_used, react_iterations = await base_agent._react_loop(
             _dispatch(), _prep(), [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.confidence == 0.4
+    assert tools_used == []
+    assert react_iterations == 1
     critic.assert_not_awaited()
