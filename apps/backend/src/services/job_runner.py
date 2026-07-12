@@ -32,10 +32,20 @@ def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) ->
     }
 
 
-async def _stream_graph(graph, input_data, config, dao: JobRepositoryPort, job_id: str) -> None:
+async def _stream_graph(
+    graph, input_data, config, dao: JobRepositoryPort, job_id: str, cost_cb: CostCallback,
+) -> None:
+    prev_cost = 0.0
     async for chunk in graph.astream(input_data, config, stream_mode="updates"):
         for node_name, node_update in chunk.items():
             logger.info("job=%s node=%s completed", job_id, node_name)
+
+            if node_name in (PREP, ANALYSIS, REPORT):
+                cost_now = cost_cb.cost()
+                await dao.update_artifact_data(
+                    job_id, node_name, {"cost": round(cost_now - prev_cost, 6)}
+                )
+                prev_cost = cost_now
 
             if node_name == PREP:
                 status = "failed" if node_update.get("discovery_error") else "done"
@@ -98,7 +108,7 @@ async def run_analysis(
             main_graph,
             {"repo_url": repo_url, "concern": concern, "job_id": job_id,
              "autopilot": autopilot, "messages": []},
-            config, dao, job_id,
+            config, dao, job_id, cost_cb,
         )
         await dao.save_cost(job_id, cost_cb.cost())
         await _finalize(dao, job_id, config)
@@ -127,6 +137,7 @@ async def resume_analysis(
             config,
             dao,
             job_id,
+            cost_cb,
         )
         await dao.save_cost(job_id, cost_cb.cost())
         await _finalize(dao, job_id, config)
