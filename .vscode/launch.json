@@ -1,0 +1,122 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: Run App",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "src.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--log-level",
+        "debug"
+      ],
+      "cwd": "${workspaceFolder}/apps/backend",
+      "envFile": "${workspaceFolder}/apps/backend/.env",
+      "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
+      "justMyCode": true
+    },
+    {
+      "name": "Backend: Subgraph E2E Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      // requires Docker running (testcontainers)
+      "args": [
+        "-m",
+        "subgraph",
+        "-v",
+        "tests/subgraphs"
+      ],
+      "cwd": "${workspaceFolder}/apps/backend",
+      "envFile": "${workspaceFolder}/apps/backend/.env",
+      "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Backend: run_subgraph.py (discovery)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/backend/scripts/run_subgraph.py",
+      // clones a real repo, needs Docker
+      "args": [
+        "discovery",
+        "--repo",
+        "${input:repoUrl}",
+        "--concern",
+        "${input:concern}"
+      ],
+      "cwd": "${workspaceFolder}/apps/backend",
+      "envFile": "${workspaceFolder}/apps/backend/.env",
+      "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Backend: run_subgraph.py (analysis)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/backend/scripts/run_subgraph.py",
+      "args": [
+        "analysis",
+        "--prep-result-id",
+        "${input:prepResultId}",
+        "--concern",
+        "${input:concern}"
+      ],
+      "cwd": "${workspaceFolder}/apps/backend",
+      "envFile": "${workspaceFolder}/apps/backend/.env",
+      "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Backend: run_subgraph.py (report)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/backend/scripts/run_subgraph.py",
+      "args": [
+        "report",
+        "--analysis-result-id",
+        "${input:analysisResultId}",
+        "--concern",
+        "${input:concern}"
+      ],
+      "cwd": "${workspaceFolder}/apps/backend",
+      "envFile": "${workspaceFolder}/apps/backend/.env",
+      "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "repoUrl",
+      "type": "promptString",
+      "description": "GitHub repo URL for the discovery subgraph",
+      "default": "https://github.com/alaain04/challenge-invoice-api"
+    },
+    {
+      "id": "prepResultId",
+      "type": "promptString",
+      "description": "PrepResult ID from a prior discovery run"
+    },
+    {
+      "id": "analysisResultId",
+      "type": "promptString",
+      "description": "AnalysisResult ID from a prior analysis run"
+    },
+    {
+      "id": "concern",
+      "type": "promptString",
+      "description": "User concern text",
+      "default": "security vulnerabilities"
+      // "default": "Outdated dependencies with known CVEs"
+    }
+  ]
+}
