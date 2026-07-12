@@ -173,6 +173,22 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
     assert analysis.findings[0].severity == "high"
     assert len(analysis.evidence_bundle_ids) == 1
 
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    job_repo.update_artifact_data.assert_awaited_once()
+    call = job_repo.update_artifact_data.await_args
+    assert call.args[0] == job_id
+    assert call.args[1] == "analysis"
+    agent_calls = call.args[2]["agent_calls"]
+    assert len(agent_calls) == 1
+    assert agent_calls[0]["agent_type"] == "vulnerability_agent"
+    assert agent_calls[0]["domain"] == "vulnerability"
+    assert agent_calls[0]["tools_used"] == ["npm_audit"]
+    assert agent_calls[0]["react_iterations"] == 1
+    assert agent_calls[0]["conductor_iteration"] == 1
+    assert agent_calls[0]["bundle_id"] == analysis.evidence_bundle_ids[0]
+    assert agent_calls[0]["started_at"]
+    assert agent_calls[0]["finished_at"]
+
 
 @pytest.mark.asyncio
 async def test_analysis_finalizes_immediately_when_no_dispatches(subgraph_config, result_dao):
@@ -295,3 +311,13 @@ async def test_analysis_accumulates_bundles_from_parallel_agents(subgraph_config
     # advisory from the audit fixture.
     assert len(analysis.evidence_bundle_ids) == 2
     assert len(analysis.findings) == 2
+
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    job_repo.update_artifact_data.assert_awaited_once()
+    call = job_repo.update_artifact_data.await_args
+    agent_calls = call.args[2]["agent_calls"]
+    assert len(agent_calls) == 2
+    assert {c["agent_type"] for c in agent_calls} == {"vulnerability_agent", "maintenance_agent"}
+    for c in agent_calls:
+        assert c["started_at"]
+        assert c["finished_at"]

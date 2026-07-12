@@ -97,6 +97,6 @@ async def subgraph_config(result_dao):
             "result_dao": result_dao,
             "container": container_mock,
             "docker_tool": MagicMock(),
-            "job_repo": MagicMock(),
+            "job_repo": AsyncMock(),
         }
     }
