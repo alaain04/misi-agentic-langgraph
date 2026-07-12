@@ -1,6 +1,6 @@
 from src.models.results import (
     PrepResult, AgentDispatch, AnalysisConductorDecision,
-    EvidenceBundle, AnalysisResult, ReportFinding, ReportResult,
+    EvidenceBundle, AgentCallRecord, AnalysisResult, ReportFinding, ReportResult,
     DomainAgentDecision,
 )
 from src.models.conductor import FindingNote, EvidenceRef
@@ -65,6 +65,23 @@ def test_evidence_bundle_accepts_verification_note():
         confidence=0.3, verification_note="finding 1 lacks evidence",
     )
     assert b.verification_note == "finding 1 lacks evidence"
+
+
+def test_agent_call_record_round_trip():
+    record = AgentCallRecord(
+        conductor_iteration=1,
+        agent_type="vulnerability_agent",
+        domain="vulnerability",
+        tools_used=["npm_audit"],
+        react_iterations=1,
+        started_at="2026-07-12T00:00:00+00:00",
+        finished_at="2026-07-12T00:00:05+00:00",
+        bundle_id="bundle-1",
+    )
+    data = record.model_dump()
+    record2 = AgentCallRecord(**data)
+    assert record2.tools_used == ["npm_audit"]
+    assert record2.conductor_iteration == 1
 
 
 def test_report_result_round_trip():

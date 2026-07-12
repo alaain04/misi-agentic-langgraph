@@ -54,6 +54,17 @@ class EvidenceBundle(BaseModel):
     verification_note: str | None = None
 
 
+class AgentCallRecord(BaseModel):
+    conductor_iteration: int
+    agent_type: str
+    domain: str
+    tools_used: list[str]
+    react_iterations: int
+    started_at: str
+    finished_at: str
+    bundle_id: str
+
+
 class AnalysisResult(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     job_id: str
