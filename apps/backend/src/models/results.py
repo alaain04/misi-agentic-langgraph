@@ -16,7 +16,6 @@ class PrepResult(BaseModel):
     manifest_files: list[str]
     detected_package_manager: str
     dependency_graph: dict
-    sbom_cyclonedx: dict
     discovery_summary: str
     vector_store_id: str
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -48,6 +47,7 @@ class EvidenceBundle(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     domain: str
     hypothesis: str
+    packages_to_focus: list[str] = Field(default_factory=list)
     findings: list[FindingNote]
     summary: str
     confidence: float

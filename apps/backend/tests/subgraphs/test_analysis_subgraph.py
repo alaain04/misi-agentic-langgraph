@@ -42,9 +42,8 @@ def _seed_prep(job_id: str) -> PrepResult:
         detected_package_manager="npm",
         dependency_graph={
             "direct": {"lodash": "4.17.20", "express": "4.18.2", "axios": "1.6.0"},
-            "transitive": {},
+            "packages": {},
         },
-        sbom_cyclonedx={},
         discovery_summary="test-project depends on lodash, express, and axios.",
         vector_store_id="",
     )

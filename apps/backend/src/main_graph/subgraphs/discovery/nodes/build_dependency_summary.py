@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
+from src.main_graph.subgraphs.discovery.dependency_graph import (
+    build_dependency_graph,
+    count_dependencies,
+    read_package_json,
+)
 from src.main_graph.subgraphs.discovery.state import DiscoveryState, ProjectMetadata
 from src.utils.llm import Model, get_llm
 
@@ -21,20 +25,6 @@ Output only the summary text.\
 """
 
 
-def _read_package_json(repo_path: str) -> dict:
-    path = os.path.join(repo_path, "package.json")
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _count_deps(pkg: dict) -> tuple[int, int]:
-    direct = len(pkg.get("dependencies", {})) + len(pkg.get("devDependencies", {}))
-    return direct, 0  # transitive unknown without running npm
-
-
 async def build_project_context(state: DiscoveryState) -> dict:
     error = state.get("discovery_error")
     if error:
@@ -48,9 +38,9 @@ async def build_project_context(state: DiscoveryState) -> dict:
 
     repo_path = state.get("repo_path", "")
     concern = state.get("concern", "")
-    pkg = _read_package_json(repo_path)
+    pkg = read_package_json(repo_path)
     pm = state.get("detected_package_manager", "npm")
-    direct, transitive = _count_deps(pkg)
+    direct, transitive = count_dependencies(build_dependency_graph(repo_path, pm, pkg))
 
     metadata = ProjectMetadata(
         name=pkg.get("name", "unknown"),

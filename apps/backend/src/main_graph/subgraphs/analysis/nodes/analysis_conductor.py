@@ -34,18 +34,21 @@ Available agents:
 {roster}
 
 Dispatch strategy:
-- Map the concern to the agents whose description matches it best.
-  * "vulnerability" / "CVE" / "exploit" → vulnerability_agent first
-  * "outdated" / "unmaintained" / "deprecated" → maintenance_agent first
-  * "supply chain" / "typosquat" / "malicious" → supply_chain_agent first
-  * Recent news, novel threats, or anything not covered above → web_research_agent
-- First iteration: dispatch at least 2 agents that directly address the concern.
-- Subsequent iterations: only dispatch follow-up agents when a specific gap remains
-  (e.g. a flagged package not yet inspected, a lead from one agent worth pursuing).
-  Do not re-dispatch the same agent with the same hypothesis — that is wasted effort.
+- Select agents by capability match to the concern. Dispatch as few or as many
+  as the concern needs (1 to all of them) — there is no minimum or maximum count.
+- You may dispatch the SAME agent multiple times in parallel. Two common cases:
+  (a) shard a large package set — same hypothesis, different packages_to_focus;
+  (b) probe a different angle on the same packages — different hypothesis.
+  Keep total parallel dispatches per iteration <= 5.
+- Every dispatch must be unique across (agent_type, packages_to_focus, hypothesis).
+  Never re-run a combination already answered in the evidence collected so far.
+- Later iterations: dispatch only to close a specific gap or chase a lead from a
+  prior bundle. Spend early iterations on breadth, later ones on depth.
 
-Packages to focus: pick the most directly relevant packages from the dependency list
-(max 10 per dispatch). Prefer direct dependencies over transitive ones.
+Package selection:
+- Choose packages by relevance to the concern, not by count.
+- Direct dependencies first for maintenance/general concerns; for supply-chain and
+  vulnerability concerns, transitive dependencies are in scope and often higher risk.
 
 Finalize when:
 - All agents relevant to the concern have reported with confidence >= 0.6, OR
@@ -59,9 +62,11 @@ def _format_bundles(bundles: list) -> str:
         return "No evidence collected yet."
     parts = []
     for b in bundles:
+        packages = ", ".join(b.packages_to_focus) or "n/a"
         parts.append(
             f"[{b.domain}] confidence={b.confidence:.2f}\n"
             f"  hypothesis: {b.hypothesis}\n"
+            f"  packages: {packages}\n"
             f"  summary: {b.summary}\n"
             f"  findings: {len(b.findings)}"
         )
@@ -81,7 +86,7 @@ async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> di
         f"Concern: {state['concern']}\n\n"
         f"Project context:\n{prep.discovery_summary}\n\n"
         f"Package manager: {prep.detected_package_manager}\n"
-        f"Direct dependencies: {list(prep.dependency_graph.get('direct', {}).keys())[:20]}\n\n"
+        f"Direct dependencies: {list(prep.dependency_graph.get('direct', {}).keys())}\n\n"
         f"Evidence collected so far:\n{_format_bundles(bundles)}\n\n"
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"
     )

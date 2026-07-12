@@ -35,13 +35,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 async def _run_discovery(args) -> None:
     from src.db.result_dao import ResultDAO
-    from src.domain.adapters.container_run_adapter import ContainerRunAdapter
+    from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
     from src.main_graph.subgraphs.discovery.graph import build_discovery_subgraph
 
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
 
-    container = ContainerRunAdapter()
+    container = DockerContainerAdapter()
 
     config = {
         "configurable": {

@@ -14,8 +14,8 @@ def test_prep_result_auto_id_and_timestamp():
     r = PrepResult(
         job_id="j1", repo_path="/tmp/r", project_metadata={},
         manifest_files=["package.json"], detected_package_manager="npm",
-        dependency_graph={"direct": {}, "transitive": {}},
-        sbom_cyclonedx={}, discovery_summary="summary", vector_store_id="vs1",
+        dependency_graph={"direct": {}},
+        discovery_summary="summary", vector_store_id="vs1",
     )
     assert r.id
     assert r.created_at

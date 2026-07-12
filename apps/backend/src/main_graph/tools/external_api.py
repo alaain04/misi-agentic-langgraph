@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -63,7 +62,7 @@ async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
     key = f"advisory:{ecosystem}:{package_name}"
     if key in _cache:
         return _cache[key]
-    token = os.getenv("GITHUB_TOKEN", "")
+    token = settings.github_token
     if not token:
         return {"error": "GITHUB_TOKEN not set", "advisories": []}
     query = """
