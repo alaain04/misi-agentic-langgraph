@@ -54,6 +54,9 @@ Finalize when:
 - All agents relevant to the concern have reported with confidence >= 0.6, OR
 - Two rounds of agents produced consistent findings with no new leads, OR
 - Iteration {max_iter} is reached.
+
+A bundle marked "unresolved" failed evidence verification: treat it as an open gap.
+Prefer re-dispatching to close it, or discount its findings when finalizing.
 """
 
 
@@ -63,13 +66,16 @@ def _format_bundles(bundles: list) -> str:
     parts = []
     for b in bundles:
         packages = ", ".join(b.packages_to_focus) or "n/a"
-        parts.append(
+        block = (
             f"[{b.domain}] confidence={b.confidence:.2f}\n"
             f"  hypothesis: {b.hypothesis}\n"
             f"  packages: {packages}\n"
             f"  summary: {b.summary}\n"
             f"  findings: {len(b.findings)}"
         )
+        if getattr(b, "verification_note", None):
+            block += f"\n  unresolved: {b.verification_note}"
+        parts.append(block)
     return "\n\n".join(parts)
 
 
