@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import textwrap
 
 from src.main_graph.subgraphs.discovery.dependency_graph import (
     build_dependency_graph,
@@ -16,13 +17,13 @@ logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_4O_MINI)
 
-_SYSTEM = """\
-You are analyzing a Node.js project. Given its package.json contents and the user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
-- Names the project and its stated purpose
-- Lists key dependency groups most relevant to the concern
-- Flags anything immediately notable (scripts, workspaces, unusual dependencies)
-Output only the summary text.\
-"""
+_SYSTEM = textwrap.dedent("""\
+    You are analyzing a Node.js project. Given its package.json contents and the user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
+    - Names the project and its stated purpose
+    - Lists key dependency groups most relevant to the concern
+    - Flags anything immediately notable (scripts, workspaces, unusual dependencies)
+    Output only the summary text.
+    """).strip()
 
 
 async def build_project_context(state: DiscoveryState) -> dict:

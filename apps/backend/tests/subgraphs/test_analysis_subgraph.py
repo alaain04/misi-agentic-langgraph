@@ -75,6 +75,22 @@ def _make_agent_llm(decision: DomainAgentDecision):
     return llm
 
 
+# vulnerability_agent is deterministic: it runs `npm audit` (not the LLM) and
+# extracts every advisory. Feed it a canned audit result so the graph wiring can
+# be exercised without a real repo.
+_AUDIT_FIXTURE = {
+    "advisories": {
+        "1": {
+            "module_name": "lodash", "severity": "high",
+            "title": "CVE-2021-23337: prototype pollution in lodash < 4.17.21",
+            "vulnerable_versions": "<4.17.21", "patched_versions": ">=4.17.21",
+            "cves": ["CVE-2021-23337"], "url": None,
+            "findings": [{"version": "4.17.20"}],
+        }
+    }
+}
+
+
 @pytest.mark.asyncio
 async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, result_dao):
     """
@@ -130,6 +146,10 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
         patch(
             "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
             _make_agent_llm(agent_decision),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent.npm_audit",
+            AsyncMock(return_value=_AUDIT_FIXTURE),
         ),
     ):
         graph = build_analysis_subgraph()
@@ -253,6 +273,10 @@ async def test_analysis_accumulates_bundles_from_parallel_agents(subgraph_config
             "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
             _make_agent_llm(agent_decision),
         ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent.npm_audit",
+            AsyncMock(return_value=_AUDIT_FIXTURE),
+        ),
     ):
         graph = build_analysis_subgraph()
         result = await graph.ainvoke(
@@ -266,6 +290,8 @@ async def test_analysis_accumulates_bundles_from_parallel_agents(subgraph_config
         )
 
     analysis = await result_dao.get_analysis(result["analysis_result_id"])
-    # Two agents dispatched → two bundles → two findings accumulated
+    # Two agents dispatched → two bundles. The maintenance agent contributes its
+    # mocked finding; the deterministic vulnerability agent contributes the lodash
+    # advisory from the audit fixture.
     assert len(analysis.evidence_bundle_ids) == 2
     assert len(analysis.findings) == 2

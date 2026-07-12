@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # included in the report but do not pause execution for approval.
     # Values: any | low | medium | high | critical  (default: any)
     reviewer_min_severity: str = "any"
+    # Minimum severity for vulnerability findings from the dependency audit.
+    # npm/pnpm `audit --json` is not filtered by --audit-level, so we filter here.
+    # Values: low | medium | high | critical  (default: high)
+    vuln_min_severity: str = "high"
 
 
 settings = Settings()

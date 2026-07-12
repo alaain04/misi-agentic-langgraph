@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import textwrap
 
 from langchain_core.runnables import RunnableConfig
 
@@ -16,48 +17,56 @@ _MAX_ITERATIONS = 4
 _llm = get_llm(Model.GPT_5_4_MINI)
 
 
+_SYSTEM_TEMPLATE = textwrap.dedent("""\
+    You are a dependency risk investigation conductor for a Node.js project.
+    Your job: given a user concern and project context, dispatch the right
+    specialist agents to collect evidence, then finalize once you have enough
+    to produce a risk report.
+
+    Output an AnalysisConductorDecision:
+    - dispatches: list of AgentDispatch (agents to run in parallel this iteration)
+    - finalize: true when evidence is sufficient to produce a complete risk report
+    - reasoning: explain which gaps remain and why you are or are not finalizing
+
+    Available agents:
+    {roster}
+
+    Dispatch strategy:
+    - Select agents by capability match to the concern. Dispatch as few or as many
+      as the concern needs (1 to all of them) — there is no minimum or maximum count.
+    - You may dispatch the SAME agent multiple times in parallel. Two common cases:
+      (a) shard a large package set — same hypothesis, different packages_to_focus;
+      (b) probe a different angle on the same packages — different hypothesis.
+      Keep total parallel dispatches per iteration <= 5.
+    - Every dispatch must be unique across (agent_type, packages_to_focus, hypothesis).
+      Never re-run a combination already answered in the evidence collected so far.
+    - The vulnerability_agent audits the ENTIRE dependency tree in one run. Dispatch
+      it at most once, leave packages_to_focus empty for it, and never shard it —
+      extra dispatches add no coverage.
+    - Later iterations: dispatch only to close a specific gap or chase a lead from a
+      prior bundle. Spend early iterations on breadth, later ones on depth.
+
+    Package selection:
+    - Choose packages by relevance to the concern, not by count.
+    - Direct dependencies first for maintenance/general concerns; for supply-chain
+      and vulnerability concerns, transitive dependencies are in scope and often
+      higher risk.
+
+    Finalize when:
+    - All agents relevant to the concern have reported with confidence >= 0.6, OR
+    - Two rounds of agents produced consistent findings with no new leads, OR
+    - Iteration {max_iter} is reached.
+
+    A bundle marked "unresolved" failed evidence verification: treat it as an open gap.
+    Prefer re-dispatching to close it, or discount its findings when finalizing.
+    """).strip()
+
+
 def _build_system(max_iter: int) -> str:
     roster = "\n".join(
         f"- {k}: {v}" for k, v in get_agent_descriptions().items()
     )
-    return f"""\
-You are a dependency risk investigation conductor for a Node.js project.
-Your job: given a user concern and project context, dispatch the right specialist agents
-to collect evidence, then finalize once you have enough to produce a risk report.
-
-Output an AnalysisConductorDecision:
-- dispatches: list of AgentDispatch (agents to run in parallel this iteration)
-- finalize: true when evidence is sufficient to produce a complete risk report
-- reasoning: explain which gaps remain and why you are or are not finalizing
-
-Available agents:
-{roster}
-
-Dispatch strategy:
-- Select agents by capability match to the concern. Dispatch as few or as many
-  as the concern needs (1 to all of them) — there is no minimum or maximum count.
-- You may dispatch the SAME agent multiple times in parallel. Two common cases:
-  (a) shard a large package set — same hypothesis, different packages_to_focus;
-  (b) probe a different angle on the same packages — different hypothesis.
-  Keep total parallel dispatches per iteration <= 5.
-- Every dispatch must be unique across (agent_type, packages_to_focus, hypothesis).
-  Never re-run a combination already answered in the evidence collected so far.
-- Later iterations: dispatch only to close a specific gap or chase a lead from a
-  prior bundle. Spend early iterations on breadth, later ones on depth.
-
-Package selection:
-- Choose packages by relevance to the concern, not by count.
-- Direct dependencies first for maintenance/general concerns; for supply-chain and
-  vulnerability concerns, transitive dependencies are in scope and often higher risk.
-
-Finalize when:
-- All agents relevant to the concern have reported with confidence >= 0.6, OR
-- Two rounds of agents produced consistent findings with no new leads, OR
-- Iteration {max_iter} is reached.
-
-A bundle marked "unresolved" failed evidence verification: treat it as an open gap.
-Prefer re-dispatching to close it, or discount its findings when finalizing.
-"""
+    return _SYSTEM_TEMPLATE.format(roster=roster, max_iter=max_iter)
 
 
 def _format_bundles(bundles: list) -> str:
@@ -88,11 +97,14 @@ async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> di
     bundle_ids = state.get("bundle_ids") or []
     bundles = await dao.get_bundles(bundle_ids) if bundle_ids else []
 
+    direct_versions = [
+        f"{n}@{v}" for n, v in prep.dependency_graph.get("direct", {}).items()
+    ]
     user_prompt = (
         f"Concern: {state['concern']}\n\n"
         f"Project context:\n{prep.discovery_summary}\n\n"
         f"Package manager: {prep.detected_package_manager}\n"
-        f"Direct dependencies: {list(prep.dependency_graph.get('direct', {}).keys())}\n\n"
+        f"Direct dependencies (name@installed_version): {direct_versions}\n\n"
         f"Evidence collected so far:\n{_format_bundles(bundles)}\n\n"
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"
     )

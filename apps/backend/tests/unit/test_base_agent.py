@@ -23,28 +23,33 @@ def _dispatch(agent_type: str = "vulnerability_agent") -> AgentDispatch:
 
 
 @pytest.mark.asyncio
-async def test_agent_run_returns_bundle_on_finalize():
-    from src.main_graph.subgraphs.analysis.agents import base_agent
-    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
-    from src.main_graph.subgraphs.analysis.agents.vulnerability_agent import VulnerabilityAgent
+async def test_vulnerability_agent_run_extracts_all_audit_findings():
+    """run() audits the whole tree deterministically and takes every finding at
+    or above the configured severity — no LLM, no package sampling."""
+    from src.main_graph.subgraphs.analysis.agents import vulnerability_agent
 
-    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
-    final_decision = DomainAgentDecision(
-        tool_calls=[], findings=[finding],
-        summary="Found 1 CVE", confidence=0.9, finalize=True, reasoning="done",
-    )
-    mock_llm = MagicMock()
-    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=final_decision)
-    critic = AsyncMock(return_value=FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.9))
+    audit_output = {
+        "advisories": {
+            "1": {"module_name": "lodash", "severity": "high", "title": "Code injection",
+                  "vulnerable_versions": "<=4.17.23", "patched_versions": "<0.0.0",
+                  "cves": ["CVE-1"], "url": "https://x/1", "findings": [{"version": "4.17.21"}]},
+            "2": {"module_name": "form-data", "severity": "critical", "title": "Unsafe random",
+                  "vulnerable_versions": "<2.5.4", "patched_versions": ">=2.5.4",
+                  "cves": [], "url": "https://x/2", "findings": [{"version": "2.5.0"}]},
+        }
+    }
+    audit = AsyncMock(return_value=audit_output)
 
-    with patch("src.main_graph.subgraphs.analysis.agents.base_agent._llm", mock_llm), \
-         patch.object(base_agent, "critique_findings", critic):
-        bundle = await VulnerabilityAgent().run(_dispatch(), _prep())
+    with patch.object(vulnerability_agent, "npm_audit", audit), \
+         patch.object(vulnerability_agent.settings, "vuln_min_severity", "high"):
+        bundle = await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep())
 
     assert isinstance(bundle, EvidenceBundle)
-    assert bundle.domain == "vulnerabilities"
-    assert bundle.confidence == 0.9
-    assert len(bundle.findings) == 1
+    assert bundle.confidence == 1.0
+    assert bundle.packages_to_focus == []  # not sampled — whole tree
+    names = {f.dep_name for f in bundle.findings}
+    assert names == {"lodash", "form-data"}
+    assert bundle.findings[0].severity == "critical"  # sorted most-severe first
 
 
 @pytest.mark.asyncio
@@ -166,6 +171,32 @@ async def test_react_loop_critic_failure_degrades_to_pass():
 
     assert bundle.confidence == 0.9
     assert bundle.verification_note is None
+
+
+@pytest.mark.asyncio
+async def test_react_loop_survives_malformed_decision_then_recovers():
+    """A malformed structured-output response (e.g. LLM omits required fields)
+    must not crash the loop; it should retry the next iteration."""
+    from src.main_graph.subgraphs.analysis.agents import base_agent
+    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
+
+    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=[ValueError("2 validation errors for DomainAgentDecision"), _finalize_decision([finding])]
+    )
+    critic = AsyncMock(return_value=FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.9))
+
+    with patch.object(base_agent, "_llm", mock_llm), \
+         patch.object(base_agent, "critique_findings", critic):
+        bundle = await base_agent._react_loop(
+            _dispatch(), _prep(), [],
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+        )
+
+    assert bundle.findings == [finding]
+    assert bundle.confidence == 0.9
+    assert mock_llm.with_structured_output.return_value.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio

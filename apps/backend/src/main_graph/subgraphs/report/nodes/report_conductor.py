@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import textwrap
 
 from langchain_core.runnables import RunnableConfig
 
@@ -15,25 +16,26 @@ logger = logging.getLogger(__name__)
 _MAX_ITERATIONS = 6
 _llm = get_llm(Model.GPT_5_4_MINI)
 
-_SYSTEM = """\
-You are a technical report writer. You enrich dependency risk findings with:
-1. web_search — find safer alternatives and migration guides for risky packages
-2. code_impact — find which source files use each risky package
-3. get_findings — retrieve findings filtered by severity
+_SYSTEM = textwrap.dedent("""\
+    You are a technical report writer. You enrich dependency risk findings with:
+    1. web_search — find safer alternatives and migration guides for risky packages
+    2. code_impact — find which source files use each risky package
+    3. get_findings — retrieve findings filtered by severity
 
-For each high/critical finding, call both web_search and code_impact before finalizing.
-Output a ReportConductorDecision:
-- tool_calls: tools to run in parallel
-- finalize: true when all high/critical findings are enriched
-- reasoning: what you are doing
+    For each high/critical finding, call both web_search and code_impact
+    before finalizing.
+    Output a ReportConductorDecision:
+    - tool_calls: tools to run in parallel
+    - finalize: true when all high/critical findings are enriched
+    - reasoning: what you are doing
 
-After {max_iter} iterations, set finalize=true.
+    After {max_iter} iterations, set finalize=true.
 
-Available tools:
-- web_search(query): search for alternatives, CVE details, migration guides
-- code_impact(package_name): find source files importing the package
-- get_findings(severity): retrieve findings (severity: critical|high|medium|low|all)
-"""
+    Available tools:
+    - web_search(query): search for alternatives, CVE details, migration guides
+    - code_impact(package_name): find source files importing the package
+    - get_findings(severity): retrieve findings (severity: critical|high|medium|low|all)
+    """).strip()
 
 
 def _format_results(results: list[ToolResult]) -> str:

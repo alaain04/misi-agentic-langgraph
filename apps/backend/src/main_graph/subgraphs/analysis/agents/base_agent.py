@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import ClassVar
 
 from src.main_graph.subgraphs.analysis.agents.critique import critique_findings
+from src.main_graph.subgraphs.analysis.agents.dependency_versions import resolve_installed_versions
 from src.main_graph.tools.registry import TOOL_DESCRIPTIONS
 from src.main_graph.tools.search_code import make_search_code_tool
 from src.models.conductor import ToolCall, ToolResult
@@ -53,6 +54,13 @@ def _format_params(t) -> str:
             piece += f" = {p.default!r}"
         parts.append(piece)
     return ", ".join(parts)
+
+
+def _format_packages(names: list[str], dependency_graph: dict) -> str:
+    if not names:
+        return "all dependencies"
+    installed = resolve_installed_versions(names, dependency_graph)
+    return ", ".join(f"{n}@{installed[n]}" if n in installed else n for n in names)
 
 
 def _format_tools(tools: list) -> str:
@@ -130,23 +138,30 @@ async def _react_loop(
         system = textwrap.dedent(system_prompt).strip().format(
             domain=dispatch.domain,
             hypothesis=dispatch.hypothesis,
-            packages=", ".join(dispatch.packages_to_focus) or "all dependencies",
+            packages=_format_packages(dispatch.packages_to_focus, prep.dependency_graph),
             context=prep.discovery_summary[:500],
             tool_descriptions=_format_tools(tools),
             max_iter=_MAX_ITERATIONS,
         )
-        decision = await structured.ainvoke([
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
-        ])
+        try:
+            decision = await structured.ainvoke([
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ])
+        except Exception as exc:
+            logger.warning("structured decision failed, retrying: %s", exc)
+            continue
 
         last = iteration == _MAX_ITERATIONS - 1
         if decision.finalize or last:
             if not decision.findings:
                 confidence = decision.confidence
                 break
+            installed = resolve_installed_versions(
+                [f.dep_name for f in decision.findings], prep.dependency_graph
+            )
             try:
-                verdict = await critique_findings(dispatch, decision.findings)
+                verdict = await critique_findings(dispatch, decision.findings, installed)
             except Exception as exc:
                 logger.warning("critique_findings failed, accepting draft: %s", exc)
                 confidence = decision.confidence

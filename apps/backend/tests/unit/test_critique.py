@@ -18,7 +18,7 @@ def test_format_findings_marks_missing_evidence():
     from src.main_graph.subgraphs.analysis.agents.critique import _format_findings
 
     f = FindingNote(dep_name="express", severity="high", description="CVE-123", evidence=[])
-    rendered = _format_findings([f])
+    rendered = _format_findings([f], {})
     assert "express" in rendered
     assert "no evidence attached" in rendered
 
@@ -30,9 +30,17 @@ def test_format_findings_includes_snippets():
         dep_name="express", severity="high", description="CVE-123",
         evidence=[EvidenceRef(tool="npm_audit", url=None, log_snippet="advisory 1234 high")],
     )
-    rendered = _format_findings([f])
+    rendered = _format_findings([f], {})
     assert "advisory 1234 high" in rendered
     assert "npm_audit" in rendered
+
+
+def test_format_findings_annotates_installed_version():
+    from src.main_graph.subgraphs.analysis.agents.critique import _format_findings
+
+    f = FindingNote(dep_name="class-validator", severity="critical", description="CVE-123", evidence=[])
+    rendered = _format_findings([f], {"class-validator": "0.14.1"})
+    assert "(installed: 0.14.1)" in rendered
 
 
 @pytest.mark.asyncio
@@ -45,7 +53,7 @@ async def test_critique_findings_returns_verdict():
 
     f = FindingNote(dep_name="express", severity="high", description="CVE-123", evidence=[])
     with patch("src.main_graph.subgraphs.analysis.agents.critique._llm", mock_llm):
-        result = await critique_findings(_dispatch(), [f])
+        result = await critique_findings(_dispatch(), [f], {})
 
     assert result.ok is False
     assert result.calibrated_confidence == 0.2
