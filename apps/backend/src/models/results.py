@@ -51,6 +51,7 @@ class EvidenceBundle(BaseModel):
     findings: list[FindingNote]
     summary: str
     confidence: float
+    verification_note: str | None = None
 
 
 class AnalysisResult(BaseModel):

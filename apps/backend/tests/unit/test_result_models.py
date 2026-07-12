@@ -54,6 +54,19 @@ def test_domain_agent_decision():
     assert d.confidence == 0.85
 
 
+def test_evidence_bundle_verification_note_defaults_none():
+    b = EvidenceBundle(domain="d", hypothesis="h", findings=[], summary="s", confidence=0.5)
+    assert b.verification_note is None
+
+
+def test_evidence_bundle_accepts_verification_note():
+    b = EvidenceBundle(
+        domain="d", hypothesis="h", findings=[], summary="s",
+        confidence=0.3, verification_note="finding 1 lacks evidence",
+    )
+    assert b.verification_note == "finding 1 lacks evidence"
+
+
 def test_report_result_round_trip():
     r = ReportResult(
         job_id="j1", concern="outdated deps",
