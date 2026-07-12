@@ -24,6 +24,8 @@ def _dispatch(agent_type: str = "vulnerability_agent") -> AgentDispatch:
 
 @pytest.mark.asyncio
 async def test_agent_run_returns_bundle_on_finalize():
+    from src.main_graph.subgraphs.analysis.agents import base_agent
+    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
     from src.main_graph.subgraphs.analysis.agents.vulnerability_agent import VulnerabilityAgent
 
     finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
@@ -33,8 +35,10 @@ async def test_agent_run_returns_bundle_on_finalize():
     )
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=final_decision)
+    critic = AsyncMock(return_value=FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.9))
 
-    with patch("src.main_graph.subgraphs.analysis.agents.base_agent._llm", mock_llm):
+    with patch("src.main_graph.subgraphs.analysis.agents.base_agent._llm", mock_llm), \
+         patch.object(base_agent, "critique_findings", critic):
         bundle = await VulnerabilityAgent().run(_dispatch(), _prep())
 
     assert isinstance(bundle, EvidenceBundle)
@@ -78,3 +82,108 @@ def test_agent_get_tools_returns_list():
     tools = VulnerabilityAgent().get_tools(_prep())
     assert isinstance(tools, list)
     assert len(tools) > 0
+
+
+def _finalize_decision(findings, confidence=0.9):
+    return DomainAgentDecision(
+        tool_calls=[], findings=findings,
+        summary="draft", confidence=confidence, finalize=True, reasoning="done",
+    )
+
+
+@pytest.mark.asyncio
+async def test_react_loop_self_corrects_then_passes():
+    from src.main_graph.subgraphs.analysis.agents import base_agent
+    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
+
+    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_finalize_decision([finding])
+    )
+    critic = AsyncMock(side_effect=[
+        FindingsVerdict(ok=False, feedback="add evidence for express", calibrated_confidence=0.2),
+        FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.85),
+    ])
+
+    with patch.object(base_agent, "_llm", mock_llm), \
+         patch.object(base_agent, "critique_findings", critic):
+        bundle = await base_agent._react_loop(
+            _dispatch(), _prep(), [],
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+        )
+
+    assert bundle.confidence == 0.85
+    assert bundle.verification_note is None
+    assert critic.await_count == 2  # rejected once, re-verified after self-correction
+    assert mock_llm.with_structured_output.return_value.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_react_loop_attaches_note_when_budget_exhausted():
+    from src.main_graph.subgraphs.analysis.agents import base_agent
+    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
+
+    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_finalize_decision([finding])
+    )
+    critic = AsyncMock(return_value=FindingsVerdict(
+        ok=False, feedback="express finding unsupported", calibrated_confidence=0.1,
+    ))
+
+    with patch.object(base_agent, "_llm", mock_llm), \
+         patch.object(base_agent, "_MAX_ITERATIONS", 2), \
+         patch.object(base_agent, "critique_findings", critic):
+        bundle = await base_agent._react_loop(
+            _dispatch(), _prep(), [],
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+        )
+
+    assert bundle.findings == [finding]  # kept, not pruned
+    assert bundle.confidence == 0.1
+    assert bundle.verification_note == "express finding unsupported"
+
+
+@pytest.mark.asyncio
+async def test_react_loop_critic_failure_degrades_to_pass():
+    from src.main_graph.subgraphs.analysis.agents import base_agent
+
+    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_finalize_decision([finding], confidence=0.9)
+    )
+    critic = AsyncMock(side_effect=RuntimeError("critic down"))
+
+    with patch.object(base_agent, "_llm", mock_llm), \
+         patch.object(base_agent, "critique_findings", critic):
+        bundle = await base_agent._react_loop(
+            _dispatch(), _prep(), [],
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+        )
+
+    assert bundle.confidence == 0.9
+    assert bundle.verification_note is None
+
+
+@pytest.mark.asyncio
+async def test_react_loop_skips_critic_when_no_findings():
+    from src.main_graph.subgraphs.analysis.agents import base_agent
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_finalize_decision([], confidence=0.4)
+    )
+    critic = AsyncMock()
+
+    with patch.object(base_agent, "_llm", mock_llm), \
+         patch.object(base_agent, "critique_findings", critic):
+        bundle = await base_agent._react_loop(
+            _dispatch(), _prep(), [],
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+        )
+
+    assert bundle.confidence == 0.4
+    critic.assert_not_awaited()

@@ -9,6 +9,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
+from src.main_graph.subgraphs.analysis.agents.critique import critique_findings
 from src.main_graph.tools.registry import TOOL_DESCRIPTIONS
 from src.main_graph.tools.search_code import make_search_code_tool
 from src.models.conductor import ToolCall, ToolResult
@@ -99,6 +100,14 @@ async def _run_tool(tc: ToolCall, tool_map: dict, prep: PrepResult) -> ToolResul
                           duration_ms=int((time.monotonic() - start) * 1000))
 
 
+def _feedback_result(feedback: str) -> ToolResult:
+    """Wrap critic feedback as a tool result so the agent sees it next iteration."""
+    return ToolResult(
+        id=str(uuid.uuid4()), tool="verification_feedback", args={},
+        output={"feedback": feedback}, error=None, duration_ms=0,
+    )
+
+
 async def _react_loop(
     dispatch: AgentDispatch,
     prep: PrepResult,
@@ -108,6 +117,8 @@ async def _react_loop(
     tool_map = {(getattr(t, "name", None) or getattr(t, "__name__", repr(t))): t for t in tools}
     tool_results: list[ToolResult] = []
     decision: DomainAgentDecision | None = None
+    confidence = 0.0
+    note: str | None = None
 
     structured = _llm.with_structured_output(DomainAgentDecision, method="function_calling")
 
@@ -129,8 +140,26 @@ async def _react_loop(
             {"role": "user", "content": prompt},
         ])
 
-        if decision.finalize or iteration == _MAX_ITERATIONS - 1:
-            break
+        last = iteration == _MAX_ITERATIONS - 1
+        if decision.finalize or last:
+            if not decision.findings:
+                confidence = decision.confidence
+                break
+            try:
+                verdict = await critique_findings(dispatch, decision.findings)
+            except Exception as exc:
+                logger.warning("critique_findings failed, accepting draft: %s", exc)
+                confidence = decision.confidence
+                break
+            if verdict.ok:
+                confidence = verdict.calibrated_confidence
+                break
+            if last:
+                confidence = verdict.calibrated_confidence
+                note = verdict.feedback
+                break
+            tool_results.append(_feedback_result(verdict.feedback))
+            continue
 
         if decision.tool_calls:
             new_results = await asyncio.gather(
@@ -144,7 +173,8 @@ async def _react_loop(
         packages_to_focus=dispatch.packages_to_focus,
         findings=decision.findings if decision else [],
         summary=decision.summary if decision else "No results.",
-        confidence=decision.confidence if decision else 0.0,
+        confidence=confidence,
+        verification_note=note,
     )
 
 
