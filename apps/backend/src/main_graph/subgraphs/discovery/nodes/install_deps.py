@@ -11,6 +11,10 @@ from src.main_graph.subgraphs.discovery.state import DiscoveryState
 
 logger = logging.getLogger(__name__)
 
+_LOCK_FILE_NAMES = {
+    "pnpm": "pnpm-lock.yaml", "yarn": "yarn.lock", "npm": "package-lock.json",
+}
+
 
 def _install_command(pm: str, pm_version: str) -> str:
     if pm == "pnpm":
@@ -52,6 +56,7 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
     if rc != 0:
         logger.warning("install_deps: install failed rc=%d err=%s", rc, err[:300])
 
-    lock_created = os.path.exists(os.path.join(repo_path, "package-lock.json"))
+    lock_file = _LOCK_FILE_NAMES.get(pm, "package-lock.json")
+    lock_created = os.path.exists(os.path.join(repo_path, lock_file))
     logger.info("install_deps: lock_created=%s", lock_created)
     return {"has_lock_file": lock_created}

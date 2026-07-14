@@ -11,9 +11,9 @@ from src.main_graph.tools.registry import register
 logger = logging.getLogger(__name__)
 
 
-async def _run_npm(args: list[str], cwd: str) -> tuple[str, str]:
+async def _run_npm(args: list[str], cwd: str, executable: str = "npm") -> tuple[str, str]:
     proc = await asyncio.create_subprocess_exec(
-        "npm", *args,
+        executable, *args,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -39,10 +39,11 @@ async def npm_list(repo_path: str) -> dict:
         return {"error": str(exc)}
 
 
-@register("npm_audit", "Runs `npm audit --json`; returns vulnerabilities, severities, and affected packages")
-async def npm_audit(repo_path: str) -> dict:
+@register("npm_audit", "Runs the package manager's audit command (npm/pnpm/yarn); returns vulnerabilities, severities, and affected packages")
+async def npm_audit(repo_path: str, detected_package_manager: str = "npm") -> dict:
+    executable = detected_package_manager if detected_package_manager in ("pnpm", "yarn") else "npm"
     try:
-        stdout, _ = await _run_npm(["audit", "--json"], repo_path)
+        stdout, _ = await _run_npm(["audit", "--json"], repo_path, executable)
         return _safe_json(stdout)
     except Exception as exc:
         logger.warning("npm_audit failed: %s", exc)
