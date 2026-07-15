@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langgraph.types import Send
 
-from src.main_graph.subgraphs.analysis.agents.registry import AGENT_REGISTRY
+from src.main_graph.subgraphs.analysis.utils.registry import AGENT_REGISTRY
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 
 

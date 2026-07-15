@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.main_graph.subgraphs.analysis.agents.audit_parser import parse_audit_findings
+from src.main_graph.subgraphs.analysis.utils.audit_parser import parse_audit_findings
 
 # pnpm / npm v6 shape
 _ADVISORIES = {

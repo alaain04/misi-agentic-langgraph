@@ -79,7 +79,7 @@ async def test_agent_run_accepts_bare_async_functions():
 
 
 def test_registry_has_expected_agents():
-    from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
+    from src.main_graph.subgraphs.analysis.utils.registry import REGISTRY
     assert "vulnerability_agent" in REGISTRY
     assert "maintenance_agent" in REGISTRY
     assert "supply_chain_agent" in REGISTRY
@@ -103,7 +103,7 @@ def _finalize_decision(findings, confidence=0.9):
 @pytest.mark.asyncio
 async def test_react_loop_self_corrects_then_passes():
     from src.main_graph.subgraphs.analysis.agents import base_agent
-    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
+    from src.main_graph.subgraphs.analysis.agents.critique_agent import FindingsVerdict
 
     finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
     mock_llm = MagicMock()
@@ -133,7 +133,7 @@ async def test_react_loop_self_corrects_then_passes():
 @pytest.mark.asyncio
 async def test_react_loop_attaches_note_when_budget_exhausted():
     from src.main_graph.subgraphs.analysis.agents import base_agent
-    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
+    from src.main_graph.subgraphs.analysis.agents.critique_agent import FindingsVerdict
 
     finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
     mock_llm = MagicMock()
@@ -188,7 +188,7 @@ async def test_react_loop_survives_malformed_decision_then_recovers():
     """A malformed structured-output response (e.g. LLM omits required fields)
     must not crash the loop; it should retry the next iteration."""
     from src.main_graph.subgraphs.analysis.agents import base_agent
-    from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
+    from src.main_graph.subgraphs.analysis.agents.critique_agent import FindingsVerdict
 
     finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
     mock_llm = MagicMock()

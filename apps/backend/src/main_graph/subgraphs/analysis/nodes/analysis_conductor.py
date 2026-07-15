@@ -6,7 +6,7 @@ import textwrap
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
-from src.main_graph.subgraphs.analysis.agents.registry import get_agent_descriptions
+from src.main_graph.subgraphs.analysis.utils.registry import get_agent_descriptions
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.models.results import AnalysisConductorDecision, PrepResult
 from src.utils.llm import Model, get_llm

@@ -3,7 +3,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
+from src.main_graph.subgraphs.analysis.utils.registry import REGISTRY
 from src.main_graph.subgraphs.analysis.nodes.analysis_conductor import analysis_conductor
 from src.main_graph.subgraphs.analysis.nodes.domain_agent import domain_agent
 from src.main_graph.subgraphs.analysis.nodes.evidence_collector import evidence_collector

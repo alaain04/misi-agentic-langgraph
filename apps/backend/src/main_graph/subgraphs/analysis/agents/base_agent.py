@@ -9,8 +9,8 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
-from src.main_graph.subgraphs.analysis.agents.critique import critique_findings
-from src.main_graph.subgraphs.analysis.agents.dependency_versions import resolve_installed_versions
+from src.main_graph.subgraphs.analysis.agents.critique_agent import critique_findings
+from src.main_graph.subgraphs.analysis.utils.dependency_versions import resolve_installed_versions
 from src.main_graph.tools.registry import TOOL_DESCRIPTIONS
 from src.main_graph.tools.search_code import make_search_code_tool
 from src.models.conductor import ToolCall, ToolResult

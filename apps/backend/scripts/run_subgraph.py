@@ -37,6 +37,7 @@ async def _run_discovery(args) -> None:
     from src.db.result_dao import ResultDAO
     from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
     from src.main_graph.subgraphs.discovery.graph import build_discovery_subgraph
+    from src.services.job_dao import JobDAO
 
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
@@ -48,7 +49,7 @@ async def _run_discovery(args) -> None:
             "result_dao": dao,
             "container": container,
             "docker_tool": None,
-            "job_repo": None,
+            "job_repo": JobDAO(),
         }
     }
 
@@ -82,6 +83,7 @@ async def _run_discovery(args) -> None:
 async def _run_analysis(args) -> None:
     from src.db.result_dao import ResultDAO
     from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
+    from src.services.job_dao import JobDAO
 
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
@@ -91,7 +93,7 @@ async def _run_analysis(args) -> None:
             "result_dao": dao,
             "container": None,
             "docker_tool": None,
-            "job_repo": None,
+            "job_repo": JobDAO(),
         }
     }
 
@@ -121,6 +123,7 @@ async def _run_analysis(args) -> None:
 async def _run_report(args) -> None:
     from src.db.result_dao import ResultDAO
     from src.main_graph.subgraphs.report.graph import build_report_subgraph
+    from src.services.job_dao import JobDAO
 
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
@@ -130,7 +133,7 @@ async def _run_report(args) -> None:
             "result_dao": dao,
             "container": None,
             "docker_tool": None,
-            "job_repo": None,
+            "job_repo": JobDAO(),
         }
     }
 

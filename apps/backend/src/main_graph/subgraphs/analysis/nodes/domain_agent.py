@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
-from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
+from src.main_graph.subgraphs.analysis.utils.registry import REGISTRY
 from src.main_graph.subgraphs.analysis.agents.web_research_agent import WebResearchAgent
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.models.results import AgentCallRecord, AgentDispatch
