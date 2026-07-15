@@ -7,6 +7,7 @@ import textwrap
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
+from src.main_graph.subgraphs.report.utils.registry import REPORT_TOOL_DESCRIPTIONS
 from src.models.conductor import FindingNote, ToolResult
 from src.models.results import AnalysisResult, ReportConductorDecision
 from src.utils.llm import Model, get_llm
@@ -16,11 +17,9 @@ logger = logging.getLogger(__name__)
 _MAX_ITERATIONS = 6
 _llm = get_llm(Model.GPT_5_4_MINI)
 
-_SYSTEM = textwrap.dedent("""\
-    You are a technical report writer. You enrich dependency risk findings with:
-    1. web_search — find safer alternatives and migration guides for risky packages
-    2. code_impact — find which source files use each risky package
-    3. get_findings — retrieve findings filtered by severity
+_SYSTEM_TEMPLATE = textwrap.dedent("""\
+    You are a technical report writer. You enrich dependency risk findings using
+    the tools below.
 
     For each high/critical finding, call both web_search and code_impact
     before finalizing.
@@ -32,10 +31,15 @@ _SYSTEM = textwrap.dedent("""\
     After {max_iter} iterations, set finalize=true.
 
     Available tools:
-    - web_search(query): search for alternatives, CVE details, migration guides
-    - code_impact(package_name): find source files importing the package
-    - get_findings(severity): retrieve findings (severity: critical|high|medium|low|all)
+    {roster}
     """).strip()
+
+
+def _build_system(max_iter: int) -> str:
+    roster = "\n".join(
+        f"- {name}: {desc}" for name, desc in REPORT_TOOL_DESCRIPTIONS.items()
+    )
+    return _SYSTEM_TEMPLATE.format(roster=roster, max_iter=max_iter)
 
 
 def _format_results(results: list[ToolResult]) -> str:
@@ -43,7 +47,10 @@ def _format_results(results: list[ToolResult]) -> str:
         return "No tool results yet."
     parts = []
     for tr in results[-15:]:
-        val = f"ERROR: {tr.error}" if tr.error else json.dumps(tr.output, indent=2)[:1500]
+        if tr.error:
+            val = f"ERROR: {tr.error}"
+        else:
+            val = json.dumps(tr.output, indent=2)[:1500]
         parts.append(f"[{tr.tool}] → {val}")
     return "\n\n".join(parts)
 
@@ -67,8 +74,10 @@ async def report_conductor(state, config: RunnableConfig) -> dict:
         f"Tool results so far:\n{_format_results(state.get('tool_results') or [])}\n\n"
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"
     )
-    system = _SYSTEM.format(max_iter=_MAX_ITERATIONS)
-    structured = _llm.with_structured_output(ReportConductorDecision, method="function_calling")
+    system = _build_system(_MAX_ITERATIONS)
+    structured = _llm.with_structured_output(
+        ReportConductorDecision, method="function_calling"
+    )
     decision: ReportConductorDecision = await structured.ainvoke([
         {"role": "system", "content": system},
         {"role": "user", "content": user_prompt},
