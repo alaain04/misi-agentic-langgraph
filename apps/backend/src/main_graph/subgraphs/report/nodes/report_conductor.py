@@ -47,10 +47,11 @@ def _format_results(results: list[ToolResult]) -> str:
         return "No tool results yet."
     parts = []
     for tr in results[-15:]:
-        if tr.error:
-            val = f"ERROR: {tr.error}"
-        else:
-            val = json.dumps(tr.output, indent=2)[:1500]
+        val = (
+            f"ERROR: {tr.error}"
+            if tr.error
+            else json.dumps(tr.output, indent=2)[:1500]
+        )
         parts.append(f"[{tr.tool}] → {val}")
     return "\n\n".join(parts)
 
