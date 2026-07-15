@@ -8,35 +8,23 @@ import uuid
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
-from src.main_graph.tools.code_impact import make_code_impact_tool
-from src.main_graph.tools.external_api import web_search
+from src.main_graph.subgraphs.report.utils.registry import REPORT_TOOL_HANDLERS
 from src.models.conductor import ToolCall, ToolResult
 from src.models.results import AnalysisResult, PrepResult
 
 logger = logging.getLogger(__name__)
 
 
-async def _get_findings_tool(severity: str, analysis: AnalysisResult) -> dict:
-    findings = analysis.findings
-    if severity != "all":
-        findings = [f for f in findings if f.severity == severity]
-    return {"findings": [f.model_dump() for f in findings]}
-
-
-async def _run_one(tc: ToolCall, prep: PrepResult, analysis: AnalysisResult) -> ToolResult:
+async def _run_one(
+    tc: ToolCall, prep: PrepResult, analysis: AnalysisResult
+) -> ToolResult:
     start = time.monotonic()
+    handler = REPORT_TOOL_HANDLERS.get(tc.tool)
     try:
-        if tc.tool == "get_findings":
-            output = await _get_findings_tool(tc.args.get("severity", "all"), analysis)
-        elif tc.tool == "web_search":
-            output = await web_search(**tc.args)
-        elif tc.tool == "code_impact":
-            impact_tool = make_code_impact_tool(prep.vector_store_id)
-            output = await impact_tool.ainvoke(tc.args)
-            if not isinstance(output, dict):
-                output = {"results": output}
-        else:
+        if handler is None:
             output = {"error": f"unknown tool: {tc.tool}"}
+        else:
+            output = await handler(tc.args, prep, analysis)
         return ToolResult(
             id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
             output=output, error=None,
