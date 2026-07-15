@@ -100,3 +100,10 @@ class ReportResult(BaseModel):
     overall_risk_level: str
     findings: list[ReportFinding]
     recommendations: list[str]
+
+
+class ReportDraft(BaseModel):
+    executive_summary: str
+    overall_risk_level: str
+    findings: list[ReportFinding] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)

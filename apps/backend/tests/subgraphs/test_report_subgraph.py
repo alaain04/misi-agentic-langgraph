@@ -13,19 +13,19 @@ What is mocked:
 """
 from __future__ import annotations
 
-import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.models.conductor import FindingNote
-from src.models.results import AnalysisResult
-from src.models.results import ReportConductorDecision
 from src.main_graph.subgraphs.report.graph import build_report_subgraph
+from src.models.conductor import FindingNote
+from src.models.results import AnalysisResult, ReportConductorDecision, ReportDraft
 
 
-def _seed_analysis(job_id: str, findings: list[FindingNote] | None = None) -> AnalysisResult:
+def _seed_analysis(
+    job_id: str, findings: list[FindingNote] | None = None
+) -> AnalysisResult:
     if findings is None:
         findings = [
             FindingNote(
@@ -59,10 +59,10 @@ def _make_conductor_llm(decision: ReportConductorDecision):
 
 
 def _make_save_llm(report_json: dict):
-    response = MagicMock()
-    response.content = json.dumps(report_json)
+    chain = MagicMock()
+    chain.ainvoke = AsyncMock(return_value=ReportDraft(**report_json))
     llm = MagicMock()
-    llm.ainvoke = AsyncMock(return_value=response)
+    llm.with_structured_output = MagicMock(return_value=chain)
     return llm
 
 
@@ -75,7 +75,9 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
     await result_dao.save_analysis(analysis)
 
     report_payload = {
-        "executive_summary": "lodash has a known prototype pollution CVE. Update to 4.17.21.",
+        "executive_summary": (
+            "lodash has a known prototype pollution CVE. Update to 4.17.21."
+        ),
         "overall_risk_level": "high",
         "findings": [
             {
@@ -95,7 +97,9 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
         patch(
             "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
             _make_conductor_llm(
-                ReportConductorDecision(tool_calls=[], finalize=True, reasoning="no enrichment needed")
+                ReportConductorDecision(
+                    tool_calls=[], finalize=True, reasoning="no enrichment needed"
+                )
             ),
         ),
         patch(
@@ -127,7 +131,9 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
 
 
 @pytest.mark.asyncio
-async def test_report_overall_risk_derived_from_findings_on_llm_failure(subgraph_config, result_dao):
+async def test_report_overall_risk_derived_from_findings_on_llm_failure(
+    subgraph_config, result_dao
+):
     """
     When the LLM returns unparseable JSON, save_report_result falls back to
     mapping findings directly and derives overall_risk_level from severity.
@@ -145,8 +151,12 @@ async def test_report_overall_risk_derived_from_findings_on_llm_failure(subgraph
     analysis = _seed_analysis(job_id, findings=findings)
     await result_dao.save_analysis(analysis)
 
+    broken_chain = MagicMock()
+    broken_chain.ainvoke = AsyncMock(
+        side_effect=ValueError("invalid structured output")
+    )
     broken_llm = MagicMock()
-    broken_llm.ainvoke = AsyncMock(return_value=MagicMock(content="not-valid-json {"))
+    broken_llm.with_structured_output = MagicMock(return_value=broken_chain)
 
     with (
         patch(
@@ -181,7 +191,7 @@ async def test_report_overall_risk_derived_from_findings_on_llm_failure(subgraph
 
 @pytest.mark.asyncio
 async def test_report_with_empty_findings(subgraph_config, result_dao):
-    """When analysis has no findings, the report is saved with no findings and risk=none."""
+    """When analysis has no findings, the report is saved with risk=none."""
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
 
     analysis = _seed_analysis(job_id, findings=[])
@@ -198,7 +208,9 @@ async def test_report_with_empty_findings(subgraph_config, result_dao):
         patch(
             "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
             _make_conductor_llm(
-                ReportConductorDecision(tool_calls=[], finalize=True, reasoning="nothing to enrich")
+                ReportConductorDecision(
+                    tool_calls=[], finalize=True, reasoning="nothing to enrich"
+                )
             ),
         ),
         patch(
