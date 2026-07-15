@@ -129,6 +129,11 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
     assert report.executive_summary
     assert len(report.recommendations) > 0
 
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    job_repo.update_artifact_data.assert_awaited_once_with(
+        job_id, "report", {"tool_results": []}
+    )
+
 
 @pytest.mark.asyncio
 async def test_report_overall_risk_derived_from_findings_on_llm_failure(

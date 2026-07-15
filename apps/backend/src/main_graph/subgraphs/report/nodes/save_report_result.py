@@ -6,6 +6,7 @@ import logging
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
+from src.main_graph.constants import REPORT
 from src.models.conductor import ToolResult
 from src.models.results import AnalysisResult, ReportDraft, ReportFinding, ReportResult
 from src.utils.llm import Model, get_llm
@@ -35,7 +36,9 @@ def _format_enrichment(tool_results: list[ToolResult]) -> str:
 
 
 async def save_report_result(state, config: RunnableConfig) -> dict:
-    dao = get_services(config)["result_dao"]
+    services = get_services(config)
+    dao = services["result_dao"]
+    job_repo = services["job_repo"]
     analysis: AnalysisResult = await dao.get_analysis(state["analysis_result_id"])
     tool_results: list[ToolResult] = state.get("tool_results") or []
 
@@ -84,6 +87,13 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
         recommendations=recommendations,
     )
     report_result_id = await dao.save_report(result)
+
+    await job_repo.update_artifact_data(
+        state["job_id"],
+        REPORT,
+        {"tool_results": [tr.model_dump() for tr in tool_results]},
+    )
+
     logger.info("save_report_result: saved report_result_id=%s findings=%d",
                 report_result_id, len(findings))
     return {"report_result_id": report_result_id}
