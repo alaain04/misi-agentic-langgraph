@@ -3,12 +3,12 @@ Blackbox integration test for the report subgraph.
 
 What is real:
 - save_report_result (MongoDB persistence via testcontainer)
-- ReportResult construction from LLM JSON response
+- ReportResult construction from structured LLM output (ReportDraft)
 - Severity-based overall_risk_level derivation (pure Python, no mocks)
 
 What is mocked:
 - report_conductor._llm (controlled finalize decision)
-- save_report_result._llm (returns canned JSON report)
+- save_report_result._llm (returns a canned ReportDraft via with_structured_output)
 - AnalysisResult is seeded directly into MongoDB (no analysis run needed)
 """
 from __future__ import annotations
