@@ -52,7 +52,7 @@ async def test_critique_findings_returns_verdict():
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=verdict)
 
     f = FindingNote(dep_name="express", severity="high", description="CVE-123", evidence=[])
-    with patch("src.main_graph.subgraphs.analysis.agents.critique._llm", mock_llm):
+    with patch("src.main_graph.subgraphs.analysis.agents.critique_agent._llm", mock_llm):
         result = await critique_findings(_dispatch(), [f], {})
 
     assert result.ok is False
