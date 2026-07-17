@@ -1,6 +1,5 @@
 import json
-import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,34 +7,54 @@ import src.main_graph.tools.npm_cli  # trigger registration
 from src.main_graph.tools.registry import TOOL_REGISTRY
 
 
+def _container(stdout: str = "", stderr: str = "", rc: int = 0) -> AsyncMock:
+    container = AsyncMock()
+    container.run.return_value = (rc, stdout, stderr)
+    return container
+
+
 @pytest.mark.asyncio
-async def test_npm_list_parses_json_output():
+async def test_npm_list_runs_inside_container():
     fake_output = '{"version": "1.0.0", "dependencies": {"lodash": {"version": "4.17.21"}}}'
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(fake_output, ""))):
-        result = await TOOL_REGISTRY["npm_list"](repo_path="/tmp/repo")
+    container = _container(stdout=fake_output)
+    result = await TOOL_REGISTRY["npm_list"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine"
+    )
     assert result["dependencies"]["lodash"]["version"] == "4.17.21"
+    container.run.assert_awaited_once()
+    _, kwargs = container.run.call_args
+    assert kwargs["image"] == "node:lts-alpine"
+    assert kwargs["volume"] == "/tmp/repo:/workspace"
+    assert "npm list --json --all" in kwargs["command"]
 
 
 @pytest.mark.asyncio
 async def test_npm_list_returns_error_on_failure():
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(side_effect=Exception("cmd failed"))):
-        result = await TOOL_REGISTRY["npm_list"](repo_path="/tmp/repo")
+    container = AsyncMock()
+    container.run.side_effect = Exception("container failed")
+    result = await TOOL_REGISTRY["npm_list"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine"
+    )
     assert "error" in result
 
 
 @pytest.mark.asyncio
 async def test_npm_audit_parses_vulnerabilities():
     fake_output = '{"vulnerabilities": {"lodash": {"severity": "high", "name": "lodash"}}, "metadata": {"vulnerabilities": {"high": 1}}}'
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(fake_output, ""))):
-        result = await TOOL_REGISTRY["npm_audit"](repo_path="/tmp/repo")
+    container = _container(stdout=fake_output)
+    result = await TOOL_REGISTRY["npm_audit"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine"
+    )
     assert result["metadata"]["vulnerabilities"]["high"] == 1
 
 
 @pytest.mark.asyncio
 async def test_npm_outdated_parses_output():
     fake_output = '{"lodash": {"current": "4.17.20", "latest": "4.17.21", "wanted": "4.17.21"}}'
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(fake_output, ""))):
-        result = await TOOL_REGISTRY["npm_outdated"](repo_path="/tmp/repo")
+    container = _container(stdout=fake_output)
+    result = await TOOL_REGISTRY["npm_outdated"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine"
+    )
     assert "lodash" in result["outdated"]
 
 
@@ -57,13 +76,15 @@ def repo_with_pkg(tmp_path):
 
 @pytest.mark.asyncio
 async def test_resolve_transitive_parent_direct_dep(repo_with_pkg):
-    """express is a direct dep — is_direct should be True."""
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=("{}", ""))):
-        result = await TOOL_REGISTRY["resolve_transitive_parent"](
-            repo_path=repo_with_pkg, package_name="express"
-        )
+    """express is a direct dep — is_direct should be True, and no container run is needed."""
+    container = _container(stdout="{}")
+    result = await TOOL_REGISTRY["resolve_transitive_parent"](
+        repo_path=repo_with_pkg, package_name="express",
+        container=container, docker_image="node:lts-alpine",
+    )
     assert result["is_direct"] is True
     assert result["brought_in_by"] == []
+    container.run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -80,10 +101,11 @@ async def test_resolve_transitive_parent_transitive_dep(repo_with_pkg):
             }
         }
     })
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(npm_tree, ""))):
-        result = await TOOL_REGISTRY["resolve_transitive_parent"](
-            repo_path=repo_with_pkg, package_name="accepts"
-        )
+    container = _container(stdout=npm_tree)
+    result = await TOOL_REGISTRY["resolve_transitive_parent"](
+        repo_path=repo_with_pkg, package_name="accepts",
+        container=container, docker_image="node:lts-alpine",
+    )
     assert result["is_direct"] is False
     assert "express" in result["brought_in_by"]
 
@@ -92,9 +114,10 @@ async def test_resolve_transitive_parent_transitive_dep(repo_with_pkg):
 async def test_resolve_transitive_parent_unknown_package(repo_with_pkg):
     """Package not found anywhere returns empty parents."""
     npm_tree = json.dumps({"name": "my-app", "dependencies": {}})
-    with patch("src.main_graph.tools.npm_cli._run_npm", new=AsyncMock(return_value=(npm_tree, ""))):
-        result = await TOOL_REGISTRY["resolve_transitive_parent"](
-            repo_path=repo_with_pkg, package_name="ghost-package"
-        )
+    container = _container(stdout=npm_tree)
+    result = await TOOL_REGISTRY["resolve_transitive_parent"](
+        repo_path=repo_with_pkg, package_name="ghost-package",
+        container=container, docker_image="node:lts-alpine",
+    )
     assert result["is_direct"] is False
     assert result["brought_in_by"] == []
