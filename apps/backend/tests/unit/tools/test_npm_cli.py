@@ -49,6 +49,38 @@ async def test_npm_audit_parses_vulnerabilities():
 
 
 @pytest.mark.asyncio
+async def test_npm_audit_uses_npm_by_default():
+    container = _container(stdout="{}")
+    await TOOL_REGISTRY["npm_audit"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine"
+    )
+    _, kwargs = container.run.call_args
+    assert kwargs["command"].startswith("cd /workspace && npm audit")
+
+
+@pytest.mark.asyncio
+async def test_npm_audit_uses_pnpm_executable_when_detected():
+    container = _container(stdout="{}")
+    await TOOL_REGISTRY["npm_audit"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine",
+        detected_package_manager="pnpm",
+    )
+    _, kwargs = container.run.call_args
+    assert kwargs["command"].startswith("cd /workspace && pnpm audit")
+
+
+@pytest.mark.asyncio
+async def test_npm_audit_falls_back_to_npm_for_unknown_manager():
+    container = _container(stdout="{}")
+    await TOOL_REGISTRY["npm_audit"](
+        repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine",
+        detected_package_manager="bun",
+    )
+    _, kwargs = container.run.call_args
+    assert kwargs["command"].startswith("cd /workspace && npm audit")
+
+
+@pytest.mark.asyncio
 async def test_npm_outdated_parses_output():
     fake_output = '{"lodash": {"current": "4.17.20", "latest": "4.17.21", "wanted": "4.17.21"}}'
     container = _container(stdout=fake_output)

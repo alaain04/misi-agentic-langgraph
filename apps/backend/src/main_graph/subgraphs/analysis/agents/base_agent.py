@@ -9,6 +9,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
+from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.critique import critique_findings
 from src.main_graph.subgraphs.analysis.agents.dependency_versions import resolve_installed_versions
 from src.main_graph.tools.registry import TOOL_DESCRIPTIONS
@@ -21,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 6
 _llm = get_llm(Model.GPT_5_4_MINI)
+
+_INJECTED_PARAMS = {"repo_path", "detected_package_manager", "container", "docker_image"}
 
 
 def _format_params(t) -> str:
@@ -40,7 +43,7 @@ def _format_params(t) -> str:
         return ""
     parts = []
     for p in sig.parameters.values():
-        if p.name in ("repo_path", "detected_package_manager"):  # auto-injected by _run_tool, not supplied by the LLM
+        if p.name in _INJECTED_PARAMS:  # auto-injected by _run_tool, not supplied by the LLM
             continue
         ann = p.annotation
         if ann is inspect.Parameter.empty:
@@ -83,7 +86,9 @@ def _format_results(results: list[ToolResult]) -> str:
     return "\n\n".join(parts)
 
 
-async def _run_tool(tc: ToolCall, tool_map: dict, prep: PrepResult) -> ToolResult:
+async def _run_tool(
+    tc: ToolCall, tool_map: dict, prep: PrepResult, container: ContainerRunPort | None = None,
+) -> ToolResult:
     import inspect
     start = time.monotonic()
     fn = tool_map.get(tc.tool)
@@ -97,6 +102,10 @@ async def _run_tool(tc: ToolCall, tool_map: dict, prep: PrepResult) -> ToolResul
             kwargs["repo_path"] = prep.repo_path
         if "detected_package_manager" in sig.parameters:
             kwargs["detected_package_manager"] = prep.detected_package_manager
+        if "container" in sig.parameters:
+            kwargs["container"] = container
+        if "docker_image" in sig.parameters:
+            kwargs["docker_image"] = prep.docker_image
         output = await fn.ainvoke(kwargs) if hasattr(fn, "ainvoke") else await fn(**kwargs)
         return ToolResult(id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
                           output=output if isinstance(output, dict) else {"result": output},
@@ -121,6 +130,7 @@ async def _react_loop(
     prep: PrepResult,
     tools: list,
     system_prompt: str,
+    container: ContainerRunPort | None = None,
 ) -> tuple[EvidenceBundle, list[str], int]:
     tool_map = {(getattr(t, "name", None) or getattr(t, "__name__", repr(t))): t for t in tools}
     tool_results: list[ToolResult] = []
@@ -179,7 +189,7 @@ async def _react_loop(
 
         if decision.tool_calls:
             new_results = await asyncio.gather(
-                *[_run_tool(tc, tool_map, prep) for tc in decision.tool_calls]
+                *[_run_tool(tc, tool_map, prep, container) for tc in decision.tool_calls]
             )
             tool_results.extend(new_results)
 
@@ -209,5 +219,7 @@ class BaseAgent(ABC):
             tools.append(make_search_code_tool(prep.vector_store_id))
         return tools
 
-    async def run(self, dispatch: AgentDispatch, prep: PrepResult) -> tuple[EvidenceBundle, list[str], int]:
-        return await _react_loop(dispatch, prep, self.get_tools(prep), self.system_prompt)
+    async def run(
+        self, dispatch: AgentDispatch, prep: PrepResult, container: ContainerRunPort | None = None,
+    ) -> tuple[EvidenceBundle, list[str], int]:
+        return await _react_loop(dispatch, prep, self.get_tools(prep), self.system_prompt, container)

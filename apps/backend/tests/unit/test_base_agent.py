@@ -55,6 +55,22 @@ async def test_vulnerability_agent_run_extracts_all_audit_findings():
 
 
 @pytest.mark.asyncio
+async def test_vulnerability_agent_run_passes_container_and_docker_image():
+    """run() forwards the injected container port and the prep's docker_image to npm_audit."""
+    from src.main_graph.subgraphs.analysis.agents import vulnerability_agent
+
+    audit = AsyncMock(return_value={"advisories": {}})
+    fake_container = AsyncMock()
+
+    with patch.object(vulnerability_agent, "npm_audit", audit):
+        await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep(), fake_container)
+
+    _, kwargs = audit.call_args
+    assert kwargs["container"] is fake_container
+    assert kwargs["docker_image"] == _prep().docker_image
+
+
+@pytest.mark.asyncio
 async def test_agent_run_accepts_bare_async_functions():
     """Bare async functions (no .name attr) must not crash the react loop."""
     from src.main_graph.subgraphs.analysis.agents.base_agent import _react_loop
@@ -76,6 +92,41 @@ async def test_agent_run_accepts_bare_async_functions():
     assert bundle.domain == "vulnerabilities"
     assert tools_used == []
     assert react_iterations == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tool_injects_container_and_docker_image():
+    from src.main_graph.subgraphs.analysis.agents.base_agent import _run_tool
+    from src.models.conductor import ToolCall
+
+    received_kwargs: dict = {}
+
+    async def container_tool(container, docker_image) -> dict:
+        received_kwargs["container"] = container
+        received_kwargs["docker_image"] = docker_image
+        return {"ok": True}
+
+    fake_container = AsyncMock()
+    tc = ToolCall(tool="container_tool", args={}, reason="test")
+    result = await _run_tool(tc, {"container_tool": container_tool}, _prep(), fake_container)
+
+    assert result.error is None
+    assert received_kwargs["container"] is fake_container
+    assert received_kwargs["docker_image"] == _prep().docker_image
+
+
+def test_format_params_excludes_injected_params():
+    from src.main_graph.subgraphs.analysis.agents.base_agent import _format_params
+
+    async def some_tool(package_name: str, repo_path: str, detected_package_manager: str,
+                         container, docker_image: str) -> dict: ...
+
+    sig = _format_params(some_tool)
+    assert "package_name" in sig
+    assert "repo_path" not in sig
+    assert "detected_package_manager" not in sig
+    assert "container" not in sig
+    assert "docker_image" not in sig
 
 
 def test_registry_has_expected_agents():

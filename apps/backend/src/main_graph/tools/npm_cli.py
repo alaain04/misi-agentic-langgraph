@@ -14,9 +14,10 @@ _DEFAULT_IMAGE = "node:lts-alpine"
 
 
 async def _run_npm(
-    args: list[str], repo_path: str, container: ContainerRunPort, docker_image: str
+    args: list[str], repo_path: str, container: ContainerRunPort, docker_image: str,
+    executable: str = "npm",
 ) -> tuple[str, str]:
-    command = "cd /workspace && npm " + " ".join(args)
+    command = f"cd /workspace && {executable} " + " ".join(args)
     volume = f"{repo_path}:/workspace"
     _rc, stdout, stderr = await container.run(
         image=docker_image, command=command, volume=volume, run_as_root=True
@@ -41,10 +42,14 @@ async def npm_list(repo_path: str, container: ContainerRunPort, docker_image: st
         return {"error": str(exc)}
 
 
-@register("npm_audit", "Runs `npm audit --json`; returns vulnerabilities, severities, and affected packages")
-async def npm_audit(repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE) -> dict:
+@register("npm_audit", "Runs the package manager's audit command (npm/pnpm/yarn); returns vulnerabilities, severities, and affected packages")
+async def npm_audit(
+    repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE,
+    detected_package_manager: str = "npm",
+) -> dict:
+    executable = detected_package_manager if detected_package_manager in ("pnpm", "yarn") else "npm"
     try:
-        stdout, _ = await _run_npm(["audit", "--json"], repo_path, container, docker_image)
+        stdout, _ = await _run_npm(["audit", "--json"], repo_path, container, docker_image, executable)
         return _safe_json(stdout)
     except Exception as exc:
         logger.warning("npm_audit failed: %s", exc)

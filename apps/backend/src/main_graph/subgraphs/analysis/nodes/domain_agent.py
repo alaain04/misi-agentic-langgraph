@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 async def domain_agent(state: AnalysisState, config: RunnableConfig) -> dict:
-    dao = get_services(config)["result_dao"]
+    svc = get_services(config)
+    dao = svc["result_dao"]
+    container = svc["container"]
     prep = await dao.get_prep(state["prep_result_id"])
     dispatch = AgentDispatch(**state["current_dispatch"])
 
@@ -26,7 +28,7 @@ async def domain_agent(state: AnalysisState, config: RunnableConfig) -> dict:
                 dispatch.agent_type, dispatch.domain, dispatch.hypothesis[:60])
 
     started_at = datetime.now(UTC).isoformat()
-    bundle, tools_used, react_iterations = await agent.run(dispatch, prep)
+    bundle, tools_used, react_iterations = await agent.run(dispatch, prep, container)
     finished_at = datetime.now(UTC).isoformat()
 
     bundle_id = await dao.save_bundle(bundle)
