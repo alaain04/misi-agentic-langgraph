@@ -10,7 +10,10 @@ from src.models.results import ReportFinding
 
 def _original() -> FindingNote:
     return FindingNote(
-        dep_name="left-pad", severity="high", description="GPL-incompatible", evidence=[]
+        dep_name="left-pad",
+        severity="high",
+        description="GPL-incompatible",
+        evidence=[],
     )
 
 

@@ -25,7 +25,10 @@ def _prep(**overrides) -> PrepResult:
 
 def _finding() -> FindingNote:
     return FindingNote(
-        dep_name="left-pad", severity="high", description="GPL-incompatible", evidence=[]
+        dep_name="left-pad",
+        severity="high",
+        description="GPL-incompatible",
+        evidence=[],
     )
 
 
