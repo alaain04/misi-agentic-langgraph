@@ -222,6 +222,8 @@ async def enrich_finding(
                     ]
                 ),
             )
+        except AssertionError:
+            raise
         except Exception as exc:
             logger.warning(
                 "finding_enricher: structured decision failed, retrying: %s", exc
