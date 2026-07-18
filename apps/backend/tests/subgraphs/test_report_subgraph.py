@@ -77,7 +77,9 @@ def _make_enricher_llm(decisions_by_dep: dict[str, FindingEnrichmentDecision]):
         for dep, decision in decisions_by_dep.items():
             if f"package: {dep}" in system:
                 return decision
-        raise AssertionError(f"no mocked decision matched system prompt: {system[:200]}")
+        raise AssertionError(
+            f"no mocked decision matched system prompt: {system[:200]}"
+        )
 
     chain = MagicMock()
     chain.ainvoke = AsyncMock(side_effect=_ainvoke)
@@ -198,7 +200,9 @@ async def test_report_drops_low_severity_findings_before_enrichment(
     high finding's decision needs to be mocked."""
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
     findings = [
-        FindingNote(dep_name="lodash", severity="high", description="high risk", evidence=[]),
+        FindingNote(
+            dep_name="lodash", severity="high", description="high risk", evidence=[]
+        ),
         FindingNote(
             dep_name="axios", severity="medium", description="medium risk", evidence=[]
         ),
