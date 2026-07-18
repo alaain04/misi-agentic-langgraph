@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import textwrap
+from typing import cast
 
 from langchain_core.runnables import RunnableConfig
 
@@ -63,9 +64,7 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
 
 
 def _build_system(max_iter: int) -> str:
-    roster = "\n".join(
-        f"- {k}: {v}" for k, v in get_agent_descriptions().items()
-    )
+    roster = "\n".join(f"- {k}: {v}" for k, v in get_agent_descriptions().items())
     return _SYSTEM_TEMPLATE.format(roster=roster, max_iter=max_iter)
 
 
@@ -110,17 +109,26 @@ async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> di
     )
 
     system = _build_system(_MAX_ITERATIONS)
-    structured = _llm.with_structured_output(AnalysisConductorDecision, method="function_calling")
-    decision: AnalysisConductorDecision = await structured.ainvoke([
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_prompt},
-    ])
+    structured = _llm.with_structured_output(
+        AnalysisConductorDecision, method="function_calling"
+    )
+    decision = cast(
+        AnalysisConductorDecision,
+        await structured.ainvoke(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ]
+        ),
+    )
 
     if iteration >= _MAX_ITERATIONS:
         decision = decision.model_copy(update={"finalize": True})
 
     logger.info(
         "analysis_conductor: iteration=%d dispatches=%d finalize=%s",
-        iteration, len(decision.dispatches), decision.finalize,
+        iteration,
+        len(decision.dispatches),
+        decision.finalize,
     )
     return {"conductor_decision": decision, "conductor_iteration": iteration}

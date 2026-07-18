@@ -23,7 +23,9 @@ async def _get_findings_tool(severity: str, analysis: AnalysisResult) -> dict:
     return {"findings": [f.model_dump() for f in findings]}
 
 
-async def _run_one(tc: ToolCall, prep: PrepResult, analysis: AnalysisResult) -> ToolResult:
+async def _run_one(
+    tc: ToolCall, prep: PrepResult, analysis: AnalysisResult
+) -> ToolResult:
     start = time.monotonic()
     try:
         if tc.tool == "get_findings":
@@ -38,15 +40,21 @@ async def _run_one(tc: ToolCall, prep: PrepResult, analysis: AnalysisResult) -> 
         else:
             output = {"error": f"unknown tool: {tc.tool}"}
         return ToolResult(
-            id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
-            output=output, error=None,
+            id=str(uuid.uuid4()),
+            tool=tc.tool,
+            args=tc.args,
+            output=output,
+            error=None,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
     except Exception as exc:
         logger.warning("report_tool_runner: tool=%s error=%s", tc.tool, exc)
         return ToolResult(
-            id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
-            output={}, error=str(exc),
+            id=str(uuid.uuid4()),
+            tool=tc.tool,
+            args=tc.args,
+            output={},
+            error=str(exc),
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 

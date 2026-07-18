@@ -1,17 +1,20 @@
 from __future__ import annotations
+
 import logging
 import os
 import uuid
+
 from langchain_core.documents import Document
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from src.main_graph.tools.search_code import set_vector_store, _SOURCE_EXTENSIONS
+
+from src.main_graph.tools.search_code import _SOURCE_EXTENSIONS, set_vector_store
 from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
-_embeddings = OpenAIEmbeddings(api_key=settings.openai_api_key)
+_embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
 _splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
 
 _MAX_FILES = 200
@@ -64,5 +67,7 @@ async def index_repository(state: dict) -> dict:
         await store.aadd_documents(docs)
 
     set_vector_store(vector_store_id, store)
-    logger.info("index_repository: vector_store_id=%s docs=%d", vector_store_id, len(docs))
+    logger.info(
+        "index_repository: vector_store_id=%s docs=%d", vector_store_id, len(docs)
+    )
     return {"vector_store_id": vector_store_id}

@@ -4,10 +4,16 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
-from src.main_graph.subgraphs.analysis.nodes.analysis_conductor import analysis_conductor
+from src.main_graph.subgraphs.analysis.nodes.analysis_conductor import (
+    analysis_conductor,
+)
 from src.main_graph.subgraphs.analysis.nodes.domain_agent import domain_agent
-from src.main_graph.subgraphs.analysis.nodes.evidence_collector import evidence_collector
-from src.main_graph.subgraphs.analysis.nodes.save_analysis_result import save_analysis_result
+from src.main_graph.subgraphs.analysis.nodes.evidence_collector import (
+    evidence_collector,
+)
+from src.main_graph.subgraphs.analysis.nodes.save_analysis_result import (
+    save_analysis_result,
+)
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 
 
@@ -28,17 +34,22 @@ def _after_conductor(state: AnalysisState):
     sends = []
     for dispatch in decision.dispatches:
         agent_type = (
-            dispatch.agent_type if dispatch.agent_type in REGISTRY else "web_research_agent"
+            dispatch.agent_type
+            if dispatch.agent_type in REGISTRY
+            else "web_research_agent"
         )
         dispatch_dict = dispatch.model_dump()
         dispatch_dict["agent_type"] = agent_type
         sends.append(
-            Send("domain_agent", {
-                **state,
-                "current_dispatch": dispatch_dict,
-                "bundle_ids": [],
-                "agent_calls": [],
-            })
+            Send(
+                "domain_agent",
+                {
+                    **state,
+                    "current_dispatch": dispatch_dict,
+                    "bundle_ids": [],
+                    "agent_calls": [],
+                },
+            )
         )
     return sends
 

@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 import nats
 import nats.errors
@@ -86,7 +86,7 @@ class NATSJetStreamAdapter(MessagingPort):
 
     async def pull_fetch(self, subscription: Any, batch: int, timeout: float) -> list[Any]:
         try:
-            return await subscription.fetch(batch, timeout=timeout)
+            return cast(list[Any], await subscription.fetch(batch, timeout=timeout))
         except (FetchTimeoutError, nats.errors.TimeoutError):
             return []
 

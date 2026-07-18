@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import textwrap
+from typing import cast
 
 from langchain_core.runnables import RunnableConfig
 
@@ -43,15 +44,16 @@ def _format_results(results: list[ToolResult]) -> str:
         return "No tool results yet."
     parts = []
     for tr in results[-15:]:
-        val = f"ERROR: {tr.error}" if tr.error else json.dumps(tr.output, indent=2)[:1500]
+        val = (
+            f"ERROR: {tr.error}" if tr.error else json.dumps(tr.output, indent=2)[:1500]
+        )
         parts.append(f"[{tr.tool}] → {val}")
     return "\n\n".join(parts)
 
 
 def _format_findings(findings: list[FindingNote]) -> str:
     return "\n".join(
-        f"- [{f.severity.upper()}] {f.dep_name}: {f.description}"
-        for f in findings
+        f"- [{f.severity.upper()}] {f.dep_name}: {f.description}" for f in findings
     )
 
 
@@ -68,15 +70,26 @@ async def report_conductor(state, config: RunnableConfig) -> dict:
         f"Iteration: {iteration}/{_MAX_ITERATIONS}"
     )
     system = _SYSTEM.format(max_iter=_MAX_ITERATIONS)
-    structured = _llm.with_structured_output(ReportConductorDecision, method="function_calling")
-    decision: ReportConductorDecision = await structured.ainvoke([
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_prompt},
-    ])
+    structured = _llm.with_structured_output(
+        ReportConductorDecision, method="function_calling"
+    )
+    decision = cast(
+        ReportConductorDecision,
+        await structured.ainvoke(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ]
+        ),
+    )
 
     if iteration >= _MAX_ITERATIONS:
         decision = decision.model_copy(update={"finalize": True})
 
-    logger.info("report_conductor: iteration=%d tools=%d finalize=%s",
-                iteration, len(decision.tool_calls), decision.finalize)
+    logger.info(
+        "report_conductor: iteration=%d tools=%d finalize=%s",
+        iteration,
+        len(decision.tool_calls),
+        decision.finalize,
+    )
     return {"conductor_decision": decision, "conductor_iteration": iteration}

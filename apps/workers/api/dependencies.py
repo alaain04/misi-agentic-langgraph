@@ -23,7 +23,7 @@ from services.application_services.ingest_service import IngestService
 # Infrastructure clients
 # ---------------------------------------------------------------------------
 
-_mongo_client = AsyncMongoClient(settings.MONGODB_URI)
+_mongo_client: AsyncMongoClient[dict[str, object]] = AsyncMongoClient(settings.MONGODB_URI)
 _mongo_db = _mongo_client[settings.MONGODB_DB]
 
 # ---------------------------------------------------------------------------
@@ -111,4 +111,4 @@ def get_consumer_service() -> ConsumerService:
 
 async def shutdown() -> None:
     await _cache.close()
-    _mongo_client.close()
+    await _mongo_client.close()

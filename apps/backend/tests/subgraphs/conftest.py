@@ -7,6 +7,7 @@ Requires Docker (for testcontainers MongoDB). Run with:
 If Docker is not running, all tests are skipped automatically.
 Start Docker/Colima first: colima start
 """
+
 from __future__ import annotations
 
 import os
@@ -29,11 +30,13 @@ os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 def _docker_available() -> bool:
     try:
-        subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=5, check=True
-        )
+        subprocess.run(["docker", "info"], capture_output=True, timeout=5, check=True)
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ):
         return False
 
 

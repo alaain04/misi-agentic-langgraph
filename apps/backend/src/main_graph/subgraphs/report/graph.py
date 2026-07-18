@@ -25,8 +25,11 @@ def build_report_subgraph():
     builder.add_node("save_report_result", save_report_result)
 
     builder.add_edge(START, "report_conductor")
-    builder.add_conditional_edges("report_conductor", _after_conductor,
-                                  ["report_tool_runner", "save_report_result"])
+    builder.add_conditional_edges(
+        "report_conductor",
+        _after_conductor,
+        ["report_tool_runner", "save_report_result"],
+    )
     builder.add_edge("report_tool_runner", "report_conductor")
     builder.add_edge("save_report_result", END)
 

@@ -13,7 +13,7 @@ class RedisCacheAdapter(CachePort):
     """
 
     def __init__(self, redis_url: str) -> None:
-        self._client: aioredis.Redis[str] = aioredis.from_url(
+        self._client: aioredis.Redis = aioredis.from_url(
             redis_url, encoding="utf-8", decode_responses=True
         )
 

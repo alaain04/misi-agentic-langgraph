@@ -32,7 +32,8 @@ Output ONLY valid JSON:
       "recommendation": "<actionable fix>",
       "alternatives": ["<alternative package>"],
       "affected_files": ["<file:line>"],
-      "evidence": [{"tool": "<tool>", "url": "<url or null>", "log_snippet": "<excerpt>"}]
+      "evidence": [{"tool": "<tool>", "url": "<url or null>", "log_snippet": \
+"<excerpt>"}]
     }
   ],
   "recommendations": ["<top-level recommendation>"]
@@ -47,7 +48,8 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
 
     enrichment = "\n\n".join(
         f"[{tr.tool}({json.dumps(tr.args)})] → {json.dumps(tr.output, indent=2)[:1500]}"
-        for tr in tool_results if not tr.error
+        for tr in tool_results
+        if not tr.error
     )
 
     findings_json = json.dumps([f.model_dump() for f in analysis.findings], indent=2)
@@ -57,13 +59,16 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
         f"Enrichment data:\n{enrichment or 'None'}"
     )
 
-    response = await _llm.ainvoke([
-        {"role": "system", "content": _SYSTEM},
-        {"role": "user", "content": user_prompt},
-    ])
+    response = await _llm.ainvoke(
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ]
+    )
 
     try:
-        data = parse_llm_json(response.content or "")
+        content = response.content if isinstance(response.content, str) else ""
+        data = parse_llm_json(content)
         findings = [ReportFinding(**f) for f in data.get("findings", [])]
     except Exception:
         findings = [
@@ -92,6 +97,9 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
         recommendations=data.get("recommendations", []),
     )
     report_result_id = await dao.save_report(result)
-    logger.info("save_report_result: saved report_result_id=%s findings=%d",
-                report_result_id, len(findings))
+    logger.info(
+        "save_report_result: saved report_result_id=%s findings=%d",
+        report_result_id,
+        len(findings),
+    )
     return {"report_result_id": report_result_id}

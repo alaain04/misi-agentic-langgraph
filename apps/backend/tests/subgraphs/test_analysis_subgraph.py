@@ -11,6 +11,7 @@ What is mocked:
 - base_agent._llm (returns canned DomainAgentDecision with finalize=True)
 - PrepResult is seeded directly into MongoDB (no discovery run needed)
 """
+
 from __future__ import annotations
 
 import uuid
@@ -18,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
 from src.models.conductor import EvidenceRef, FindingNote
 from src.models.results import (
     AgentDispatch,
@@ -25,7 +27,6 @@ from src.models.results import (
     DomainAgentDecision,
     PrepResult,
 )
-from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
 
 
 def _seed_prep(job_id: str) -> PrepResult:
@@ -81,10 +82,13 @@ def _make_agent_llm(decision: DomainAgentDecision):
 _AUDIT_FIXTURE = {
     "advisories": {
         "1": {
-            "module_name": "lodash", "severity": "high",
+            "module_name": "lodash",
+            "severity": "high",
             "title": "CVE-2021-23337: prototype pollution in lodash < 4.17.21",
-            "vulnerable_versions": "<4.17.21", "patched_versions": ">=4.17.21",
-            "cves": ["CVE-2021-23337"], "url": None,
+            "vulnerable_versions": "<4.17.21",
+            "patched_versions": ">=4.17.21",
+            "cves": ["CVE-2021-23337"],
+            "url": None,
             "findings": [{"version": "4.17.20"}],
         }
     }
@@ -129,7 +133,11 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
                 dep_name="lodash",
                 severity="high",
                 description="CVE-2021-23337: prototype pollution in lodash < 4.17.21",
-                evidence=[EvidenceRef(tool="osv_lookup", url=None, log_snippet="GHSA-35jh-r3h4")],
+                evidence=[
+                    EvidenceRef(
+                        tool="osv_lookup", url=None, log_snippet="GHSA-35jh-r3h4"
+                    )
+                ],
             )
         ],
         summary="lodash 4.17.20 is vulnerable to CVE-2021-23337",
@@ -163,7 +171,9 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
             config=subgraph_config,
         )
 
-    assert result.get("analysis_result_id"), "Expected analysis_result_id in output state"
+    assert result.get("analysis_result_id"), (
+        "Expected analysis_result_id in output state"
+    )
 
     analysis = await result_dao.get_analysis(result["analysis_result_id"])
     assert analysis.job_id == job_id
@@ -191,7 +201,9 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
 
 
 @pytest.mark.asyncio
-async def test_analysis_finalizes_immediately_when_no_dispatches(subgraph_config, result_dao):
+async def test_analysis_finalizes_immediately_when_no_dispatches(
+    subgraph_config, result_dao
+):
     """
     If conductor finalizes on the first call with no dispatches,
     the result is saved with empty findings.
@@ -230,7 +242,9 @@ async def test_analysis_finalizes_immediately_when_no_dispatches(subgraph_config
 
 
 @pytest.mark.asyncio
-async def test_analysis_accumulates_bundles_from_parallel_agents(subgraph_config, result_dao):
+async def test_analysis_accumulates_bundles_from_parallel_agents(
+    subgraph_config, result_dao
+):
     """
     Conductor dispatches two agents in parallel; both findings end up
     in the AnalysisResult (fan-in via Annotated[list, operator.add]).
@@ -259,9 +273,7 @@ async def test_analysis_accumulates_bundles_from_parallel_agents(subgraph_config
         AnalysisConductorDecision(
             dispatches=dispatches, finalize=False, reasoning="parallel check"
         ),
-        AnalysisConductorDecision(
-            dispatches=[], finalize=True, reasoning="done"
-        ),
+        AnalysisConductorDecision(dispatches=[], finalize=True, reasoning="done"),
     ]
 
     agent_decision = DomainAgentDecision(
@@ -317,7 +329,10 @@ async def test_analysis_accumulates_bundles_from_parallel_agents(subgraph_config
     call = job_repo.update_artifact_data.await_args
     agent_calls = call.args[2]["agent_calls"]
     assert len(agent_calls) == 2
-    assert {c["agent_type"] for c in agent_calls} == {"vulnerability_agent", "maintenance_agent"}
+    assert {c["agent_type"] for c in agent_calls} == {
+        "vulnerability_agent",
+        "maintenance_agent",
+    }
     for c in agent_calls:
         assert c["started_at"]
         assert c["finished_at"]

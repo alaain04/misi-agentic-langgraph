@@ -20,14 +20,16 @@ Usage:
 
 All subgraphs read/write from the MongoDB configured via MONGODB_URI.
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 import uuid
+
+from langchain_core.runnables import RunnableConfig
 
 # Ensure src is importable from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -43,7 +45,7 @@ async def _run_discovery(args) -> None:
 
     container = DockerContainerAdapter()
 
-    config = {
+    config: RunnableConfig = {
         "configurable": {
             "result_dao": dao,
             "container": container,
@@ -69,13 +71,15 @@ async def _run_discovery(args) -> None:
         return
 
     prep_id = result.get("prep_result_id")
+    assert prep_id is not None
     print(f"[discovery] prep_result_id = {prep_id}")
     print(f"[discovery] vector_store_id = {result.get('vector_store_id', '')}")
 
     prep = await dao.get_prep(prep_id)
-    print(f"\n--- PrepResult ---")
+    print("\n--- PrepResult ---")
     print(f"  package_manager : {prep.detected_package_manager}")
-    print(f"  direct deps     : {list(prep.dependency_graph.get('direct', {}).keys())[:10]}")
+    direct_deps = list(prep.dependency_graph.get("direct", {}).keys())[:10]
+    print(f"  direct deps     : {direct_deps}")
     print(f"  summary (first 200 chars): {prep.discovery_summary[:200]}")
 
 
@@ -86,7 +90,7 @@ async def _run_analysis(args) -> None:
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
 
-    config = {
+    config: RunnableConfig = {
         "configurable": {
             "result_dao": dao,
             "container": None,
@@ -111,7 +115,7 @@ async def _run_analysis(args) -> None:
     print(f"[analysis] analysis_result_id = {analysis_id}")
 
     analysis = await dao.get_analysis(analysis_id)
-    print(f"\n--- AnalysisResult ---")
+    print("\n--- AnalysisResult ---")
     print(f"  findings        : {len(analysis.findings)}")
     print(f"  iterations      : {analysis.iteration_count}")
     for f in analysis.findings:
@@ -125,7 +129,7 @@ async def _run_report(args) -> None:
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
 
-    config = {
+    config: RunnableConfig = {
         "configurable": {
             "result_dao": dao,
             "container": None,
@@ -135,7 +139,7 @@ async def _run_report(args) -> None:
     }
 
     print(f"[report] job_id={job_id}  analysis_result_id={args.analysis_result_id}")
-    analysis = await dao.get_analysis(args.analysis_result_id)
+    await dao.get_analysis(args.analysis_result_id)
 
     graph = build_report_subgraph()
     result = await graph.ainvoke(
@@ -153,7 +157,7 @@ async def _run_report(args) -> None:
     print(f"[report] report_result_id = {report_id}")
 
     report = await dao.get_report(report_id)
-    print(f"\n--- ReportResult ---")
+    print("\n--- ReportResult ---")
     print(f"  risk_level      : {report.overall_risk_level}")
     print(f"  findings        : {len(report.findings)}")
     print(f"  recommendations : {len(report.recommendations)}")
@@ -161,14 +165,21 @@ async def _run_report(args) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a single subgraph against real infrastructure")
+    parser = argparse.ArgumentParser(
+        description="Run a single subgraph against real infrastructure"
+    )
     parser.add_argument("subgraph", choices=["discovery", "analysis", "report"])
     parser.add_argument("--concern", required=True, help="User concern text")
     parser.add_argument("--job-id", help="Optional job ID (generated if omitted)")
 
     parser.add_argument("--repo", help="[discovery] GitHub repo URL")
-    parser.add_argument("--prep-result-id", help="[analysis] PrepResult ID from a prior discovery run")
-    parser.add_argument("--analysis-result-id", help="[report] AnalysisResult ID from a prior analysis run")
+    parser.add_argument(
+        "--prep-result-id", help="[analysis] PrepResult ID from a prior discovery run"
+    )
+    parser.add_argument(
+        "--analysis-result-id",
+        help="[report] AnalysisResult ID from a prior analysis run",
+    )
 
     args = parser.parse_args()
 

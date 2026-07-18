@@ -11,6 +11,7 @@ What is mocked:
 - index_repository._embeddings (no OpenAI calls)
 - build_dependency_summary._llm (no OpenAI calls)
 """
+
 from __future__ import annotations
 
 import os
@@ -23,7 +24,9 @@ import pytest
 from src.main_graph.subgraphs.discovery.graph import build_discovery_subgraph
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "simple-nodejs-project")
-_DISCOVERY_SUMMARY = "test-project uses Express 4.18, Lodash 4.17, and Axios 1.6 as main dependencies."
+_DISCOVERY_SUMMARY = (
+    "test-project uses Express 4.18, Lodash 4.17, and Axios 1.6 as main dependencies."
+)
 
 
 def _setup_repo(job_id: str) -> str:
@@ -94,7 +97,9 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
 
 
 @pytest.mark.asyncio
-async def test_discovery_sets_vector_store_id_when_sources_present(subgraph_config, result_dao):
+async def test_discovery_sets_vector_store_id_when_sources_present(
+    subgraph_config, result_dao
+):
     """When the repo has source files, a vector_store_id is set in state."""
     job_id = f"disc-{uuid.uuid4().hex[:8]}"
     repo_path = _setup_repo(job_id)
@@ -128,7 +133,9 @@ async def test_discovery_sets_vector_store_id_when_sources_present(subgraph_conf
         shutil.rmtree(repo_path, ignore_errors=True)
 
     assert result.get("prep_result_id")
-    assert result.get("vector_store_id"), "Expected non-empty vector_store_id when source files exist"
+    assert result.get("vector_store_id"), (
+        "Expected non-empty vector_store_id when source files exist"
+    )
 
     prep = await result_dao.get_prep(result["prep_result_id"])
     assert prep.vector_store_id == result["vector_store_id"]
@@ -166,5 +173,7 @@ async def test_discovery_error_skips_prep_save(subgraph_config, result_dao):
         )
 
     # discovery_error is set, so save_prep_result skips
-    assert not result.get("prep_result_id"), "Expected no prep_result_id when clone fails"
+    assert not result.get("prep_result_id"), (
+        "Expected no prep_result_id when clone fails"
+    )
     assert result.get("discovery_error")

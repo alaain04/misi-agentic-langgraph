@@ -1,4 +1,5 @@
-"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo, install_deps."""
+"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo,
+install_deps."""
 
 import json
 from unittest.mock import AsyncMock, patch
@@ -188,7 +189,10 @@ async def test_install_deps_retries_on_peer_conflict(tmp_path):
     assert container.run.await_count == 2
     _, kwargs = container.run.call_args_list[1]
     assert "--legacy-peer-deps" in container.run.call_args_list[1].kwargs.get(
-        "command", container.run.call_args_list[1].args[1] if container.run.call_args_list[1].args else ""
+        "command",
+        container.run.call_args_list[1].args[1]
+        if container.run.call_args_list[1].args
+        else "",
     ) or any(
         "--legacy-peer-deps" in str(a) for a in container.run.call_args_list[1].args
     )

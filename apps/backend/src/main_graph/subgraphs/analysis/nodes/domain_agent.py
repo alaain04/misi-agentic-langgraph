@@ -15,18 +15,24 @@ logger = logging.getLogger(__name__)
 
 
 async def domain_agent(state: AnalysisState, config: RunnableConfig) -> dict:
-    dao = get_services(config)["result_dao"]
+    svc = get_services(config)
+    dao = svc["result_dao"]
+    container = svc["container"]
     prep = await dao.get_prep(state["prep_result_id"])
     dispatch = AgentDispatch(**state["current_dispatch"])
 
     agent_class = REGISTRY.get(dispatch.agent_type, WebResearchAgent)
     agent = agent_class()
 
-    logger.info("domain_agent: type=%s domain=%s hypothesis=%s",
-                dispatch.agent_type, dispatch.domain, dispatch.hypothesis[:60])
+    logger.info(
+        "domain_agent: type=%s domain=%s hypothesis=%s",
+        dispatch.agent_type,
+        dispatch.domain,
+        dispatch.hypothesis[:60],
+    )
 
     started_at = datetime.now(UTC).isoformat()
-    bundle, tools_used, react_iterations = await agent.run(dispatch, prep)
+    bundle, tools_used, react_iterations = await agent.run(dispatch, prep, container)
     finished_at = datetime.now(UTC).isoformat()
 
     bundle_id = await dao.save_bundle(bundle)
@@ -42,5 +48,7 @@ async def domain_agent(state: AnalysisState, config: RunnableConfig) -> dict:
         bundle_id=bundle_id,
     )
 
-    logger.info("domain_agent: saved bundle_id=%s findings=%d", bundle_id, len(bundle.findings))
+    logger.info(
+        "domain_agent: saved bundle_id=%s findings=%d", bundle_id, len(bundle.findings)
+    )
     return {"bundle_ids": [bundle_id], "agent_calls": [record.model_dump()]}

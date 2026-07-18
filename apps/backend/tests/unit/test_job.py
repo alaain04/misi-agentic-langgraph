@@ -50,11 +50,15 @@ def test_job_dao_implements_push_artifact_item():
     assert hasattr(JobDAO, "push_artifact_item")
     assert inspect.iscoroutinefunction(JobDAO.push_artifact_item)
     # Port must declare it too
-    assert "push_artifact_item" in {m for m in dir(JobRepositoryPort) if not m.startswith("_")}
+    assert "push_artifact_item" in {
+        m for m in dir(JobRepositoryPort) if not m.startswith("_")
+    }
 
 
 def test_job_metadata_stores_autopilot():
-    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="security", autopilot=True))
+    job = Job(
+        metadata=JobMetadata(repo_url=_REPO_URL, concern="security", autopilot=True)
+    )
     assert job.metadata.autopilot is True
     doc = job.to_doc()
     assert doc["metadata"]["autopilot"] is True
@@ -67,19 +71,25 @@ def test_job_metadata_autopilot_defaults_false():
 
 def test_job_dao_implements_save_dep_tree():
     import inspect
+
     from src.domain.ports.job_repository_port import JobRepositoryPort
     from src.services.job_dao import JobDAO
 
     assert hasattr(JobDAO, "save_dep_tree")
     assert inspect.iscoroutinefunction(JobDAO.save_dep_tree)
-    assert "save_dep_tree" in {m for m in dir(JobRepositoryPort) if not m.startswith("_")}
+    assert "save_dep_tree" in {
+        m for m in dir(JobRepositoryPort) if not m.startswith("_")
+    }
 
 
 def test_job_dao_implements_get_dep_tree():
     import inspect
+
     from src.domain.ports.job_repository_port import JobRepositoryPort
     from src.services.job_dao import JobDAO
 
     assert hasattr(JobDAO, "get_dep_tree")
     assert inspect.iscoroutinefunction(JobDAO.get_dep_tree)
-    assert "get_dep_tree" in {m for m in dir(JobRepositoryPort) if not m.startswith("_")}
+    assert "get_dep_tree" in {
+        m for m in dir(JobRepositoryPort) if not m.startswith("_")
+    }

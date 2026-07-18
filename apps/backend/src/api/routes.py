@@ -24,11 +24,13 @@ async def analyze(
     request: AnalysisRequest,
     dao: JobRepositoryPort = Depends(get_job_repo),
 ):
-    job = Job(metadata=JobMetadata(
-        repo_url=request.repo_url,
-        concern=request.concern,
-        autopilot=request.autopilot,
-    ))
+    job = Job(
+        metadata=JobMetadata(
+            repo_url=request.repo_url,
+            concern=request.concern,
+            autopilot=request.autopilot,
+        )
+    )
     await dao.create(job)
     asyncio.create_task(
         run_analysis(

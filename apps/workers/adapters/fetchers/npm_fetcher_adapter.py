@@ -25,7 +25,7 @@ class NpmFetcherAdapter(FetcherPort):
         self._rate_limiter = rate_limiter
         self._max_retries = max_retries
 
-    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict:
+    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict[str, object]:
         encoded = urllib.parse.quote(name, safe="")
         reg_resp, dl_resp = await asyncio.gather(
             self._get(client, f"{_NPM_REGISTRY}/{encoded}"),

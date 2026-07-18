@@ -1,5 +1,7 @@
 """Background task: run a job through the 3-layer pipeline."""
+
 from __future__ import annotations
+
 import logging
 import shutil
 
@@ -33,7 +35,12 @@ def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) ->
 
 
 async def _stream_graph(
-    graph, input_data, config, dao: JobRepositoryPort, job_id: str, cost_cb: CostCallback,
+    graph,
+    input_data,
+    config,
+    dao: JobRepositoryPort,
+    job_id: str,
+    cost_cb: CostCallback,
 ) -> None:
     prev_cost = 0.0
     async for chunk in graph.astream(input_data, config, stream_mode="updates"):
@@ -64,7 +71,9 @@ async def _stream_graph(
                 if report_result_id:
                     result_dao = get_result_dao()
                     report = await result_dao.get_report(report_result_id)
-                    await dao.update_artifact_data(job_id, REPORT, {"output": report.model_dump()})
+                    await dao.update_artifact_data(
+                        job_id, REPORT, {"output": report.model_dump()}
+                    )
 
 
 async def _finalize(dao: JobRepositoryPort, job_id: str, config: dict) -> None:
@@ -84,7 +93,9 @@ async def _finalize(dao: JobRepositoryPort, job_id: str, config: dict) -> None:
     if values.get("cancelled"):
         await dao.mark_cancelled(job_id)
     elif values.get("discovery_error") or not values.get("prep_result_id"):
-        await dao.mark_failed(job_id, error=values.get("discovery_error", "prep failed"))
+        await dao.mark_failed(
+            job_id, error=values.get("discovery_error", "prep failed")
+        )
     else:
         report_result_id = values.get("report_result_id", "")
         await dao.save_result(job_id, {"report_result_id": report_result_id})
@@ -106,9 +117,17 @@ async def run_analysis(
     try:
         await _stream_graph(
             main_graph,
-            {"repo_url": repo_url, "concern": concern, "job_id": job_id,
-             "autopilot": autopilot, "messages": []},
-            config, dao, job_id, cost_cb,
+            {
+                "repo_url": repo_url,
+                "concern": concern,
+                "job_id": job_id,
+                "autopilot": autopilot,
+                "messages": [],
+            },
+            config,
+            dao,
+            job_id,
+            cost_cb,
         )
         await dao.save_cost(job_id, cost_cb.cost())
         await _finalize(dao, job_id, config)

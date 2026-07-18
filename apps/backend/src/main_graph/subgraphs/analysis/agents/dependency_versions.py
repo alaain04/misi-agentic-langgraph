@@ -6,10 +6,13 @@ version}, "packages": {"name@version": {...}}}. Direct dependencies resolve
 in O(1); transitive ones require a scan of "packages" since that dict is
 keyed by "name@version", not by name alone.
 """
+
 from __future__ import annotations
 
 
-def resolve_installed_versions(names: list[str], dependency_graph: dict) -> dict[str, str]:
+def resolve_installed_versions(
+    names: list[str], dependency_graph: dict
+) -> dict[str, str]:
     direct = dependency_graph.get("direct", {})
     packages = dependency_graph.get("packages", {})
     resolved: dict[str, str] = {}

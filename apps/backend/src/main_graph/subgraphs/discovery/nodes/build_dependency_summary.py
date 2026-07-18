@@ -1,4 +1,5 @@
 """Node: build_project_context — lightweight LLM summary from package.json."""
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,8 @@ logger = logging.getLogger(__name__)
 _llm = get_llm(Model.GPT_4O_MINI)
 
 _SYSTEM = textwrap.dedent("""\
-    You are analyzing a Node.js project. Given its package.json contents and the user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
+    You are analyzing a Node.js project. Given its package.json contents and the \
+user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
     - Names the project and its stated purpose
     - Lists key dependency groups most relevant to the concern
     - Flags anything immediately notable (scripts, workspaces, unusual dependencies)
@@ -31,8 +33,10 @@ async def build_project_context(state: DiscoveryState) -> dict:
     if error:
         return {
             "project_metadata": ProjectMetadata(
-                name="unknown", package_manager="unknown",
-                direct_dependencies_count=0, transitive_dependencies_count=0,
+                name="unknown",
+                package_manager="unknown",
+                direct_dependencies_count=0,
+                transitive_dependencies_count=0,
             ),
             "project_context": f"Discovery failed: {error}",
         }
@@ -51,15 +55,36 @@ async def build_project_context(state: DiscoveryState) -> dict:
     )
 
     pkg_summary = json.dumps(
-        {k: pkg.get(k) for k in ("name", "version", "description", "scripts", "dependencies", "devDependencies", "workspaces")
-         if pkg.get(k)},
+        {
+            k: pkg.get(k)
+            for k in (
+                "name",
+                "version",
+                "description",
+                "scripts",
+                "dependencies",
+                "devDependencies",
+                "workspaces",
+            )
+            if pkg.get(k)
+        },
         indent=2,
     )[:3000]  # cap to avoid token overflow
 
-    response = await _llm.ainvoke([
-        {"role": "system", "content": _SYSTEM},
-        {"role": "user", "content": f"Concern: {concern}\n\npackage.json:\n{pkg_summary}"},
-    ])
+    response = await _llm.ainvoke(
+        [
+            {"role": "system", "content": _SYSTEM},
+            {
+                "role": "user",
+                "content": f"Concern: {concern}\n\npackage.json:\n{pkg_summary}",
+            },
+        ]
+    )
 
-    logger.info("build_project_context: project=%s pm=%s direct=%d", metadata["name"], pm, direct)
+    logger.info(
+        "build_project_context: project=%s pm=%s direct=%d",
+        metadata["name"],
+        pm,
+        direct,
+    )
     return {"project_metadata": metadata, "project_context": response.content}

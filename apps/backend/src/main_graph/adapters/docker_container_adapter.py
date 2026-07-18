@@ -11,7 +11,11 @@ _TIMEOUT = 300
 
 class DockerContainerAdapter(ContainerRunPort):
     async def run(
-        self, image: str, command: str, volume: str | None = None, run_as_root: bool = False
+        self,
+        image: str,
+        command: str,
+        volume: str | None = None,
+        run_as_root: bool = False,
     ) -> tuple[int, str, str]:
         cmd = ["docker", "run", "--rm"]
         if volume:
@@ -35,6 +39,7 @@ class DockerContainerAdapter(ContainerRunPort):
             await proc.wait()
             return -1, "", f"timed out after {_TIMEOUT}s"
 
+        assert proc.returncode is not None  # communicate() waits for exit
         return (
             proc.returncode,
             stdout_b.decode(errors="replace"),

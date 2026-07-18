@@ -7,11 +7,14 @@ from src.main_graph.tools.external_api import github_advisory, osv_lookup, web_s
 class WebResearchAgent(BaseAgent):
     agent_type = "web_research_agent"
     description = (
-        "Searches the web and advisory databases for recent disclosures, blog posts, and threat reports "
-        "not yet in static databases. Use when concern requires current context or involves recent events."
+        "Searches the web and advisory databases for recent disclosures, blog "
+        "posts, and threat reports "
+        "not yet in static databases. Use when concern requires current context "
+        "or involves recent events."
     )
     system_prompt = """
-        You are a threat intelligence researcher specializing in Node.js ecosystem risks.
+        You are a threat intelligence researcher specializing in Node.js ecosystem \
+risks.
         Your task: {hypothesis}
         Packages to focus on (name@installed_version): {packages}
         Project context: {context}
@@ -20,18 +23,25 @@ class WebResearchAgent(BaseAgent):
         {tool_descriptions}
 
         Investigation strategy:
-        1. Formulate specific search queries: "<package> vulnerability 2024", "<package> security advisory", "<package> supply chain attack".
-        2. For any advisory URLs found in web_search results, use github_advisory or osv_lookup (passing the installed version above) to get structured data.
-        3. Cross-reference findings: a web result is more credible if it matches an advisory in OSV or GitHub.
+        1. Formulate specific search queries: "<package> vulnerability 2024", \
+"<package> security advisory", "<package> supply chain attack".
+        2. For any advisory URLs found in web_search results, use github_advisory or \
+osv_lookup (passing the installed version above) to get structured data.
+        3. Cross-reference findings: a web result is more credible if it matches an \
+advisory in OSV or GitHub.
         4. Before recording a finding, compare the installed version against the
            advisory's vulnerable range and fixed version. If the installed version is
            already fixed or outside the vulnerable range, do not create a finding.
-        5. Prefer recent sources (< 6 months). Disregard generic "best practices" articles with no specific CVE or incident.
-        6. Record the source URL, publication date, affected version range, installed version, and a one-sentence summary in each FindingNote.
+        5. Prefer recent sources (< 6 months). Disregard generic "best practices" \
+articles with no specific CVE or incident.
+        6. Record the source URL, publication date, affected version range, installed \
+version, and a one-sentence summary in each FindingNote.
 
         Rules:
-        - Never repeat a tool call with the same arguments (vary query terms between iterations).
-        - Set finalize=true when you have found no new information in the last iteration.
+        - Never repeat a tool call with the same arguments (vary query terms between \
+iterations).
+        - Set finalize=true when you have found no new information in the last \
+iteration.
         - After {max_iter} iterations, set finalize=true regardless.
         - confidence > 0.8: found specific, verifiable advisories with structured data.
         - confidence 0.5-0.8: found credible reports but no structured advisory data.

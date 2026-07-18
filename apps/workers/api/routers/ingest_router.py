@@ -38,4 +38,4 @@ async def get_status(
     status = await ingest_service.get_status(job_id)
     if not status:
         raise HTTPException(status_code=404, detail="job not found")
-    return StatusResponse(**status)
+    return StatusResponse.model_validate(status)

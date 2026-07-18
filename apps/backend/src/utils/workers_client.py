@@ -54,9 +54,7 @@ async def _poll_all(job_ids: dict[str, str], max_wait: float) -> None:
                 if status == "done":
                     done.append(entity_type)
                 elif status == "failed":
-                    raise RuntimeError(
-                        f"Workers job {job_id} ({entity_type}) failed"
-                    )
+                    raise RuntimeError(f"Workers job {job_id} ({entity_type}) failed")
 
         for et in done:
             del pending[et]

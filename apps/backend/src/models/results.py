@@ -15,6 +15,7 @@ class PrepResult(BaseModel):
     project_metadata: dict
     manifest_files: list[str]
     detected_package_manager: str
+    docker_image: str = "node:lts-alpine"
     dependency_graph: dict
     discovery_summary: str
     vector_store_id: str

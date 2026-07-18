@@ -1,4 +1,5 @@
 """Local file and JSON analysis tools."""
+
 from __future__ import annotations
 
 import glob
@@ -33,10 +34,17 @@ def _all_deps(pkg: dict) -> dict[str, str]:
 
 def _is_wide_range(spec: str) -> bool:
     s = spec.strip()
-    return s in _WIDE_RANGE_PATTERNS or s.startswith(">=") or (s.startswith("^") and s[1:2] == "0")
+    return (
+        s in _WIDE_RANGE_PATTERNS
+        or s.startswith(">=")
+        or (s.startswith("^") and s[1:2] == "0")
+    )
 
 
-@register("package_json", "Parses package.json; returns declared dependencies, scripts, engines, workspaces")
+@register(
+    "package_json",
+    "Parses package.json; returns declared dependencies, scripts, engines, workspaces",
+)
 async def package_json(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     if not pkg:
@@ -44,7 +52,11 @@ async def package_json(repo_path: str) -> dict:
     return pkg
 
 
-@register("package_lock", "Parses package-lock.json or lockfile; returns resolved versions and integrity hashes")
+@register(
+    "package_lock",
+    "Parses package-lock.json or lockfile; returns resolved versions and integrity "
+    "hashes",
+)
 async def package_lock(repo_path: str) -> dict:
     for name in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
         path = os.path.join(repo_path, name)
@@ -54,40 +66,75 @@ async def package_lock(repo_path: str) -> dict:
                     content = f.read()
                 if name == "package-lock.json":
                     return {"lockfile": name, "data": json.loads(content)}
-                return {"lockfile": name, "raw_size_bytes": len(content), "note": "non-JSON lockfile, use npm_list for resolved versions"}
+                return {
+                    "lockfile": name,
+                    "raw_size_bytes": len(content),
+                    "note": "non-JSON lockfile, use npm_list for resolved versions",
+                }
             except Exception as exc:
                 return {"error": str(exc)}
     return {"error": "no lockfile found"}
 
 
-@register("version_ranges", "Detects broad version ranges (*, latest, wide ^ or >=) in package.json")
+@register(
+    "version_ranges",
+    "Detects broad version ranges (*, latest, wide ^ or >=) in package.json",
+)
 async def version_ranges(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     deps = _all_deps(pkg)
-    risky = [{"package": name, "range": spec} for name, spec in deps.items() if _is_wide_range(spec)]
+    risky = [
+        {"package": name, "range": spec}
+        for name, spec in deps.items()
+        if _is_wide_range(spec)
+    ]
     return {"risky_ranges": risky, "total_checked": len(deps)}
 
 
-@register("dependency_confusion", "Detects internal/private package names that may be vulnerable to dependency confusion")
+@register(
+    "dependency_confusion",
+    "Detects internal/private package names that may be vulnerable to dependency "
+    "confusion",
+)
 async def dependency_confusion(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     deps = _all_deps(pkg)
     suspicious = []
     for name in deps:
-        if any(kw in name.lower() for kw in ("internal", "private", "local", "corp", "intranet")):
-            suspicious.append({"package": name, "reason": "name suggests private/internal package"})
-    return {"suspicious_packages": suspicious, "note": "Verify these exist on npm registry"}
+        if any(
+            kw in name.lower()
+            for kw in ("internal", "private", "local", "corp", "intranet")
+        ):
+            suspicious.append(
+                {"package": name, "reason": "name suggests private/internal package"}
+            )
+    return {
+        "suspicious_packages": suspicious,
+        "note": "Verify these exist on npm registry",
+    }
 
 
-@register("install_scripts", "Detects packages with lifecycle scripts (preinstall, install, postinstall)")
+@register(
+    "install_scripts",
+    "Detects packages with lifecycle scripts (preinstall, install, postinstall)",
+)
 async def install_scripts(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     scripts = pkg.get("scripts", {})
-    lifecycle = ["preinstall", "install", "postinstall", "prepare", "prepack", "postpack"]
+    lifecycle = [
+        "preinstall",
+        "install",
+        "postinstall",
+        "prepare",
+        "prepack",
+        "postpack",
+    ]
     found = [s for s in lifecycle if s in scripts]
     packages_with_scripts = []
     if found:
-        packages_with_scripts.append({"package": pkg.get("name", "root"), "scripts": found})
+        packages_with_scripts.append(
+            {"package": pkg.get("name", "root"), "scripts": found}
+        )
     nm_path = os.path.join(repo_path, "node_modules")
     if os.path.isdir(nm_path):
         for entry in os.listdir(nm_path)[:100]:
@@ -98,16 +145,30 @@ async def install_scripts(repo_path: str) -> dict:
                 dep_scripts = dep_pkg.get("scripts", {})
                 dep_found = [s for s in lifecycle if s in dep_scripts]
                 if dep_found:
-                    packages_with_scripts.append({"package": entry, "scripts": dep_found})
+                    packages_with_scripts.append(
+                        {"package": entry, "scripts": dep_found}
+                    )
             except Exception:
                 pass
     return {"packages_with_scripts": packages_with_scripts}
 
 
-@register("check_licenses", "Collects licenses for all dependencies and flags non-permissive licenses")
+@register(
+    "check_licenses",
+    "Collects licenses for all dependencies and flags non-permissive licenses",
+)
 async def check_licenses(repo_path: str) -> dict:
     nm_path = os.path.join(repo_path, "node_modules")
-    permissive = {"mit", "isc", "bsd-2-clause", "bsd-3-clause", "apache-2.0", "cc0-1.0", "0bsd", "unlicense"}
+    permissive = {
+        "mit",
+        "isc",
+        "bsd-2-clause",
+        "bsd-3-clause",
+        "apache-2.0",
+        "cc0-1.0",
+        "0bsd",
+        "unlicense",
+    }
     results = []
     if os.path.isdir(nm_path):
         for entry in os.listdir(nm_path)[:200]:
@@ -116,8 +177,10 @@ async def check_licenses(repo_path: str) -> dict:
                 with open(pkg_path) as f:
                     dep_pkg = json.load(f)
                 lic = dep_pkg.get("license", "UNKNOWN")
-                flagged = str(lic).lower() not in permissive
-                results.append({"package": entry, "license": lic, "flagged": flagged})
+                is_flagged = str(lic).lower() not in permissive
+                results.append(
+                    {"package": entry, "license": lic, "flagged": is_flagged}
+                )
             except Exception:
                 pass
     flagged = [r for r in results if r["flagged"]]
@@ -139,17 +202,24 @@ async def duplicate_packages(repo_path: str) -> dict:
                 seen.setdefault(name, []).append(version)
             except Exception:
                 pass
-    duplicates = {name: versions for name, versions in seen.items() if len(versions) > 1}
+    duplicates = {
+        name: versions for name, versions in seen.items() if len(versions) > 1
+    }
     return {"duplicates": duplicates, "duplicate_count": len(duplicates)}
 
 
-@register("missing_dependencies", "Finds packages imported in source files but absent from package.json")
+@register(
+    "missing_dependencies",
+    "Finds packages imported in source files but absent from package.json",
+)
 async def missing_dependencies(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     declared = set(_all_deps(pkg).keys())
     imported: set[str] = set()
     for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "dist", "build")]
+        dirs[:] = [
+            d for d in dirs if d not in ("node_modules", ".git", "dist", "build")
+        ]
         for fname in files:
             if fname.endswith((".js", ".ts", ".jsx", ".tsx")):
                 try:
@@ -162,7 +232,11 @@ async def missing_dependencies(repo_path: str) -> dict:
                                 end = line.find(line[idx - 1], idx)
                                 if end > idx:
                                     spec = line[idx:end].split("/")[0]
-                                    if spec and not spec.startswith(".") and not spec.startswith("node:"):
+                                    if (
+                                        spec
+                                        and not spec.startswith(".")
+                                        and not spec.startswith("node:")
+                                    ):
                                         imported.add(spec)
                 except Exception:
                     pass
@@ -188,10 +262,17 @@ async def dependency_size(repo_path: str) -> dict:
         sizes.append({"package": entry, "size_bytes": total})
     sizes.sort(key=lambda x: x["size_bytes"], reverse=True)
     total_bytes = sum(s["size_bytes"] for s in sizes)
-    return {"total_bytes": total_bytes, "top_10_by_size": sizes[:10], "package_count": len(sizes)}
+    return {
+        "total_bytes": total_bytes,
+        "top_10_by_size": sizes[:10],
+        "package_count": len(sizes),
+    }
 
 
-@register("dependency_stats", "Reports total, direct, transitive, dev, optional, and peer dependency counts")
+@register(
+    "dependency_stats",
+    "Reports total, direct, transitive, dev, optional, and peer dependency counts",
+)
 async def dependency_stats(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     return {
@@ -203,24 +284,30 @@ async def dependency_stats(repo_path: str) -> dict:
     }
 
 
-@register("workspace_dependencies", "Lists dependencies per workspace for monorepo projects")
+@register(
+    "workspace_dependencies", "Lists dependencies per workspace for monorepo projects"
+)
 async def workspace_dependencies(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     workspaces = pkg.get("workspaces", [])
     if not workspaces:
         return {"workspaces": [], "note": "Not a monorepo or workspaces not declared"}
     results = []
-    for pattern in (workspaces if isinstance(workspaces, list) else workspaces.get("packages", [])):
+    for pattern in (
+        workspaces if isinstance(workspaces, list) else workspaces.get("packages", [])
+    ):
         for ws_path in glob.glob(os.path.join(repo_path, pattern)):
             ws_pkg_path = os.path.join(ws_path, "package.json")
             try:
                 with open(ws_pkg_path) as f:
                     ws_pkg = json.load(f)
-                results.append({
-                    "workspace": os.path.relpath(ws_path, repo_path),
-                    "name": ws_pkg.get("name"),
-                    "dependencies": list(ws_pkg.get("dependencies", {}).keys()),
-                })
+                results.append(
+                    {
+                        "workspace": os.path.relpath(ws_path, repo_path),
+                        "name": ws_pkg.get("name"),
+                        "dependencies": list(ws_pkg.get("dependencies", {}).keys()),
+                    }
+                )
             except Exception:
                 pass
     return {"workspaces": results}

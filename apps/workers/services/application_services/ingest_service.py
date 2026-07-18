@@ -34,5 +34,5 @@ class IngestService:
         logger.info("ingest: created job %s (%d items)", job_id, len(items))
         return job_id
 
-    async def get_status(self, job_id: str) -> dict | None:
+    async def get_status(self, job_id: str) -> dict[str, object] | None:
         return await self._job_repo.get_status(job_id)
