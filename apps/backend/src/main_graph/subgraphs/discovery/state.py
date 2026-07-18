@@ -30,6 +30,9 @@ class DiscoveryState(TypedDict):
     # New: set by index_repository
     vector_store_id: NotRequired[str]
 
+    # New: set by index_codegraph
+    codegraph_ready: NotRequired[bool]
+
     # Outputs
     project_metadata: NotRequired[ProjectMetadata]
     project_context: NotRequired[str]

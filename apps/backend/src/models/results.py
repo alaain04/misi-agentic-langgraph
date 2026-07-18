@@ -19,6 +19,7 @@ class PrepResult(BaseModel):
     dependency_graph: dict
     discovery_summary: str
     vector_store_id: str
+    codegraph_ready: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
@@ -76,6 +77,16 @@ class AnalysisResult(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
+class BlastRadiusSummary(BaseModel):
+    available: bool
+    affected_file_count: int = 0
+    affected_files: list[str] = Field(default_factory=list)
+    production_file_count: int = 0
+    isolated_to_tests_or_scripts: bool = False
+    node_count: int = 0
+    depth_searched: int = 0
+
+
 class ReportFinding(BaseModel):
     dep_name: str
     severity: str
@@ -84,6 +95,8 @@ class ReportFinding(BaseModel):
     alternatives: list[str] = Field(default_factory=list)
     affected_files: list[str] = Field(default_factory=list)
     evidence: list = Field(default_factory=list)
+    business_impact: str = ""
+    blast_radius: BlastRadiusSummary | None = None
 
 
 class ReportConductorDecision(BaseModel):

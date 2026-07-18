@@ -21,6 +21,38 @@ def test_make_code_impact_tool_returns_tool():
     assert tool.name == "code_impact"
 
 
+def test_is_indexable_source_file_excludes_manifests_and_lockfiles():
+    from src.main_graph.tools.search_code import is_indexable_source_file
+
+    assert is_indexable_source_file("package.json") is False
+    assert is_indexable_source_file("package-lock.json") is False
+    assert is_indexable_source_file("pnpm-lock.yaml") is False
+    assert is_indexable_source_file("tsconfig.json") is False
+    assert is_indexable_source_file("index.ts") is True
+    assert is_indexable_source_file("config.json") is True
+
+
+@pytest.mark.asyncio
+async def test_index_repository_excludes_package_json():
+    from src.main_graph.subgraphs.discovery.nodes.index_repository import (
+        _walk_source_files,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (open(os.path.join(tmpdir, "index.ts"), "w")).write(
+            'import express from "express";\nconst app = express();'
+        )
+        (open(os.path.join(tmpdir, "package.json"), "w")).write(
+            '{"dependencies": {"express": "1.0.0"}}'
+        )
+
+        files = _walk_source_files(tmpdir)
+
+    relpaths = [rel for rel, _ in files]
+    assert "index.ts" in relpaths
+    assert "package.json" not in relpaths
+
+
 @pytest.mark.asyncio
 async def test_index_repository_writes_vector_store_id():
     from src.main_graph.subgraphs.discovery.nodes.index_repository import (

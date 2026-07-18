@@ -29,6 +29,7 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         dependency_graph=build_dependency_graph(state.get("repo_path", ""), pm),
         discovery_summary=state.get("project_context") or "",
         vector_store_id=state.get("vector_store_id") or "",
+        codegraph_ready=state.get("codegraph_ready") or False,
     )
     prep_result_id = await dao.save_prep(result)
     logger.info("save_prep_result: saved prep_result_id=%s", prep_result_id)

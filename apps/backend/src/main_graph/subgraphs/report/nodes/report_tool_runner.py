@@ -7,11 +7,14 @@ import uuid
 
 from langchain_core.runnables import RunnableConfig
 
+from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.config import get_services
+from src.main_graph.tools.blast_radius import make_blast_radius_tool
 from src.main_graph.tools.code_impact import make_code_impact_tool
 from src.main_graph.tools.external_api import web_search
 from src.models.conductor import ToolCall, ToolResult
 from src.models.results import AnalysisResult, PrepResult
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,10 @@ async def _get_findings_tool(severity: str, analysis: AnalysisResult) -> dict:
 
 
 async def _run_one(
-    tc: ToolCall, prep: PrepResult, analysis: AnalysisResult
+    tc: ToolCall,
+    prep: PrepResult,
+    analysis: AnalysisResult,
+    container: ContainerRunPort,
 ) -> ToolResult:
     start = time.monotonic()
     try:
@@ -32,6 +38,19 @@ async def _run_one(
             output = await _get_findings_tool(tc.args.get("severity", "all"), analysis)
         elif tc.tool == "web_search":
             output = await web_search(**tc.args)
+        elif tc.tool == "blast_radius":
+            if not prep.codegraph_ready:
+                output = {
+                    "available": False,
+                    "error": "codegraph index not built for this repo",
+                }
+            else:
+                blast_tool = make_blast_radius_tool(
+                    prep.repo_path, container, settings.codegraph_docker_image
+                )
+                output = await blast_tool.ainvoke(tc.args)
+                if not isinstance(output, dict):
+                    output = {"results": output}
         elif tc.tool == "code_impact":
             impact_tool = make_code_impact_tool(prep.vector_store_id)
             output = await impact_tool.ainvoke(tc.args)
@@ -64,11 +83,13 @@ async def report_tool_runner(state, config: RunnableConfig) -> dict:
     if not decision or not decision.tool_calls:
         return {"tool_results": []}
 
-    dao = get_services(config)["result_dao"]
+    services = get_services(config)
+    dao = services["result_dao"]
+    container: ContainerRunPort = services["container"]
     prep: PrepResult = await dao.get_prep(state["prep_result_id"])
     analysis: AnalysisResult = await dao.get_analysis(state["analysis_result_id"])
 
     results = await asyncio.gather(
-        *[_run_one(tc, prep, analysis) for tc in decision.tool_calls]
+        *[_run_one(tc, prep, analysis, container) for tc in decision.tool_calls]
     )
     return {"tool_results": list(results)}
