@@ -264,6 +264,9 @@ async def typosquat_detection(repo_path: str) -> dict:
     return {"potential_typosquats": flagged, "checked": len(deps)}
 
 
+_LOW_WEEKLY_DOWNLOADS = 1000
+
+
 @register(
     "high_risk_packages",
     "Flags packages with unusual risk characteristics (very new or abandoned). "
@@ -277,9 +280,21 @@ async def high_risk_packages(repo_path: str) -> dict:
     cutoff_abandoned = datetime.now(UTC) - timedelta(days=730)
     flagged = []
     deps_to_check = deps[:30]
-    metas = await asyncio.gather(*[_npm_metadata(d) for d in deps_to_check])
-    for dep, meta in zip(deps_to_check, metas):
+    metas, downloads = await asyncio.gather(
+        asyncio.gather(*[_npm_metadata(d) for d in deps_to_check]),
+        asyncio.gather(*[_npm_weekly_downloads(d) for d in deps_to_check]),
+    )
+    for dep, meta, weekly_downloads in zip(deps_to_check, metas, downloads):
         if "error" in meta:
+            continue
+        # Real, healthy adoption overrides every other signal: a package with
+        # steady weekly downloads is demonstrably in active use, even if it
+        # hasn't shipped a release in a while (many mature libs go long
+        # stretches without needing one) or has a single npm publisher.
+        has_healthy_downloads = (
+            weekly_downloads is not None and weekly_downloads >= _LOW_WEEKLY_DOWNLOADS
+        )
+        if has_healthy_downloads:
             continue
         time_data = meta.get("time", {})
         created_str = time_data.get("created", "")
@@ -291,9 +306,11 @@ async def high_risk_packages(repo_path: str) -> dict:
                 reasons.append("very new package (<90 days)")
         except Exception:
             pass
+        is_abandoned = False
         try:
             modified = datetime.fromisoformat(modified_str.replace("Z", "+00:00"))
-            if modified < cutoff_abandoned:
+            is_abandoned = modified < cutoff_abandoned
+            if is_abandoned:
                 reasons.append("abandoned (>2 years no release)")
         except Exception:
             pass

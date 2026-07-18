@@ -21,11 +21,25 @@ _SYSTEM = textwrap.dedent("""\
     You are a technical report writer. You enrich dependency risk findings with:
     1. web_search — find evidence (advisories, issues, releases) for a finding's
        SPECIFIC flagged reason
-    2. code_impact — find which source files use each risky package
-    3. get_findings — retrieve findings filtered by severity
+    2. blast_radius — compute the REAL import/usage graph for a risky package via
+       a code graph (real files, real depth, isolated-to-tests flag). Prefer this
+       over code_impact whenever it is available.
+    3. code_impact — fuzzy semantic-search fallback; use only if blast_radius
+       reports available=false (codegraph index unavailable for this repo)
+    4. get_findings — retrieve findings filtered by severity
 
-    For each high/critical finding, call both web_search and code_impact
-    before finalizing.
+    For each high/critical finding, call web_search AND blast_radius (falling
+    back to code_impact only if blast_radius is unavailable) before finalizing.
+
+    web_search queries must be grounded in the finding's actual reason, not just
+    the bare package name — a bare package name pulls generic "how to use it"
+    tutorials, which is incoherent evidence for a risk finding. Pull the specific
+    terms from the finding's description (CVE id, "prototype pollution",
+    "license conflict", "unmaintained", etc.) into the query, e.g.
+    "class-transformer prototype pollution vulnerability CVE" rather than just
+    "class-transformer". If the finding is a license issue, search license terms
+    and compatibility, not the package's feature set.
+
     Output a ReportConductorDecision:
     - tool_calls: tools to run in parallel
     - finalize: true when all high/critical findings are enriched
@@ -40,7 +54,10 @@ _SYSTEM = textwrap.dedent("""\
       package name alone, and never a generic "how to use X" query. Results not
       mentioning package_name are dropped automatically, so a vague query just
       yields fewer results, not wrong-package ones.
-    - code_impact(package_name): find source files importing the package
+    - blast_radius(package_name, depth=3): real import-graph blast radius —
+      affected file count/paths, whether usage is isolated to tests/scripts
+    - code_impact(package_name): fuzzy fallback; find source files importing
+      the package via semantic search
     - get_findings(severity): retrieve findings (severity: critical|high|medium|low|all)
     """).strip()
 

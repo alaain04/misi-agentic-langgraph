@@ -26,20 +26,24 @@ _SOURCE_EXTENSIONS = {
     ".cts",
 }
 
-# Manifests/lockfiles list every dependency by name, so they trivially match any
-# "does this file use package X" query without the file actually using it —
-# excluded so code_impact only surfaces real usage sites.
-_EXCLUDED_BASENAMES = {
+# Manifest/lockfiles trivially mention every dependency name and aren't "usage"
+# in any business-relevant sense - a dependency being listed in package.json is
+# a given, not a finding. Exclude them from the source index so code_impact
+# and search_code only surface real import/call sites.
+_NON_SOURCE_BASENAMES = {
     "package.json",
     "package-lock.json",
     "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "tsconfig.json",
 }
 
 
-def is_indexable_source_file(filename: str) -> bool:
-    if filename in _EXCLUDED_BASENAMES:
+def is_indexable_source_file(basename: str) -> bool:
+    if basename in _NON_SOURCE_BASENAMES:
         return False
-    return os.path.splitext(filename)[1] in _SOURCE_EXTENSIONS
+    return os.path.splitext(basename)[1] in _SOURCE_EXTENSIONS
 
 
 def get_vector_store(vector_store_id: str) -> InMemoryVectorStore | None:

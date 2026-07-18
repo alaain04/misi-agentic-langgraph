@@ -7,7 +7,13 @@ from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
 from src.models.conductor import ToolResult
-from src.models.results import AnalysisResult, ReportFinding, ReportResult
+from src.models.results import (
+    AnalysisResult,
+    BlastRadiusSummary,
+    ReportFinding,
+    ReportResult,
+)
+from src.utils.config import settings
 from src.utils.llm import Model, get_llm, parse_llm_json
 
 logger = logging.getLogger(__name__)
@@ -16,9 +22,39 @@ _llm = get_llm(Model.GPT_5_4_MINI)
 
 _SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
+_BLAST_RADIUS_FIELDS = set(BlastRadiusSummary.model_fields)
+
 _SYSTEM = """\
 You are a technical report writer. Given dependency risk findings and enrichment data
-(web search results + code impact), produce a JSON report.
+(web search results + blast-radius/code-impact data), produce a JSON report.
+
+business_impact must be derived from that dependency's blast_radius data if present
+(e.g. affected_file_count, isolated_to_tests_or_scripts) — do not invent file counts
+or reach claims. If blast_radius is unavailable but code_impact snippets are present,
+read the surrounding code in those snippets (the enclosing function/class/module
+name, what it computes or handles) and translate that into a plain-language business
+consequence a non-technical stakeholder can understand — name the capability at risk
+(e.g. "used in the checkout flow's tax calculation"), not the code mechanics (do not
+say "imported in file X" — say what that file does). Never cite package.json or a
+lockfile as a usage site; a dependency being declared there is expected and not a
+finding. If neither blast_radius nor code_impact has anything, say the business
+impact could not be determined rather than guessing.
+
+Only include an item in alternatives if it is backed by a web_search result for that
+dependency — leave alternatives empty rather than inventing a package name.
+
+Check the full list of findings before writing each one: never suggest, as an
+alternative to some dependency, another dependency that itself has a finding
+somewhere in this same report — that is self-contradictory (you would be recommending
+a move to something you're simultaneously flagging as risky). Prefer an alternative
+with no finding in this report, or state that none was found.
+
+Before citing a web_search hit in evidence, check it actually supports the finding's
+severity and reason. A "how to install/use this package" tutorial does not support a
+vulnerability, license, or maintenance-risk finding, even if it mentions the package
+name — omit it rather than citing an irrelevant result. Only cite web_search hits
+that discuss the specific risk (the CVE/advisory, the license conflict, the
+abandonment) raised in the finding's description.
 
 Every affected_files entry and every evidence entry for a finding must be about that
 finding's own dep_name specifically — never carry over a file or web result that
@@ -37,6 +73,7 @@ Output ONLY valid JSON:
       "recommendation": "<actionable fix>",
       "alternatives": ["<alternative package>"],
       "affected_files": ["<file:line>"],
+      "business_impact": "<1-2 sentence narrative grounded in blast_radius data>",
       "evidence": [{"tool": "<tool>", "url": "<url or null>", "log_snippet": \
 "<excerpt>"}]
     }
@@ -70,6 +107,67 @@ def _drop_mismatched_evidence(findings: list[ReportFinding]) -> list[ReportFindi
             if isinstance(e, dict) and _evidence_matches_dep(e, finding.dep_name)
         ]
     return findings
+def _group_enrichment_by_dep(
+    tool_results: list[ToolResult], dep_names: list[str]
+) -> dict:
+    """Attribute each tool result to the dependency it enriches.
+
+    blast_radius calls carry an explicit package_name. web_search calls only
+    carry a free-text query, so we attribute them heuristically by substring
+    match; anything unattributed lands in "general".
+    """
+    by_dep: dict[str, dict[str, list]] = {name: {} for name in dep_names}
+    general: list[dict] = []
+
+    for tr in tool_results:
+        if tr.error:
+            continue
+        entry = {"args": tr.args, "output": tr.output}
+        if tr.tool == "blast_radius":
+            dep = tr.args.get("package_name")
+            if dep in by_dep:
+                by_dep[dep].setdefault("blast_radius", []).append(entry)
+                continue
+        elif tr.tool == "code_impact":
+            dep = tr.args.get("package_name")
+            if dep in by_dep:
+                by_dep[dep].setdefault("code_impact", []).append(entry)
+                continue
+        elif tr.tool == "web_search":
+            query = str(tr.args.get("query", "")).lower()
+            matched = [name for name in dep_names if name.lower() in query]
+            if matched:
+                for dep in matched:
+                    by_dep[dep].setdefault("web_search_hits", []).append(entry)
+                continue
+        general.append({"tool": tr.tool, **entry})
+
+    return {"by_dependency": by_dep, "general": general}
+
+
+def _filter_by_severity(
+    findings: list[ReportFinding], min_severity: str
+) -> list[ReportFinding]:
+    if min_severity == "any":
+        return findings
+    threshold = _SEVERITY_ORDER.get(min_severity, 0)
+    return [f for f in findings if _SEVERITY_ORDER.get(f.severity, 0) >= threshold]
+
+
+def _grounded_blast_radius(
+    tool_results: list[ToolResult], dep_name: str
+) -> BlastRadiusSummary | None:
+    for tr in tool_results:
+        if (
+            tr.tool == "blast_radius"
+            and not tr.error
+            and tr.args.get("package_name") == dep_name
+            and tr.output.get("available")
+        ):
+            return BlastRadiusSummary(
+                **{k: v for k, v in tr.output.items() if k in _BLAST_RADIUS_FIELDS}
+            )
+    return None
 
 
 async def save_report_result(state, config: RunnableConfig) -> dict:
@@ -77,17 +175,15 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
     analysis: AnalysisResult = await dao.get_analysis(state["analysis_result_id"])
     tool_results: list[ToolResult] = state.get("tool_results") or []
 
-    enrichment = "\n\n".join(
-        f"[{tr.tool}({json.dumps(tr.args)})] → {json.dumps(tr.output, indent=2)[:1500]}"
-        for tr in tool_results
-        if not tr.error
-    )
+    dep_names = sorted({f.dep_name for f in analysis.findings})
+    enrichment = _group_enrichment_by_dep(tool_results, dep_names)
 
     findings_json = json.dumps([f.model_dump() for f in analysis.findings], indent=2)
     user_prompt = (
         f"Concern: {state['concern']}\n\n"
         f"Findings:\n{findings_json}\n\n"
-        f"Enrichment data:\n{enrichment or 'None'}"
+        f"Enrichment data (grouped by dependency):\n"
+        f"{json.dumps(enrichment, indent=2, default=str)[:8000]}"
     )
 
     response = await _llm.ainvoke(
@@ -115,8 +211,30 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
         ]
         data = {}
 
+    has_web_search = any(
+        tr.tool == "web_search" and not tr.error for tr in tool_results
+    )
+    # A dependency already flagged elsewhere in this same report is itself a
+    # known risk, so it can never coherently be suggested as the "safe"
+    # alternative to a different flagged dependency.
+    flagged_dep_names_lower = {name.lower() for name in dep_names}
+    for finding in findings:
+        if not has_web_search:
+            finding.alternatives = []
+        finding.alternatives = [
+            alt
+            for alt in finding.alternatives
+            if alt.lower() not in flagged_dep_names_lower
+        ]
+        grounded = _grounded_blast_radius(tool_results, finding.dep_name)
+        if grounded is not None:
+            finding.blast_radius = grounded
+            finding.affected_files = grounded.affected_files
+
+    findings = _filter_by_severity(findings, settings.report_min_severity)
+
     overall = max(
-        (f.severity for f in analysis.findings),
+        (f.severity for f in findings),
         key=lambda s: _SEVERITY_ORDER.get(s, 0),
         default="none",
     )

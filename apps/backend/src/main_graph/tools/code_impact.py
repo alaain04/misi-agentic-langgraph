@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
+
 from langchain_core.tools import tool
 
-from src.main_graph.tools.search_code import _store_cache
+from src.main_graph.tools.search_code import _store_cache, is_indexable_source_file
 
 _SNIPPET_RADIUS = 150
 
@@ -23,7 +25,8 @@ def _snippet_around_match(content: str, needle: str) -> str:
 def make_code_impact_tool(vector_store_id: str):
     @tool
     async def code_impact(package_name: str) -> list[dict]:
-        """Find source files that import or use a specific npm package."""
+        """Find source files that import or use a specific npm package, with
+        enough surrounding code to tell what business logic depends on it."""
         store = _store_cache.get(vector_store_id)
         if store is None:
             return [{"error": f"Vector store {vector_store_id} not loaded"}]
@@ -36,6 +39,10 @@ def make_code_impact_tool(vector_store_id: str):
             }
             for doc in results
             if package_name in doc.page_content
+            # package.json/lockfiles trivially list every dependency - that's
+            # not a usage site, so it's excluded even if an older index still
+            # has it.
+            and is_indexable_source_file(os.path.basename(doc.metadata.get("file", "")))
         ]
 
     return code_impact
