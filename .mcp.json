@@ -7,6 +7,12 @@
         "serve",
         "--mcp"
       ]
+    },
+    "engram": {
+      "command": "engram",
+      "args": [
+        "mcp"
+      ]
     }
   }
 }

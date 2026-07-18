@@ -91,7 +91,7 @@ describe('mapResponseToGraphState', () => {
       iterations: [
         {
           conductor_iteration: 1,
-          tools_run: ['npm_audit', 'check_licenses'],
+          tools_run: ['npm_audit', 'dependency_stats'],
           errors: [],
           started_at: '2024-01-01T00:00:03Z',
         },
@@ -102,7 +102,7 @@ describe('mapResponseToGraphState', () => {
     const { nodes } = mapResponseToGraphState(response)
 
     const npmNode = nodes.find(n => n.id === 'tool:npm_audit:1')!
-    const licNode = nodes.find(n => n.id === 'tool:check_licenses:1')!
+    const licNode = nodes.find(n => n.id === 'tool:dependency_stats:1')!
 
     expect(npmNode).toBeDefined()
     expect(licNode).toBeDefined()

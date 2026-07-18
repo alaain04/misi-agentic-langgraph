@@ -153,40 +153,6 @@ async def install_scripts(repo_path: str) -> dict:
     return {"packages_with_scripts": packages_with_scripts}
 
 
-@register(
-    "check_licenses",
-    "Collects licenses for all dependencies and flags non-permissive licenses",
-)
-async def check_licenses(repo_path: str) -> dict:
-    nm_path = os.path.join(repo_path, "node_modules")
-    permissive = {
-        "mit",
-        "isc",
-        "bsd-2-clause",
-        "bsd-3-clause",
-        "apache-2.0",
-        "cc0-1.0",
-        "0bsd",
-        "unlicense",
-    }
-    results = []
-    if os.path.isdir(nm_path):
-        for entry in os.listdir(nm_path)[:200]:
-            pkg_path = os.path.join(nm_path, entry, "package.json")
-            try:
-                with open(pkg_path) as f:
-                    dep_pkg = json.load(f)
-                lic = dep_pkg.get("license", "UNKNOWN")
-                is_flagged = str(lic).lower() not in permissive
-                results.append(
-                    {"package": entry, "license": lic, "flagged": is_flagged}
-                )
-            except Exception:
-                pass
-    flagged = [r for r in results if r["flagged"]]
-    return {"licenses": results, "flagged_count": len(flagged), "flagged": flagged}
-
-
 @register("duplicate_packages", "Finds multiple installed versions of the same package")
 async def duplicate_packages(repo_path: str) -> dict:
     nm_path = os.path.join(repo_path, "node_modules")
