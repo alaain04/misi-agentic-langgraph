@@ -191,6 +191,7 @@ def test_registry_has_expected_agents():
     assert "maintenance_agent" in REGISTRY
     assert "supply_chain_agent" in REGISTRY
     assert "web_research_agent" in REGISTRY
+    assert "license_agent" in REGISTRY
 
 
 def test_agent_get_tools_returns_list():
