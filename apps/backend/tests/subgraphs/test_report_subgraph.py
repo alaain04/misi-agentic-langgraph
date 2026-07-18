@@ -104,6 +104,19 @@ async def test_report_produces_report_result_with_trusted_findings(
     analysis = _seed_analysis(job_id)
     await result_dao.save_analysis(analysis)
 
+    prep = PrepResult(
+        job_id=job_id,
+        repo_path="/tmp/fake-repo",
+        project_metadata={},
+        manifest_files=[],
+        detected_package_manager="npm",
+        dependency_graph={},
+        discovery_summary="",
+        vector_store_id="",
+        codegraph_ready=False,
+    )
+    prep_result_id = await result_dao.save_prep(prep)
+
     decisions = {
         "lodash": _finalize(
             ReportFinding(
@@ -144,7 +157,7 @@ async def test_report_produces_report_result_with_trusted_findings(
             {
                 "job_id": job_id,
                 "concern": "security vulnerabilities",
-                "prep_result_id": "unused-for-report",
+                "prep_result_id": prep_result_id,
                 "analysis_result_id": analysis.id,
             },
             config=subgraph_config,
@@ -210,6 +223,19 @@ async def test_report_drops_low_severity_findings_before_enrichment(
     analysis = _seed_analysis(job_id, findings=findings)
     await result_dao.save_analysis(analysis)
 
+    prep = PrepResult(
+        job_id=job_id,
+        repo_path="/tmp/fake-repo",
+        project_metadata={},
+        manifest_files=[],
+        detected_package_manager="npm",
+        dependency_graph={},
+        discovery_summary="",
+        vector_store_id="",
+        codegraph_ready=False,
+    )
+    prep_result_id = await result_dao.save_prep(prep)
+
     decisions = {
         "lodash": _finalize(
             ReportFinding(
@@ -243,7 +269,7 @@ async def test_report_drops_low_severity_findings_before_enrichment(
             {
                 "job_id": job_id,
                 "concern": "security vulnerabilities",
-                "prep_result_id": "unused-for-report",
+                "prep_result_id": prep_result_id,
                 "analysis_result_id": analysis.id,
             },
             config=subgraph_config,
@@ -272,6 +298,19 @@ async def test_report_keeps_untrusted_finding_instead_of_dropping(
     ]
     analysis = _seed_analysis(job_id, findings=findings)
     await result_dao.save_analysis(analysis)
+
+    prep = PrepResult(
+        job_id=job_id,
+        repo_path="/tmp/fake-repo",
+        project_metadata={},
+        manifest_files=[],
+        detected_package_manager="npm",
+        dependency_graph={},
+        discovery_summary="",
+        vector_store_id="",
+        codegraph_ready=False,
+    )
+    prep_result_id = await result_dao.save_prep(prep)
 
     decisions = {
         "left-pad": _finalize(
@@ -312,7 +351,7 @@ async def test_report_keeps_untrusted_finding_instead_of_dropping(
             {
                 "job_id": job_id,
                 "concern": "license compliance",
-                "prep_result_id": "unused-for-report",
+                "prep_result_id": prep_result_id,
                 "analysis_result_id": analysis.id,
             },
             config=subgraph_config,

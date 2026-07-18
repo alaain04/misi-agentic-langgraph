@@ -98,6 +98,19 @@ def _format_results(results: list[ToolResult]) -> str:
     return "\n\n".join(parts)
 
 
+def _tool_callable(fn):
+    """LangChain's @tool decorator stores a sync function's body in .func
+    and an async function's body in .coroutine (leaving .func None) — pick
+    whichever is actually callable for signature introspection."""
+    func = getattr(fn, "func", None)
+    if func is not None:
+        return func
+    coroutine = getattr(fn, "coroutine", None)
+    if coroutine is not None:
+        return coroutine
+    return fn
+
+
 async def _run_tool(tc: ToolCall, tool_map: dict, dep_name: str) -> ToolResult:
     start = time.monotonic()
     fn = tool_map.get(tc.tool)
@@ -111,7 +124,7 @@ async def _run_tool(tc: ToolCall, tool_map: dict, dep_name: str) -> ToolResult:
             duration_ms=0,
         )
     kwargs = dict(tc.args)
-    sig = inspect.signature(fn.func if hasattr(fn, "func") else fn)
+    sig = inspect.signature(_tool_callable(fn))
     if "package_name" in sig.parameters:
         # Force-injected: this subagent can only ever fetch evidence for its
         # own finding's package, regardless of what the LLM passed.
