@@ -11,11 +11,18 @@ from typing import ClassVar
 
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.critique import critique_findings
-from src.main_graph.subgraphs.analysis.agents.dependency_versions import resolve_installed_versions
+from src.main_graph.subgraphs.analysis.agents.dependency_versions import (
+    resolve_installed_versions,
+)
 from src.main_graph.tools.registry import TOOL_DESCRIPTIONS
 from src.main_graph.tools.search_code import make_search_code_tool
 from src.models.conductor import ToolCall, ToolResult
-from src.models.results import AgentDispatch, DomainAgentDecision, EvidenceBundle, PrepResult
+from src.models.results import (
+    AgentDispatch,
+    DomainAgentDecision,
+    EvidenceBundle,
+    PrepResult,
+)
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -23,7 +30,12 @@ logger = logging.getLogger(__name__)
 _MAX_ITERATIONS = 6
 _llm = get_llm(Model.GPT_5_4_MINI)
 
-_INJECTED_PARAMS = {"repo_path", "detected_package_manager", "container", "docker_image"}
+_INJECTED_PARAMS = {
+    "repo_path",
+    "detected_package_manager",
+    "container",
+    "docker_image",
+}
 
 
 def _format_params(t) -> str:
@@ -43,12 +55,16 @@ def _format_params(t) -> str:
         return ""
     parts = []
     for p in sig.parameters.values():
-        if p.name in _INJECTED_PARAMS:  # auto-injected by _run_tool, not supplied by the LLM
+        if (
+            p.name in _INJECTED_PARAMS
+        ):  # auto-injected by _run_tool, not supplied by the LLM
             continue
         ann = p.annotation
         if ann is inspect.Parameter.empty:
             ptype = ""
-        elif isinstance(ann, str):  # `from __future__ import annotations` stringifies types
+        elif isinstance(
+            ann, str
+        ):  # `from __future__ import annotations` stringifies types
             ptype = ann
         else:
             ptype = getattr(ann, "__name__", str(ann))
@@ -81,20 +97,32 @@ def _format_results(results: list[ToolResult]) -> str:
         return "No results yet."
     parts = []
     for tr in results[-10:]:
-        val = f"ERROR: {tr.error}" if tr.error else json.dumps(tr.output, indent=2)[:1500]
+        val = (
+            f"ERROR: {tr.error}" if tr.error else json.dumps(tr.output, indent=2)[:1500]
+        )
         parts.append(f"[{tr.tool}] → {val}")
     return "\n\n".join(parts)
 
 
 async def _run_tool(
-    tc: ToolCall, tool_map: dict, prep: PrepResult, container: ContainerRunPort | None = None,
+    tc: ToolCall,
+    tool_map: dict,
+    prep: PrepResult,
+    container: ContainerRunPort | None = None,
 ) -> ToolResult:
     import inspect
+
     start = time.monotonic()
     fn = tool_map.get(tc.tool)
     if fn is None:
-        return ToolResult(id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
-                          output={}, error=f"unknown tool: {tc.tool}", duration_ms=0)
+        return ToolResult(
+            id=str(uuid.uuid4()),
+            tool=tc.tool,
+            args=tc.args,
+            output={},
+            error=f"unknown tool: {tc.tool}",
+            duration_ms=0,
+        )
     try:
         sig = inspect.signature(fn.func if hasattr(fn, "func") else fn)
         kwargs = dict(tc.args)
@@ -106,22 +134,38 @@ async def _run_tool(
             kwargs["container"] = container
         if "docker_image" in sig.parameters:
             kwargs["docker_image"] = prep.docker_image
-        output = await fn.ainvoke(kwargs) if hasattr(fn, "ainvoke") else await fn(**kwargs)
-        return ToolResult(id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
-                          output=output if isinstance(output, dict) else {"result": output},
-                          error=None, duration_ms=int((time.monotonic() - start) * 1000))
+        output = (
+            await fn.ainvoke(kwargs) if hasattr(fn, "ainvoke") else await fn(**kwargs)
+        )
+        return ToolResult(
+            id=str(uuid.uuid4()),
+            tool=tc.tool,
+            args=tc.args,
+            output=output if isinstance(output, dict) else {"result": output},
+            error=None,
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
     except Exception as exc:
         logger.warning("tool %s failed: %s", tc.tool, exc)
-        return ToolResult(id=str(uuid.uuid4()), tool=tc.tool, args=tc.args,
-                          output={}, error=str(exc),
-                          duration_ms=int((time.monotonic() - start) * 1000))
+        return ToolResult(
+            id=str(uuid.uuid4()),
+            tool=tc.tool,
+            args=tc.args,
+            output={},
+            error=str(exc),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
 
 def _feedback_result(feedback: str) -> ToolResult:
     """Wrap critic feedback as a tool result so the agent sees it next iteration."""
     return ToolResult(
-        id=str(uuid.uuid4()), tool="verification_feedback", args={},
-        output={"feedback": feedback}, error=None, duration_ms=0,
+        id=str(uuid.uuid4()),
+        tool="verification_feedback",
+        args={},
+        output={"feedback": feedback},
+        error=None,
+        duration_ms=0,
     )
 
 
@@ -132,13 +176,17 @@ async def _react_loop(
     system_prompt: str,
     container: ContainerRunPort | None = None,
 ) -> tuple[EvidenceBundle, list[str], int]:
-    tool_map = {(getattr(t, "name", None) or getattr(t, "__name__", repr(t))): t for t in tools}
+    tool_map = {
+        (getattr(t, "name", None) or getattr(t, "__name__", repr(t))): t for t in tools
+    }
     tool_results: list[ToolResult] = []
     decision: DomainAgentDecision | None = None
     confidence = 0.0
     note: str | None = None
 
-    structured = _llm.with_structured_output(DomainAgentDecision, method="function_calling")
+    structured = _llm.with_structured_output(
+        DomainAgentDecision, method="function_calling"
+    )
 
     for iteration in range(_MAX_ITERATIONS):
         react_iterations = iteration + 1
@@ -146,19 +194,27 @@ async def _react_loop(
             f"Tool results so far:\n{_format_results(tool_results)}\n\n"
             f"Iteration: {iteration + 1}/{_MAX_ITERATIONS}"
         )
-        system = textwrap.dedent(system_prompt).strip().format(
-            domain=dispatch.domain,
-            hypothesis=dispatch.hypothesis,
-            packages=_format_packages(dispatch.packages_to_focus, prep.dependency_graph),
-            context=prep.discovery_summary[:500],
-            tool_descriptions=_format_tools(tools),
-            max_iter=_MAX_ITERATIONS,
+        system = (
+            textwrap.dedent(system_prompt)
+            .strip()
+            .format(
+                domain=dispatch.domain,
+                hypothesis=dispatch.hypothesis,
+                packages=_format_packages(
+                    dispatch.packages_to_focus, prep.dependency_graph
+                ),
+                context=prep.discovery_summary[:500],
+                tool_descriptions=_format_tools(tools),
+                max_iter=_MAX_ITERATIONS,
+            )
         )
         try:
-            decision = await structured.ainvoke([
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ])
+            decision = await structured.ainvoke(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ]
+            )
         except Exception as exc:
             logger.warning("structured decision failed, retrying: %s", exc)
             continue
@@ -172,7 +228,9 @@ async def _react_loop(
                 [f.dep_name for f in decision.findings], prep.dependency_graph
             )
             try:
-                verdict = await critique_findings(dispatch, decision.findings, installed)
+                verdict = await critique_findings(
+                    dispatch, decision.findings, installed
+                )
             except Exception as exc:
                 logger.warning("critique_findings failed, accepting draft: %s", exc)
                 confidence = decision.confidence
@@ -189,7 +247,10 @@ async def _react_loop(
 
         if decision.tool_calls:
             new_results = await asyncio.gather(
-                *[_run_tool(tc, tool_map, prep, container) for tc in decision.tool_calls]
+                *[
+                    _run_tool(tc, tool_map, prep, container)
+                    for tc in decision.tool_calls
+                ]
             )
             tool_results.extend(new_results)
 
@@ -220,6 +281,11 @@ class BaseAgent(ABC):
         return tools
 
     async def run(
-        self, dispatch: AgentDispatch, prep: PrepResult, container: ContainerRunPort | None = None,
+        self,
+        dispatch: AgentDispatch,
+        prep: PrepResult,
+        container: ContainerRunPort | None = None,
     ) -> tuple[EvidenceBundle, list[str], int]:
-        return await _react_loop(dispatch, prep, self.get_tools(prep), self.system_prompt, container)
+        return await _react_loop(
+            dispatch, prep, self.get_tools(prep), self.system_prompt, container
+        )

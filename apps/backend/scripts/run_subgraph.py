@@ -20,6 +20,7 @@ Usage:
 
 All subgraphs read/write from the MongoDB configured via MONGODB_URI.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -75,7 +76,9 @@ async def _run_discovery(args) -> None:
     prep = await dao.get_prep(prep_id)
     print(f"\n--- PrepResult ---")
     print(f"  package_manager : {prep.detected_package_manager}")
-    print(f"  direct deps     : {list(prep.dependency_graph.get('direct', {}).keys())[:10]}")
+    print(
+        f"  direct deps     : {list(prep.dependency_graph.get('direct', {}).keys())[:10]}"
+    )
     print(f"  summary (first 200 chars): {prep.discovery_summary[:200]}")
 
 
@@ -161,14 +164,21 @@ async def _run_report(args) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a single subgraph against real infrastructure")
+    parser = argparse.ArgumentParser(
+        description="Run a single subgraph against real infrastructure"
+    )
     parser.add_argument("subgraph", choices=["discovery", "analysis", "report"])
     parser.add_argument("--concern", required=True, help="User concern text")
     parser.add_argument("--job-id", help="Optional job ID (generated if omitted)")
 
     parser.add_argument("--repo", help="[discovery] GitHub repo URL")
-    parser.add_argument("--prep-result-id", help="[analysis] PrepResult ID from a prior discovery run")
-    parser.add_argument("--analysis-result-id", help="[report] AnalysisResult ID from a prior analysis run")
+    parser.add_argument(
+        "--prep-result-id", help="[analysis] PrepResult ID from a prior discovery run"
+    )
+    parser.add_argument(
+        "--analysis-result-id",
+        help="[report] AnalysisResult ID from a prior analysis run",
+    )
 
     args = parser.parse_args()
 

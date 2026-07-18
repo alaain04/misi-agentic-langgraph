@@ -1,12 +1,20 @@
 from langgraph.graph import END, START, StateGraph
 
 from src.main_graph.subgraphs.discovery.constants import (
-    BUILD_PROJECT_CONTEXT, CLONE_REPO, INDEX_REPO,
-    INSPECT_REPO, INSTALL_DEPS, SAVE_PREP_RESULT,
+    BUILD_PROJECT_CONTEXT,
+    CLONE_REPO,
+    INDEX_REPO,
+    INSPECT_REPO,
+    INSTALL_DEPS,
+    SAVE_PREP_RESULT,
 )
 from src.main_graph.subgraphs.discovery.nodes import (
-    build_project_context, clone_repo, index_repository,
-    inspect_repo, install_deps, save_prep_result,
+    build_project_context,
+    clone_repo,
+    index_repository,
+    inspect_repo,
+    install_deps,
+    save_prep_result,
 )
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
 

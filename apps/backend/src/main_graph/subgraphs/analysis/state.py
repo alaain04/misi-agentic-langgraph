@@ -16,9 +16,13 @@ class AnalysisState(TypedDict):
 
     # Internal
     conductor_decision: NotRequired[AnalysisConductorDecision]
-    current_dispatch: NotRequired[dict]   # AgentDispatch.model_dump() for domain_agent nodes
+    current_dispatch: NotRequired[
+        dict
+    ]  # AgentDispatch.model_dump() for domain_agent nodes
     bundle_ids: Annotated[list[str], operator.add]
-    agent_calls: Annotated[list[dict], operator.add]   # AgentCallRecord.model_dump() per domain_agent call
+    agent_calls: Annotated[
+        list[dict], operator.add
+    ]  # AgentCallRecord.model_dump() per domain_agent call
     conductor_iteration: NotRequired[int]
 
     # Output (written back to MainState)

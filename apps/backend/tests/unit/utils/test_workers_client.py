@@ -22,6 +22,7 @@ async def test_ingest_and_wait_returns_job_ids():
     with patch("src.utils.workers_client.httpx.AsyncClient", return_value=mock_client):
         with patch("src.utils.workers_client.asyncio.sleep", new_callable=AsyncMock):
             from src.utils.workers_client import ingest_and_wait
+
             result = await ingest_and_wait(["npm"], ["lodash"])
 
     assert result == {"npm": "job-1"}
@@ -46,5 +47,6 @@ async def test_ingest_and_wait_raises_on_failure():
     with patch("src.utils.workers_client.httpx.AsyncClient", return_value=mock_client):
         with patch("src.utils.workers_client.asyncio.sleep", new_callable=AsyncMock):
             from src.utils.workers_client import ingest_and_wait
+
             with pytest.raises(RuntimeError, match="failed"):
                 await ingest_and_wait(["npm"], ["lodash"])

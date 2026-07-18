@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-from src.main_graph.subgraphs.discovery.graph import _route_after_clone, _route_after_inspect
+from src.main_graph.subgraphs.discovery.graph import (
+    _route_after_clone,
+    _route_after_inspect,
+)
 from src.main_graph.subgraphs.discovery.constants import (
-    BUILD_PROJECT_CONTEXT, INSPECT_REPO, INSTALL_DEPS, INDEX_REPO,
+    BUILD_PROJECT_CONTEXT,
+    INSPECT_REPO,
+    INSTALL_DEPS,
+    INDEX_REPO,
 )
 
 
 def test_clone_error_skips_to_summary():
-    assert _route_after_clone({"discovery_error": "clone failed"}) == BUILD_PROJECT_CONTEXT
+    assert (
+        _route_after_clone({"discovery_error": "clone failed"}) == BUILD_PROJECT_CONTEXT
+    )
 
 
 def test_clone_success_goes_to_inspect():

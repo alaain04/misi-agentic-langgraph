@@ -47,13 +47,17 @@ async def test_install_scripts_detects_postinstall(repo):
 
 @pytest.mark.asyncio
 async def test_read_file_returns_content(repo):
-    result = await TOOL_REGISTRY["read_file"](repo_path=repo, relative_path="package.json")
+    result = await TOOL_REGISTRY["read_file"](
+        repo_path=repo, relative_path="package.json"
+    )
     assert "my-app" in result["content"]
 
 
 @pytest.mark.asyncio
 async def test_read_file_missing_returns_error(repo):
-    result = await TOOL_REGISTRY["read_file"](repo_path=repo, relative_path="nonexistent.txt")
+    result = await TOOL_REGISTRY["read_file"](
+        repo_path=repo, relative_path="nonexistent.txt"
+    )
     assert "error" in result
 
 
@@ -65,24 +69,37 @@ async def test_list_directory_returns_entries(repo):
 
 @pytest.mark.asyncio
 async def test_read_file_rejects_path_traversal(repo):
-    result = await TOOL_REGISTRY["read_file"](repo_path=repo, relative_path="../etc/passwd")
+    result = await TOOL_REGISTRY["read_file"](
+        repo_path=repo, relative_path="../etc/passwd"
+    )
     assert "error" in result
     assert "path traversal" in result["error"]
 
 
 @pytest.mark.asyncio
 async def test_list_directory_rejects_path_traversal(repo):
-    result = await TOOL_REGISTRY["list_directory"](repo_path=repo, relative_path="../etc")
+    result = await TOOL_REGISTRY["list_directory"](
+        repo_path=repo, relative_path="../etc"
+    )
     assert "error" in result
     assert "path traversal" in result["error"]
 
 
 def test_all_package_file_tools_registered():
     expected = [
-        "package_json", "package_lock", "version_ranges", "dependency_confusion",
-        "install_scripts", "check_licenses", "duplicate_packages", "missing_dependencies",
-        "dependency_size", "dependency_stats", "workspace_dependencies",
-        "read_file", "list_directory",
+        "package_json",
+        "package_lock",
+        "version_ranges",
+        "dependency_confusion",
+        "install_scripts",
+        "check_licenses",
+        "duplicate_packages",
+        "missing_dependencies",
+        "dependency_size",
+        "dependency_stats",
+        "workspace_dependencies",
+        "read_file",
+        "list_directory",
     ]
     for name in expected:
         assert name in TOOL_REGISTRY, f"{name} not in TOOL_REGISTRY"

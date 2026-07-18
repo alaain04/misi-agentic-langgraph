@@ -12,7 +12,11 @@ async def test_web_search_returns_results():
     fake_response.raise_for_status = MagicMock()
     fake_response.json.return_value = {
         "results": [
-            {"title": "lodash alternative", "url": "https://example.com", "content": "Use ramda instead"}
+            {
+                "title": "lodash alternative",
+                "url": "https://example.com",
+                "content": "Use ramda instead",
+            }
         ]
     }
 
@@ -23,7 +27,10 @@ async def test_web_search_returns_results():
 
     with (
         patch("src.main_graph.tools.external_api.settings") as mock_settings,
-        patch("src.main_graph.tools.external_api.httpx.AsyncClient", return_value=mock_client),
+        patch(
+            "src.main_graph.tools.external_api.httpx.AsyncClient",
+            return_value=mock_client,
+        ),
     ):
         mock_settings.tavily_api_key = "test-key"
         result = await TOOL_REGISTRY["web_search"](query="lodash alternatives npm")
@@ -51,7 +58,10 @@ async def test_web_search_handles_http_error():
 
     with (
         patch("src.main_graph.tools.external_api.settings") as mock_settings,
-        patch("src.main_graph.tools.external_api.httpx.AsyncClient", return_value=mock_client),
+        patch(
+            "src.main_graph.tools.external_api.httpx.AsyncClient",
+            return_value=mock_client,
+        ),
     ):
         mock_settings.tavily_api_key = "test-key"
         result = await TOOL_REGISTRY["web_search"](query="test")

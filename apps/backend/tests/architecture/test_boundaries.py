@@ -69,16 +69,22 @@ def test_domain_ports_have_no_infrastructure_imports():
             for forbidden in _FORBIDDEN_IN_DOMAIN_PORTS:
                 if imp.startswith(forbidden):
                     violations.append(f"{port_file.name}: imports {imp}")
-    assert not violations, "Forbidden imports in domain ports:\n" + "\n".join(violations)
+    assert not violations, "Forbidden imports in domain ports:\n" + "\n".join(
+        violations
+    )
 
 
 def test_service_files_do_not_import_from_langgraph():
     """subgraph service.py files must not import from langgraph (orchestration belongs in nodes)."""
     violations = []
-    service_files = list(_SRC.glob("main_graph/**/service.py")) + list(_SRC.glob("main_graph/nodes/*_service.py"))
+    service_files = list(_SRC.glob("main_graph/**/service.py")) + list(
+        _SRC.glob("main_graph/nodes/*_service.py")
+    )
     for svc_file in service_files:
         imports = _get_imports(svc_file)
         bad = {i for i in imports if i.startswith("langgraph")}
         if bad:
             violations.append(f"{svc_file.relative_to(_SRC)}: {bad}")
-    assert not violations, "LangGraph imports in service files:\n" + "\n".join(violations)
+    assert not violations, "LangGraph imports in service files:\n" + "\n".join(
+        violations
+    )

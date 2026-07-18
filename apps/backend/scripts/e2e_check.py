@@ -13,6 +13,7 @@ Exit codes:
     1  criteria failures or job failed
     2  cannot reach backend
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,14 @@ import urllib.request
 from urllib.error import URLError
 
 BASE = "http://localhost:8000"
-_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "none": -1}
+_SEVERITY_RANK = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "info": 0,
+    "none": -1,
+}
 _ARTIFACT_NODES = ("prep", "analysis", "report")
 
 
@@ -31,7 +39,9 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
     url = f"{BASE}{path}"
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(
-        url, data=data, method=method,
+        url,
+        data=data,
+        method=method,
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -78,11 +88,15 @@ def _check_criteria(report: dict, findings: list[dict]) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run one E2E analysis and check criteria")
+    parser = argparse.ArgumentParser(
+        description="Run one E2E analysis and check criteria"
+    )
     parser.add_argument("--repo", required=True, help="GitHub repo URL")
     parser.add_argument("--concern", required=True, help="User concern text")
     parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--timeout", type=int, default=900, help="Per-phase timeout in seconds")
+    parser.add_argument(
+        "--timeout", type=int, default=900, help="Per-phase timeout in seconds"
+    )
     args = parser.parse_args()
 
     global BASE
@@ -92,11 +106,15 @@ def main() -> None:
     print(f"Concern : {args.concern}\n")
 
     # 1. Start analysis (autopilot=True skips any HITL gates)
-    resp = _request("POST", "/analyze", {
-        "repo_url": args.repo,
-        "concern": args.concern,
-        "autopilot": True,
-    })
+    resp = _request(
+        "POST",
+        "/analyze",
+        {
+            "repo_url": args.repo,
+            "concern": args.concern,
+            "autopilot": True,
+        },
+    )
     trace_id = resp["trace_id"]
     print(f"trace_id: {trace_id}\n")
 

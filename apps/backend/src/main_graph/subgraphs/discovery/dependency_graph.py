@@ -325,9 +325,7 @@ def _parse_yarn_classic_lock(
     return installed, edges, root_keys
 
 
-def _parse_yarn_berry_lock(
-    lock: dict, direct_names: dict[str, str]
-) -> _ParsedLock:
+def _parse_yarn_berry_lock(lock: dict, direct_names: dict[str, str]) -> _ParsedLock:
     """Berry stores per-package dependency ranges (not resolved versions),
     same as Classic — so root_keys/edges are resolved the same way, via a
     descriptor->key index. "resolution" (e.g. "foo@npm:1.2.3") is already

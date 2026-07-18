@@ -37,6 +37,7 @@ async def save_analysis_result(state: AnalysisState, config: RunnableConfig) -> 
 
     logger.info(
         "save_analysis_result: saved analysis_result_id=%s findings=%d",
-        analysis_result_id, len(all_findings),
+        analysis_result_id,
+        len(all_findings),
     )
     return {"analysis_result_id": analysis_result_id}

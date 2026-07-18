@@ -12,7 +12,9 @@ from src.main_graph.subgraphs.discovery.state import DiscoveryState
 logger = logging.getLogger(__name__)
 
 _LOCK_FILE_NAMES = {
-    "pnpm": "pnpm-lock.yaml", "yarn": "yarn.lock", "npm": "package-lock.json",
+    "pnpm": "pnpm-lock.yaml",
+    "yarn": "yarn.lock",
+    "npm": "package-lock.json",
 }
 
 
@@ -25,12 +27,17 @@ def _install_command(pm: str, pm_version: str) -> str:
 async def _run_with_peer_retry(
     container: ContainerRunPort, image: str, volume: str, cmd: str, pm: str
 ) -> tuple[int, str, str]:
-    rc, out, err = await container.run(image=image, command=cmd, volume=volume, run_as_root=True)
+    rc, out, err = await container.run(
+        image=image, command=cmd, volume=volume, run_as_root=True
+    )
     if rc == 0 or pm == "pnpm":
         return rc, out, err
     if "ERESOLVE" in err or "ESBOMPROBLEMS" in err or "peer" in err.lower():
         rc, out, err = await container.run(
-            image=image, command=cmd + " --legacy-peer-deps", volume=volume, run_as_root=True
+            image=image,
+            command=cmd + " --legacy-peer-deps",
+            volume=volume,
+            run_as_root=True,
         )
     if rc != 0 and ("ERESOLVE" in err or "peer" in err.lower()):
         rc, out, err = await container.run(

@@ -74,7 +74,10 @@ def inspect_repo(state: DiscoveryState) -> dict:
 
     logger.info(
         "inspect_repo: pm=%s version=%s has_lock=%s image=%s",
-        detected_pm, pm_version, has_lock_file, docker_image,
+        detected_pm,
+        pm_version,
+        has_lock_file,
+        docker_image,
     )
 
     return {

@@ -21,7 +21,9 @@ def make_docker_tool(container: ContainerRunPort):
 
         Returns JSON with keys: returncode (int), stdout (str), stderr (str).
         """
-        returncode, stdout, stderr = await container.run(image, command, volume, run_as_root=True)
+        returncode, stdout, stderr = await container.run(
+            image, command, volume, run_as_root=True
+        )
         return json.dumps(
             {"returncode": returncode, "stdout": stdout, "stderr": stderr}
         )

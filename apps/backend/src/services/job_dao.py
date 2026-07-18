@@ -70,12 +70,16 @@ class JobDAO(JobRepositoryPort):
         if result.matched_count == 0:
             await self._col.update_one(
                 {"_id": job_id},
-                {"$push": {"artifacts": {
-                    "node": node,
-                    "status": "running",
-                    "started_at": now,
-                    "completed_at": None,
-                }}},
+                {
+                    "$push": {
+                        "artifacts": {
+                            "node": node,
+                            "status": "running",
+                            "started_at": now,
+                            "completed_at": None,
+                        }
+                    }
+                },
             )
 
     async def complete_artifact(self, job_id: str, node: str, status: str) -> None:
@@ -100,7 +104,9 @@ class JobDAO(JobRepositoryPort):
                 },
             )
 
-    async def push_artifact_message(self, job_id: str, node: str, message: dict) -> None:
+    async def push_artifact_message(
+        self, job_id: str, node: str, message: dict
+    ) -> None:
         """Append a chat message to the artifact's messages array.
 
         Upserts the artifact with status 'running' if it does not exist yet.
@@ -114,16 +120,22 @@ class JobDAO(JobRepositoryPort):
             now = datetime.now(UTC)
             await self._col.update_one(
                 {"_id": job_id},
-                {"$push": {"artifacts": {
-                    "node": node,
-                    "status": "running",
-                    "started_at": now,
-                    "completed_at": None,
-                    "messages": [message],
-                }}},
+                {
+                    "$push": {
+                        "artifacts": {
+                            "node": node,
+                            "status": "running",
+                            "started_at": now,
+                            "completed_at": None,
+                            "messages": [message],
+                        }
+                    }
+                },
             )
 
-    async def push_artifact_item(self, job_id: str, node: str, field: str, item: dict) -> None:
+    async def push_artifact_item(
+        self, job_id: str, node: str, field: str, item: dict
+    ) -> None:
         """Append an item to an array field inside an existing artifact entry."""
         await self._col.update_one(
             {"_id": job_id, "artifacts.node": node},

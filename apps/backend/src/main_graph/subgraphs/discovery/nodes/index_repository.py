@@ -64,5 +64,7 @@ async def index_repository(state: dict) -> dict:
         await store.aadd_documents(docs)
 
     set_vector_store(vector_store_id, store)
-    logger.info("index_repository: vector_store_id=%s docs=%d", vector_store_id, len(docs))
+    logger.info(
+        "index_repository: vector_store_id=%s docs=%d", vector_store_id, len(docs)
+    )
     return {"vector_store_id": vector_store_id}

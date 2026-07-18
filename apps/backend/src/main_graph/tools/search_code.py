@@ -10,7 +10,17 @@ logger = logging.getLogger(__name__)
 _store_cache: dict[str, InMemoryVectorStore] = {}
 _embeddings = OpenAIEmbeddings(api_key=settings.openai_api_key)
 
-_SOURCE_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".mts", ".cts"}
+_SOURCE_EXTENSIONS = {
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".json",
+    ".mts",
+    ".cts",
+}
 
 
 def get_vector_store(vector_store_id: str) -> InMemoryVectorStore | None:

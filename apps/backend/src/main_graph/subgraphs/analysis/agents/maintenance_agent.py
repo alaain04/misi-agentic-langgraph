@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
-from src.main_graph.tools.external_api import high_risk_packages, package_reputation, unmaintained_packages
+from src.main_graph.tools.external_api import (
+    high_risk_packages,
+    package_reputation,
+    unmaintained_packages,
+)
 
 
 class MaintenanceAgent(BaseAgent):

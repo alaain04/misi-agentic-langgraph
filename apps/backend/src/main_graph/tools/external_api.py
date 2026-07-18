@@ -1,4 +1,5 @@
 """External API tools (★) — all have 10s timeout and session-level cache."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,9 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-async def _get(url: str, headers: dict | None = None, params: dict | None = None) -> dict:
+async def _get(
+    url: str, headers: dict | None = None, params: dict | None = None
+) -> dict:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.get(url, headers=headers or {}, params=params or {})
         r.raise_for_status()
@@ -33,7 +36,9 @@ async def _npm_metadata(package_name: str) -> dict:
     if key in _cache:
         return _cache[key]
     try:
-        data = await asyncio.wait_for(_get(f"https://registry.npmjs.org/{package_name}"), _TIMEOUT)
+        data = await asyncio.wait_for(
+            _get(f"https://registry.npmjs.org/{package_name}"), _TIMEOUT
+        )
         _cache[key] = data
         return data
     except Exception as exc:
@@ -57,7 +62,10 @@ async def _npm_weekly_downloads(package_name: str) -> int | None:
         return None
 
 
-@register("github_advisory", "Queries GitHub Advisory Database (GraphQL) for known vulnerabilities in a package")
+@register(
+    "github_advisory",
+    "Queries GitHub Advisory Database (GraphQL) for known vulnerabilities in a package",
+)
 async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
     key = f"advisory:{ecosystem}:{package_name}"
     if key in _cache:
@@ -82,8 +90,14 @@ async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.post(
                 "https://api.github.com/graphql",
-                json={"query": query, "variables": {"ecosystem": ecosystem, "package": package_name}},
-                headers={"Authorization": f"bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "query": query,
+                    "variables": {"ecosystem": ecosystem, "package": package_name},
+                },
+                headers={
+                    "Authorization": f"bearer {token}",
+                    "Content-Type": "application/json",
+                },
             )
             r.raise_for_status()
             data = r.json()
@@ -95,8 +109,12 @@ async def github_advisory(package_name: str, ecosystem: str = "NPM") -> dict:
         return {"error": str(exc), "advisories": []}
 
 
-@register("osv_lookup", "Queries OSV.dev for vulnerability records for a package version")
-async def osv_lookup(package_name: str, version: str = "", ecosystem: str = "npm") -> dict:
+@register(
+    "osv_lookup", "Queries OSV.dev for vulnerability records for a package version"
+)
+async def osv_lookup(
+    package_name: str, version: str = "", ecosystem: str = "npm"
+) -> dict:
     key = f"osv:{ecosystem}:{package_name}:{version}"
     if key in _cache:
         return _cache[key]
@@ -109,14 +127,22 @@ async def osv_lookup(package_name: str, version: str = "", ecosystem: str = "npm
             r.raise_for_status()
             data = r.json()
         vulns = data.get("vulns", [])
-        result = {"package": package_name, "version": version, "vulnerabilities": vulns, "count": len(vulns)}
+        result = {
+            "package": package_name,
+            "version": version,
+            "vulnerabilities": vulns,
+            "count": len(vulns),
+        }
         _cache[key] = result
         return result
     except Exception as exc:
         return {"error": str(exc), "vulnerabilities": []}
 
 
-@register("package_reputation", "Reports package age, maintainers, release cadence, popularity, and weekly downloads via npm registry")
+@register(
+    "package_reputation",
+    "Reports package age, maintainers, release cadence, popularity, and weekly downloads via npm registry",
+)
 async def package_reputation(package_name: str) -> dict:
     meta, weekly_downloads = await asyncio.gather(
         _npm_metadata(package_name),
@@ -142,7 +168,10 @@ async def package_reputation(package_name: str) -> dict:
     }
 
 
-@register("unmaintained_packages", "Flags packages with no releases for 12+ months based on npm registry data")
+@register(
+    "unmaintained_packages",
+    "Flags packages with no releases for 12+ months based on npm registry data",
+)
 async def unmaintained_packages(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     deps = list(_all_deps(pkg).keys())
@@ -164,10 +193,36 @@ async def unmaintained_packages(repo_path: str) -> dict:
 
 
 _POPULAR_PACKAGES = {
-    "lodash", "express", "react", "vue", "angular", "webpack", "babel", "eslint",
-    "prettier", "jest", "mocha", "axios", "moment", "dayjs", "uuid", "chalk",
-    "commander", "yargs", "dotenv", "cors", "helmet", "passport", "sequelize",
-    "mongoose", "redis", "bull", "socket.io", "ws", "http-proxy", "node-fetch",
+    "lodash",
+    "express",
+    "react",
+    "vue",
+    "angular",
+    "webpack",
+    "babel",
+    "eslint",
+    "prettier",
+    "jest",
+    "mocha",
+    "axios",
+    "moment",
+    "dayjs",
+    "uuid",
+    "chalk",
+    "commander",
+    "yargs",
+    "dotenv",
+    "cors",
+    "helmet",
+    "passport",
+    "sequelize",
+    "mongoose",
+    "redis",
+    "bull",
+    "socket.io",
+    "ws",
+    "http-proxy",
+    "node-fetch",
 }
 
 
@@ -185,7 +240,10 @@ def _edit_distance(a: str, b: str) -> int:
     return prev[-1]
 
 
-@register("typosquat_detection", "Detects package names similar to popular packages (edit distance <= 2)")
+@register(
+    "typosquat_detection",
+    "Detects package names similar to popular packages (edit distance <= 2)",
+)
 async def typosquat_detection(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     deps = list(_all_deps(pkg).keys())
@@ -195,12 +253,17 @@ async def typosquat_detection(repo_path: str) -> dict:
         for popular in _POPULAR_PACKAGES:
             dist = _edit_distance(dep_clean, popular)
             if dep_clean != popular and dist <= 2:
-                flagged.append({"package": dep, "similar_to": popular, "edit_distance": dist})
+                flagged.append(
+                    {"package": dep, "similar_to": popular, "edit_distance": dist}
+                )
                 break
     return {"potential_typosquats": flagged, "checked": len(deps)}
 
 
-@register("high_risk_packages", "Flags packages with unusual risk characteristics (new, single-maintainer, abandoned)")
+@register(
+    "high_risk_packages",
+    "Flags packages with unusual risk characteristics (new, single-maintainer, abandoned)",
+)
 async def high_risk_packages(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
     deps = list(_all_deps(pkg).keys())
@@ -236,7 +299,10 @@ async def high_risk_packages(repo_path: str) -> dict:
     return {"high_risk": flagged, "checked": min(len(deps), 30)}
 
 
-@register("web_search", "Searches the web for package alternatives, security advisories, or migration guides")
+@register(
+    "web_search",
+    "Searches the web for package alternatives, security advisories, or migration guides",
+)
 async def web_search(query: str) -> dict:
     if not settings.tavily_api_key:
         return {"error": "TAVILY_API_KEY not configured", "results": []}
@@ -244,12 +310,20 @@ async def web_search(query: str) -> dict:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.post(
                 "https://api.tavily.com/search",
-                json={"api_key": settings.tavily_api_key, "query": query, "max_results": 5},
+                json={
+                    "api_key": settings.tavily_api_key,
+                    "query": query,
+                    "max_results": 5,
+                },
             )
             r.raise_for_status()
             data = r.json()
         results = [
-            {"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("content", "")}
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", ""),
+            }
             for item in data.get("results", [])
         ]
         return {"query": query, "results": results}

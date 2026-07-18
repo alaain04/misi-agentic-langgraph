@@ -1,4 +1,5 @@
 """Unit test: push_artifact_message contract via the abstract port."""
+
 from src.domain.ports.job_repository_port import JobRepositoryPort
 import inspect
 

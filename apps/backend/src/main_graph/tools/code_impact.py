@@ -10,7 +10,7 @@ def make_code_impact_tool(vector_store_id: str):
         store = _store_cache.get(vector_store_id)
         if store is None:
             return [{"error": f"Vector store {vector_store_id} not loaded"}]
-        query = f'import {package_name} require {package_name}'
+        query = f"import {package_name} require {package_name}"
         results = await store.asimilarity_search(query, k=20)
         return [
             {"file": doc.metadata.get("file", ""), "snippet": doc.page_content[:300]}

@@ -11,12 +11,18 @@ def _decision(**kwargs) -> ReportConductorDecision:
 
 
 def test_finalize_goes_to_save():
-    assert _after_conductor({"conductor_decision": _decision(finalize=True)}) == "save_report_result"
+    assert (
+        _after_conductor({"conductor_decision": _decision(finalize=True)})
+        == "save_report_result"
+    )
 
 
 def test_tool_calls_go_to_runner():
     tc = ToolCall(tool="web_search", args={"query": "q"}, reason="r")
-    assert _after_conductor({"conductor_decision": _decision(tool_calls=[tc])}) == "report_tool_runner"
+    assert (
+        _after_conductor({"conductor_decision": _decision(tool_calls=[tc])})
+        == "report_tool_runner"
+    )
 
 
 def test_empty_decision_finalizes():

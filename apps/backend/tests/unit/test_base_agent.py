@@ -2,23 +2,34 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from src.models.results import AgentDispatch, EvidenceBundle, PrepResult, DomainAgentDecision
+from src.models.results import (
+    AgentDispatch,
+    EvidenceBundle,
+    PrepResult,
+    DomainAgentDecision,
+)
 from src.models.conductor import FindingNote
 
 
 def _prep() -> PrepResult:
     return PrepResult(
-        job_id="j1", repo_path="/tmp/r", project_metadata={},
-        manifest_files=[], detected_package_manager="npm",
+        job_id="j1",
+        repo_path="/tmp/r",
+        project_metadata={},
+        manifest_files=[],
+        detected_package_manager="npm",
         dependency_graph={},
-        discovery_summary="s", vector_store_id="vs1",
+        discovery_summary="s",
+        vector_store_id="vs1",
     )
 
 
 def _dispatch(agent_type: str = "vulnerability_agent") -> AgentDispatch:
     return AgentDispatch(
-        domain="vulnerabilities", hypothesis="check CVEs",
-        packages_to_focus=["express"], agent_type=agent_type,
+        domain="vulnerabilities",
+        hypothesis="check CVEs",
+        packages_to_focus=["express"],
+        agent_type=agent_type,
     )
 
 
@@ -30,19 +41,39 @@ async def test_vulnerability_agent_run_extracts_all_audit_findings():
 
     audit_output = {
         "advisories": {
-            "1": {"module_name": "lodash", "severity": "high", "title": "Code injection",
-                  "vulnerable_versions": "<=4.17.23", "patched_versions": "<0.0.0",
-                  "cves": ["CVE-1"], "url": "https://x/1", "findings": [{"version": "4.17.21"}]},
-            "2": {"module_name": "form-data", "severity": "critical", "title": "Unsafe random",
-                  "vulnerable_versions": "<2.5.4", "patched_versions": ">=2.5.4",
-                  "cves": [], "url": "https://x/2", "findings": [{"version": "2.5.0"}]},
+            "1": {
+                "module_name": "lodash",
+                "severity": "high",
+                "title": "Code injection",
+                "vulnerable_versions": "<=4.17.23",
+                "patched_versions": "<0.0.0",
+                "cves": ["CVE-1"],
+                "url": "https://x/1",
+                "findings": [{"version": "4.17.21"}],
+            },
+            "2": {
+                "module_name": "form-data",
+                "severity": "critical",
+                "title": "Unsafe random",
+                "vulnerable_versions": "<2.5.4",
+                "patched_versions": ">=2.5.4",
+                "cves": [],
+                "url": "https://x/2",
+                "findings": [{"version": "2.5.0"}],
+            },
         }
     }
     audit = AsyncMock(return_value=audit_output)
 
-    with patch.object(vulnerability_agent, "npm_audit", audit), \
-         patch.object(vulnerability_agent.settings, "vuln_min_severity", "high"):
-        bundle, tools_used, react_iterations = await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep())
+    with (
+        patch.object(vulnerability_agent, "npm_audit", audit),
+        patch.object(vulnerability_agent.settings, "vuln_min_severity", "high"),
+    ):
+        (
+            bundle,
+            tools_used,
+            react_iterations,
+        ) = await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep())
 
     assert isinstance(bundle, EvidenceBundle)
     assert tools_used == ["npm_audit"]
@@ -63,7 +94,9 @@ async def test_vulnerability_agent_run_passes_container_and_docker_image():
     fake_container = AsyncMock()
 
     with patch.object(vulnerability_agent, "npm_audit", audit):
-        await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep(), fake_container)
+        await vulnerability_agent.VulnerabilityAgent().run(
+            _dispatch(), _prep(), fake_container
+        )
 
     _, kwargs = audit.call_args
     assert kwargs["container"] is fake_container
@@ -79,14 +112,25 @@ async def test_agent_run_accepts_bare_async_functions():
         return {"vulnerabilities": []}
 
     final_decision = DomainAgentDecision(
-        tool_calls=[], findings=[],
-        summary="No issues", confidence=0.8, finalize=True, reasoning="done",
+        tool_calls=[],
+        findings=[],
+        summary="No issues",
+        confidence=0.8,
+        finalize=True,
+        reasoning="done",
     )
     mock_llm = MagicMock()
-    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=final_decision)
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=final_decision
+    )
 
     with patch("src.main_graph.subgraphs.analysis.agents.base_agent._llm", mock_llm):
-        bundle, tools_used, react_iterations = await _react_loop(_dispatch(), _prep(), [npm_audit], "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}")
+        bundle, tools_used, react_iterations = await _react_loop(
+            _dispatch(),
+            _prep(),
+            [npm_audit],
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+        )
 
     assert isinstance(bundle, EvidenceBundle)
     assert bundle.domain == "vulnerabilities"
@@ -108,7 +152,9 @@ async def test_run_tool_injects_container_and_docker_image():
 
     fake_container = AsyncMock()
     tc = ToolCall(tool="container_tool", args={}, reason="test")
-    result = await _run_tool(tc, {"container_tool": container_tool}, _prep(), fake_container)
+    result = await _run_tool(
+        tc, {"container_tool": container_tool}, _prep(), fake_container
+    )
 
     assert result.error is None
     assert received_kwargs["container"] is fake_container
@@ -118,8 +164,13 @@ async def test_run_tool_injects_container_and_docker_image():
 def test_format_params_excludes_injected_params():
     from src.main_graph.subgraphs.analysis.agents.base_agent import _format_params
 
-    async def some_tool(package_name: str, repo_path: str, detected_package_manager: str,
-                         container, docker_image: str) -> dict: ...
+    async def some_tool(
+        package_name: str,
+        repo_path: str,
+        detected_package_manager: str,
+        container,
+        docker_image: str,
+    ) -> dict: ...
 
     sig = _format_params(some_tool)
     assert "package_name" in sig
@@ -131,6 +182,7 @@ def test_format_params_excludes_injected_params():
 
 def test_registry_has_expected_agents():
     from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
+
     assert "vulnerability_agent" in REGISTRY
     assert "maintenance_agent" in REGISTRY
     assert "supply_chain_agent" in REGISTRY
@@ -138,7 +190,10 @@ def test_registry_has_expected_agents():
 
 
 def test_agent_get_tools_returns_list():
-    from src.main_graph.subgraphs.analysis.agents.vulnerability_agent import VulnerabilityAgent
+    from src.main_graph.subgraphs.analysis.agents.vulnerability_agent import (
+        VulnerabilityAgent,
+    )
+
     tools = VulnerabilityAgent().get_tools(_prep())
     assert isinstance(tools, list)
     assert len(tools) > 0
@@ -146,8 +201,12 @@ def test_agent_get_tools_returns_list():
 
 def _finalize_decision(findings, confidence=0.9):
     return DomainAgentDecision(
-        tool_calls=[], findings=findings,
-        summary="draft", confidence=confidence, finalize=True, reasoning="done",
+        tool_calls=[],
+        findings=findings,
+        summary="draft",
+        confidence=confidence,
+        finalize=True,
+        reasoning="done",
     )
 
 
@@ -156,20 +215,30 @@ async def test_react_loop_self_corrects_then_passes():
     from src.main_graph.subgraphs.analysis.agents import base_agent
     from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
 
-    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    finding = FindingNote(
+        dep_name="express", severity="high", description="CVE", evidence=[]
+    )
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
         return_value=_finalize_decision([finding])
     )
-    critic = AsyncMock(side_effect=[
-        FindingsVerdict(ok=False, feedback="add evidence for express", calibrated_confidence=0.2),
-        FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.85),
-    ])
+    critic = AsyncMock(
+        side_effect=[
+            FindingsVerdict(
+                ok=False, feedback="add evidence for express", calibrated_confidence=0.2
+            ),
+            FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.85),
+        ]
+    )
 
-    with patch.object(base_agent, "_llm", mock_llm), \
-         patch.object(base_agent, "critique_findings", critic):
+    with (
+        patch.object(base_agent, "_llm", mock_llm),
+        patch.object(base_agent, "critique_findings", critic),
+    ):
         bundle, tools_used, react_iterations = await base_agent._react_loop(
-            _dispatch(), _prep(), [],
+            _dispatch(),
+            _prep(),
+            [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
@@ -186,20 +255,30 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
     from src.main_graph.subgraphs.analysis.agents import base_agent
     from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
 
-    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    finding = FindingNote(
+        dep_name="express", severity="high", description="CVE", evidence=[]
+    )
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
         return_value=_finalize_decision([finding])
     )
-    critic = AsyncMock(return_value=FindingsVerdict(
-        ok=False, feedback="express finding unsupported", calibrated_confidence=0.1,
-    ))
+    critic = AsyncMock(
+        return_value=FindingsVerdict(
+            ok=False,
+            feedback="express finding unsupported",
+            calibrated_confidence=0.1,
+        )
+    )
 
-    with patch.object(base_agent, "_llm", mock_llm), \
-         patch.object(base_agent, "_MAX_ITERATIONS", 2), \
-         patch.object(base_agent, "critique_findings", critic):
+    with (
+        patch.object(base_agent, "_llm", mock_llm),
+        patch.object(base_agent, "_MAX_ITERATIONS", 2),
+        patch.object(base_agent, "critique_findings", critic),
+    ):
         bundle, tools_used, react_iterations = await base_agent._react_loop(
-            _dispatch(), _prep(), [],
+            _dispatch(),
+            _prep(),
+            [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
@@ -214,17 +293,23 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
 async def test_react_loop_critic_failure_degrades_to_pass():
     from src.main_graph.subgraphs.analysis.agents import base_agent
 
-    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    finding = FindingNote(
+        dep_name="express", severity="high", description="CVE", evidence=[]
+    )
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
         return_value=_finalize_decision([finding], confidence=0.9)
     )
     critic = AsyncMock(side_effect=RuntimeError("critic down"))
 
-    with patch.object(base_agent, "_llm", mock_llm), \
-         patch.object(base_agent, "critique_findings", critic):
+    with (
+        patch.object(base_agent, "_llm", mock_llm),
+        patch.object(base_agent, "critique_findings", critic),
+    ):
         bundle, tools_used, react_iterations = await base_agent._react_loop(
-            _dispatch(), _prep(), [],
+            _dispatch(),
+            _prep(),
+            [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
@@ -241,17 +326,28 @@ async def test_react_loop_survives_malformed_decision_then_recovers():
     from src.main_graph.subgraphs.analysis.agents import base_agent
     from src.main_graph.subgraphs.analysis.agents.critique import FindingsVerdict
 
-    finding = FindingNote(dep_name="express", severity="high", description="CVE", evidence=[])
+    finding = FindingNote(
+        dep_name="express", severity="high", description="CVE", evidence=[]
+    )
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
-        side_effect=[ValueError("2 validation errors for DomainAgentDecision"), _finalize_decision([finding])]
+        side_effect=[
+            ValueError("2 validation errors for DomainAgentDecision"),
+            _finalize_decision([finding]),
+        ]
     )
-    critic = AsyncMock(return_value=FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.9))
+    critic = AsyncMock(
+        return_value=FindingsVerdict(ok=True, feedback="", calibrated_confidence=0.9)
+    )
 
-    with patch.object(base_agent, "_llm", mock_llm), \
-         patch.object(base_agent, "critique_findings", critic):
+    with (
+        patch.object(base_agent, "_llm", mock_llm),
+        patch.object(base_agent, "critique_findings", critic),
+    ):
         bundle, tools_used, react_iterations = await base_agent._react_loop(
-            _dispatch(), _prep(), [],
+            _dispatch(),
+            _prep(),
+            [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 
@@ -272,10 +368,14 @@ async def test_react_loop_skips_critic_when_no_findings():
     )
     critic = AsyncMock()
 
-    with patch.object(base_agent, "_llm", mock_llm), \
-         patch.object(base_agent, "critique_findings", critic):
+    with (
+        patch.object(base_agent, "_llm", mock_llm),
+        patch.object(base_agent, "critique_findings", critic),
+    ):
         bundle, tools_used, react_iterations = await base_agent._react_loop(
-            _dispatch(), _prep(), [],
+            _dispatch(),
+            _prep(),
+            [],
             "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
         )
 

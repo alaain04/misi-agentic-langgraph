@@ -5,33 +5,83 @@ from src.main_graph.subgraphs.analysis.agents.audit_parser import parse_audit_fi
 # pnpm / npm v6 shape
 _ADVISORIES = {
     "advisories": {
-        "1": {"module_name": "lodash", "severity": "high", "title": "Code injection",
-              "vulnerable_versions": ">=4.0.0 <=4.17.23", "patched_versions": "<0.0.0",
-              "cves": ["CVE-1"], "url": "https://x/1", "findings": [{"version": "4.17.21"}]},
-        "2": {"module_name": "form-data", "severity": "critical", "title": "Unsafe random",
-              "vulnerable_versions": "<2.5.4", "patched_versions": ">=2.5.4",
-              "cves": [], "url": "https://x/2", "findings": [{"version": "2.5.0"}]},
-        "3": {"module_name": "qs", "severity": "moderate", "title": "DoS",
-              "vulnerable_versions": "<6.5.3", "patched_versions": ">=6.5.3",
-              "cves": [], "url": "https://x/3", "findings": [{"version": "6.5.0"}]},
-        "4": {"module_name": "tmp", "severity": "low", "title": "Symlink write",
-              "vulnerable_versions": "<0.2.4", "patched_versions": ">=0.2.4",
-              "cves": [], "url": "https://x/4", "findings": [{"version": "0.2.0"}]},
+        "1": {
+            "module_name": "lodash",
+            "severity": "high",
+            "title": "Code injection",
+            "vulnerable_versions": ">=4.0.0 <=4.17.23",
+            "patched_versions": "<0.0.0",
+            "cves": ["CVE-1"],
+            "url": "https://x/1",
+            "findings": [{"version": "4.17.21"}],
+        },
+        "2": {
+            "module_name": "form-data",
+            "severity": "critical",
+            "title": "Unsafe random",
+            "vulnerable_versions": "<2.5.4",
+            "patched_versions": ">=2.5.4",
+            "cves": [],
+            "url": "https://x/2",
+            "findings": [{"version": "2.5.0"}],
+        },
+        "3": {
+            "module_name": "qs",
+            "severity": "moderate",
+            "title": "DoS",
+            "vulnerable_versions": "<6.5.3",
+            "patched_versions": ">=6.5.3",
+            "cves": [],
+            "url": "https://x/3",
+            "findings": [{"version": "6.5.0"}],
+        },
+        "4": {
+            "module_name": "tmp",
+            "severity": "low",
+            "title": "Symlink write",
+            "vulnerable_versions": "<0.2.4",
+            "patched_versions": ">=0.2.4",
+            "cves": [],
+            "url": "https://x/4",
+            "findings": [{"version": "0.2.0"}],
+        },
     }
 }
 
 # npm v7+ shape
 _VULNERABILITIES = {
     "vulnerabilities": {
-        "minimatch": {"name": "minimatch", "severity": "high", "range": "<3.0.5",
-                      "via": [{"title": "ReDoS", "url": "https://x/m", "severity": "high"}],
-                      "fixAvailable": True},
-        "ejs": {"name": "ejs", "severity": "critical", "range": "<3.1.7",
-                "via": [{"title": "Template injection", "url": "https://x/e", "severity": "critical"}],
-                "fixAvailable": {"name": "ejs", "version": "3.1.10", "isSemVerMajor": False}},
-        "moment": {"name": "moment", "severity": "moderate", "range": "<2.29.4",
-                   "via": [{"title": "ReDoS", "url": "https://x/mo", "severity": "moderate"}],
-                   "fixAvailable": True},
+        "minimatch": {
+            "name": "minimatch",
+            "severity": "high",
+            "range": "<3.0.5",
+            "via": [{"title": "ReDoS", "url": "https://x/m", "severity": "high"}],
+            "fixAvailable": True,
+        },
+        "ejs": {
+            "name": "ejs",
+            "severity": "critical",
+            "range": "<3.1.7",
+            "via": [
+                {
+                    "title": "Template injection",
+                    "url": "https://x/e",
+                    "severity": "critical",
+                }
+            ],
+            "fixAvailable": {
+                "name": "ejs",
+                "version": "3.1.10",
+                "isSemVerMajor": False,
+            },
+        },
+        "moment": {
+            "name": "moment",
+            "severity": "moderate",
+            "range": "<2.29.4",
+            "via": [{"title": "ReDoS", "url": "https://x/mo", "severity": "moderate"}],
+            "fixAvailable": True,
+        },
     }
 }
 

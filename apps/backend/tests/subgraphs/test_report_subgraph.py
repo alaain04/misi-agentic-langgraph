@@ -11,6 +11,7 @@ What is mocked:
 - save_report_result._llm (returns canned JSON report)
 - AnalysisResult is seeded directly into MongoDB (no analysis run needed)
 """
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,9 @@ from src.models.results import ReportConductorDecision
 from src.main_graph.subgraphs.report.graph import build_report_subgraph
 
 
-def _seed_analysis(job_id: str, findings: list[FindingNote] | None = None) -> AnalysisResult:
+def _seed_analysis(
+    job_id: str, findings: list[FindingNote] | None = None
+) -> AnalysisResult:
     if findings is None:
         findings = [
             FindingNote(
@@ -95,7 +98,9 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
         patch(
             "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
             _make_conductor_llm(
-                ReportConductorDecision(tool_calls=[], finalize=True, reasoning="no enrichment needed")
+                ReportConductorDecision(
+                    tool_calls=[], finalize=True, reasoning="no enrichment needed"
+                )
             ),
         ),
         patch(
@@ -127,7 +132,9 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
 
 
 @pytest.mark.asyncio
-async def test_report_overall_risk_derived_from_findings_on_llm_failure(subgraph_config, result_dao):
+async def test_report_overall_risk_derived_from_findings_on_llm_failure(
+    subgraph_config, result_dao
+):
     """
     When the LLM returns unparseable JSON, save_report_result falls back to
     mapping findings directly and derives overall_risk_level from severity.
@@ -198,7 +205,9 @@ async def test_report_with_empty_findings(subgraph_config, result_dao):
         patch(
             "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
             _make_conductor_llm(
-                ReportConductorDecision(tool_calls=[], finalize=True, reasoning="nothing to enrich")
+                ReportConductorDecision(
+                    tool_calls=[], finalize=True, reasoning="nothing to enrich"
+                )
             ),
         ),
         patch(

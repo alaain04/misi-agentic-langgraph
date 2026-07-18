@@ -1,4 +1,5 @@
 """npm tools executed inside a sandboxed container: npm_list, npm_audit, npm_outdated."""
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,10 @@ _DEFAULT_IMAGE = "node:lts-alpine"
 
 
 async def _run_npm(
-    args: list[str], repo_path: str, container: ContainerRunPort, docker_image: str,
+    args: list[str],
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str,
     executable: str = "npm",
 ) -> tuple[str, str]:
     command = f"cd /workspace && {executable} " + " ".join(args)
@@ -32,34 +36,59 @@ def _safe_json(text: str) -> dict:
         return {"raw": text}
 
 
-@register("npm_list", "Runs `npm list --json`; returns full dependency tree with installed versions")
-async def npm_list(repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE) -> dict:
+@register(
+    "npm_list",
+    "Runs `npm list --json`; returns full dependency tree with installed versions",
+)
+async def npm_list(
+    repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE
+) -> dict:
     try:
-        stdout, _ = await _run_npm(["list", "--json", "--all"], repo_path, container, docker_image)
+        stdout, _ = await _run_npm(
+            ["list", "--json", "--all"], repo_path, container, docker_image
+        )
         return _safe_json(stdout)
     except Exception as exc:
         logger.warning("npm_list failed: %s", exc)
         return {"error": str(exc)}
 
 
-@register("npm_audit", "Runs the package manager's audit command (npm/pnpm/yarn); returns vulnerabilities, severities, and affected packages")
+@register(
+    "npm_audit",
+    "Runs the package manager's audit command (npm/pnpm/yarn); returns vulnerabilities, severities, and affected packages",
+)
 async def npm_audit(
-    repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE,
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str = _DEFAULT_IMAGE,
     detected_package_manager: str = "npm",
 ) -> dict:
-    executable = detected_package_manager if detected_package_manager in ("pnpm", "yarn") else "npm"
+    executable = (
+        detected_package_manager
+        if detected_package_manager in ("pnpm", "yarn")
+        else "npm"
+    )
     try:
-        stdout, _ = await _run_npm(["audit", "--json"], repo_path, container, docker_image, executable)
+        stdout, _ = await _run_npm(
+            ["audit", "--json"], repo_path, container, docker_image, executable
+        )
         return _safe_json(stdout)
     except Exception as exc:
         logger.warning("npm_audit failed: %s", exc)
         return {"error": str(exc)}
 
 
-@register("npm_outdated", "Returns packages with newer versions available via `npm outdated --json`")
-async def npm_outdated(repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE) -> dict:
+@register(
+    "npm_outdated",
+    "Returns packages with newer versions available via `npm outdated --json`",
+)
+async def npm_outdated(
+    repo_path: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE
+) -> dict:
     try:
-        stdout, _ = await _run_npm(["outdated", "--json"], repo_path, container, docker_image)
+        stdout, _ = await _run_npm(
+            ["outdated", "--json"], repo_path, container, docker_image
+        )
         data = _safe_json(stdout)
         return {"outdated": data}
     except Exception as exc:
@@ -71,7 +100,9 @@ def _in_subtree(deps: dict, target: str) -> bool:
     """Return True if target package exists anywhere in the deps subtree."""
     if target in deps:
         return True
-    return any(_in_subtree(info.get("dependencies") or {}, target) for info in deps.values())
+    return any(
+        _in_subtree(info.get("dependencies") or {}, target) for info in deps.values()
+    )
 
 
 def _find_chain(deps: dict, target: str, prefix: str = "") -> str:
@@ -92,7 +123,10 @@ def _find_chain(deps: dict, target: str, prefix: str = "") -> str:
     "Determines if a package is a direct or transitive dependency and identifies which direct deps bring it in",
 )
 async def resolve_transitive_parent(
-    repo_path: str, package_name: str, container: ContainerRunPort, docker_image: str = _DEFAULT_IMAGE
+    repo_path: str,
+    package_name: str,
+    container: ContainerRunPort,
+    docker_image: str = _DEFAULT_IMAGE,
 ) -> dict:
     try:
         pkg_path = os.path.join(repo_path, "package.json")
@@ -108,12 +142,17 @@ async def resolve_transitive_parent(
                 "dep_chain": package_name,
             }
 
-        stdout, _ = await _run_npm(["ls", "--json", "--all"], repo_path, container, docker_image)
+        stdout, _ = await _run_npm(
+            ["ls", "--json", "--all"], repo_path, container, docker_image
+        )
         tree = _safe_json(stdout)
         tree_deps = tree.get("dependencies") or {}
 
-        parents = [name for name, info in tree_deps.items()
-                   if _in_subtree(info.get("dependencies") or {}, package_name)]
+        parents = [
+            name
+            for name, info in tree_deps.items()
+            if _in_subtree(info.get("dependencies") or {}, package_name)
+        ]
 
         return {
             "package": package_name,
