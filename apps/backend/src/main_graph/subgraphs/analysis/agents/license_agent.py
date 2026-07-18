@@ -103,7 +103,9 @@ class LicenseAgent(BaseAgent):
                 continue
 
             dep_id, dep_entry = resolved
-            for conflict in check_conflicts(project_id, project_entry, dep_id, dep_entry):
+            for conflict in check_conflicts(
+                project_id, project_entry, dep_id, dep_entry
+            ):
                 findings.append(
                     FindingNote(
                         dep_name=dep_name,

@@ -239,7 +239,11 @@ def _combine_and(a: LicenseEntry, b: LicenseEntry) -> LicenseEntry:
     """Merge two licenses under an SPDX "AND" expression: the recipient must
     satisfy both simultaneously, so any restriction or obligation on either
     side applies to the combination."""
-    category = a.category if _CATEGORY_RANK[a.category] >= _CATEGORY_RANK[b.category] else b.category
+    category = (
+        a.category
+        if _CATEGORY_RANK[a.category] >= _CATEGORY_RANK[b.category]
+        else b.category
+    )
     kwargs: dict[str, str] = {"category": category}
     for field in _CAN_FIELDS:
         kwargs[field] = (
@@ -247,7 +251,9 @@ def _combine_and(a: LicenseEntry, b: LicenseEntry) -> LicenseEntry:
         )
     for field in _MUST_FIELDS:
         kwargs[field] = (
-            "must" if "must" in (getattr(a, field), getattr(b, field)) else "not_required"
+            "must"
+            if "must" in (getattr(a, field), getattr(b, field))
+            else "not_required"
         )
     return LicenseEntry(**kwargs)  # type: ignore[arg-type]
 

@@ -16,7 +16,9 @@ def test_c1_no_conflict_when_both_can_sublicense():
 
 
 def test_c1_flags_when_project_can_dependency_cannot():
-    conflicts = _check_c1("MIT", LICENSES["MIT"], "GPL-3.0-only", LICENSES["GPL-3.0-only"])
+    conflicts = _check_c1(
+        "MIT", LICENSES["MIT"], "GPL-3.0-only", LICENSES["GPL-3.0-only"]
+    )
     assert len(conflicts) == 1
     assert conflicts[0].rule == "C1"
     assert conflicts[0].severity == "medium"
@@ -26,9 +28,7 @@ def test_c1_flags_when_project_can_dependency_cannot():
 
 def test_c2_flags_when_dependency_musts_obligation_project_lacks():
     # spec example: MIT dependency (requires include_notice) + no project license
-    conflicts = _check_c2(
-        "UNLICENSED", LICENSES["UNLICENSED"], "MIT", LICENSES["MIT"]
-    )
+    conflicts = _check_c2("UNLICENSED", LICENSES["UNLICENSED"], "MIT", LICENSES["MIT"])
     assert any(c.rule == "C2" and c.severity == "low" for c in conflicts)
     include_notice_conflicts = [c for c in conflicts if "notice" in c.detail]
     assert len(include_notice_conflicts) == 1
@@ -41,7 +41,9 @@ def test_c2_no_conflict_when_project_already_musts_same_obligation():
 
 def test_c3_flags_copyleft_contagion_gpl_dependency_into_mit_project():
     # spec example: GPL-3.0-only dependency + MIT project -> C3/high
-    conflict = _check_c3("MIT", LICENSES["MIT"], "GPL-3.0-only", LICENSES["GPL-3.0-only"])
+    conflict = _check_c3(
+        "MIT", LICENSES["MIT"], "GPL-3.0-only", LICENSES["GPL-3.0-only"]
+    )
     assert conflict is not None
     assert conflict.rule == "C3"
     assert conflict.severity == "high"
@@ -49,14 +51,20 @@ def test_c3_flags_copyleft_contagion_gpl_dependency_into_mit_project():
 
 def test_c3_no_conflict_when_project_is_same_id():
     conflict = _check_c3(
-        "GPL-3.0-only", LICENSES["GPL-3.0-only"], "GPL-3.0-only", LICENSES["GPL-3.0-only"]
+        "GPL-3.0-only",
+        LICENSES["GPL-3.0-only"],
+        "GPL-3.0-only",
+        LICENSES["GPL-3.0-only"],
     )
     assert conflict is None
 
 
 def test_c3_no_conflict_when_project_itself_copyleft():
     conflict = _check_c3(
-        "GPL-3.0-only", LICENSES["GPL-3.0-only"], "AGPL-3.0-only", LICENSES["AGPL-3.0-only"]
+        "GPL-3.0-only",
+        LICENSES["GPL-3.0-only"],
+        "AGPL-3.0-only",
+        LICENSES["AGPL-3.0-only"],
     )
     assert conflict is None
 

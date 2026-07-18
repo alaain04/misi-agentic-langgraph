@@ -102,4 +102,6 @@ async def test_license_agent_treats_missing_project_license_as_unlicensed():
         bundle, _, _ = await license_agent.LicenseAgent().run(_dispatch(), _prep())
 
     # MIT dependency musts include_notice; UNLICENSED project doesn't fulfill it -> C2
-    assert any(f.severity == "low" and "notice" in f.description for f in bundle.findings)
+    assert any(
+        f.severity == "low" and "notice" in f.description for f in bundle.findings
+    )

@@ -40,7 +40,9 @@ def test_resolve_and_combines_both_sides_most_restrictive():
     assert key == "MIT AND Apache-2.0"
     assert entry.category == "permissive"
     assert entry.sublicense == "can"
-    assert entry.state_changes == "must"  # Apache-2.0's must wins over MIT's not_required
+    assert (
+        entry.state_changes == "must"
+    )  # Apache-2.0's must wins over MIT's not_required
 
 
 def test_resolve_and_unknown_if_either_side_unknown():

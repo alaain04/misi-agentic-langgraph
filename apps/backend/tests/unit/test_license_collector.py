@@ -9,7 +9,9 @@ import pytest
 from src.models.results import PrepResult
 
 
-def _prep(package_manager: str, packages: dict, repo_path: str = "/tmp/r") -> PrepResult:
+def _prep(
+    package_manager: str, packages: dict, repo_path: str = "/tmp/r"
+) -> PrepResult:
     return PrepResult(
         job_id="j1",
         repo_path=repo_path,
@@ -61,8 +63,12 @@ async def test_npm_lockfile_license_extraction(tmp_path):
 
     assert result["express@4.18.0"] == "MIT"
     assert result["lodash@4.17.21"] == "MIT"
-    assert result["no-license-field@1.0.0"] == "UNKNOWN"  # missing field, registry also failed
-    metadata.assert_awaited_once_with("no-license-field")  # only the missing one falls back
+    assert (
+        result["no-license-field@1.0.0"] == "UNKNOWN"
+    )  # missing field, registry also failed
+    metadata.assert_awaited_once_with(
+        "no-license-field"
+    )  # only the missing one falls back
 
 
 @pytest.mark.asyncio
