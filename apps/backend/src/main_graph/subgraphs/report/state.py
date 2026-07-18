@@ -5,9 +5,6 @@ from typing import Annotated, NotRequired
 
 from typing_extensions import TypedDict
 
-from src.models.conductor import ToolResult
-from src.models.results import ReportConductorDecision
-
 
 class ReportState(TypedDict):
     # From MainState
@@ -17,9 +14,10 @@ class ReportState(TypedDict):
     analysis_result_id: str
 
     # Internal
-    conductor_decision: NotRequired[ReportConductorDecision]
-    tool_results: Annotated[list[ToolResult], operator.add]
-    conductor_iteration: NotRequired[int]
+    findings_to_enrich: NotRequired[list[dict]]  # FindingNote.model_dump() list
+    all_flagged_dep_names: NotRequired[list[str]]
+    current_finding: NotRequired[dict]  # FindingNote.model_dump() for finding_enricher
+    enriched_findings: Annotated[list[dict], operator.add]  # ReportFinding.model_dump()
 
     # Output
     report_result_id: NotRequired[str]
