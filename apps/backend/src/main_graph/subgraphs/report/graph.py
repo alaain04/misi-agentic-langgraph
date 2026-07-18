@@ -38,6 +38,9 @@ def build_report_subgraph():
     builder.add_node("report_intake", report_intake)
     builder.add_node("finding_enricher", finding_enricher)
     builder.add_node("enrichment_collector", enrichment_collector)
+    # Node kept as "save_report_result" (not "report_synthesizer") so
+    # _dispatch_findings's return value and existing routing tests don't
+    # need to change — only the function/file identity was renamed.
     builder.add_node("save_report_result", report_synthesizer)
 
     builder.add_edge(START, "report_intake")
