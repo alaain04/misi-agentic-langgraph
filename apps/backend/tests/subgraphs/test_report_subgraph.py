@@ -1,14 +1,16 @@
-"""
-Blackbox integration test for the report subgraph.
+"""Blackbox integration test for the report subgraph.
 
 What is real:
-- save_report_result (MongoDB persistence via testcontainer)
-- ReportResult construction from LLM JSON response
-- Severity-based overall_risk_level derivation (pure Python, no mocks)
+- report_intake (severity filtering via MongoDB-backed AnalysisResult)
+- report_synthesizer (MongoDB persistence via testcontainer)
+- ReportResult construction, overall_risk_level derivation (pure Python)
 
 What is mocked:
-- report_conductor._llm (controlled finalize decision)
-- save_report_result._llm (returns canned JSON report)
+- finding_enricher_agent._llm (controlled per-finding decisions, matched to
+  the finding by dep_name since parallel Send branches run in nondeterministic
+  order)
+- finding_enricher_agent.critique_report_finding (controlled verdicts)
+- report_synthesizer._llm (returns canned executive_summary/recommendations)
 - AnalysisResult is seeded directly into MongoDB (no analysis run needed)
 """
 
@@ -20,9 +22,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.main_graph.subgraphs.report.agents import finding_enricher_agent
+from src.main_graph.subgraphs.report.agents.critique import FindingVerdict
 from src.main_graph.subgraphs.report.graph import build_report_subgraph
-from src.models.conductor import FindingNote, ToolCall, ToolResult
-from src.models.results import AnalysisResult, PrepResult, ReportConductorDecision
+from src.models.conductor import FindingNote
+from src.models.results import (
+    AnalysisResult,
+    FindingEnrichmentDecision,
+    PrepResult,
+    ReportFinding,
+)
 
 
 def _seed_analysis(
@@ -52,69 +61,80 @@ def _seed_analysis(
     )
 
 
-def _make_conductor_llm(decision: ReportConductorDecision):
+def _finalize(finding: ReportFinding) -> FindingEnrichmentDecision:
+    return FindingEnrichmentDecision(
+        tool_calls=[], finding=finding, finalize=True, reasoning="enriched"
+    )
+
+
+def _ok_verdict() -> FindingVerdict:
+    return FindingVerdict(ok=True, feedback="", calibrated_confidence=0.9)
+
+
+def _make_enricher_llm(decisions_by_dep: dict[str, FindingEnrichmentDecision]):
+    async def _ainvoke(messages):
+        system = messages[0]["content"]
+        for dep, decision in decisions_by_dep.items():
+            if f"package: {dep}" in system:
+                return decision
+        raise AssertionError(f"no mocked decision matched system prompt: {system[:200]}")
+
     chain = MagicMock()
-    chain.ainvoke = AsyncMock(return_value=decision)
+    chain.ainvoke = AsyncMock(side_effect=_ainvoke)
     llm = MagicMock()
     llm.with_structured_output = MagicMock(return_value=chain)
     return llm
 
 
-def _make_conductor_llm_sequence(decisions: list[ReportConductorDecision]):
-    chain = MagicMock()
-    chain.ainvoke = AsyncMock(side_effect=decisions)
-    llm = MagicMock()
-    llm.with_structured_output = MagicMock(return_value=chain)
-    return llm
-
-
-def _make_save_llm(report_json: dict):
+def _make_synthesizer_llm(payload: dict):
     response = MagicMock()
-    response.content = json.dumps(report_json)
+    response.content = json.dumps(payload)
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=response)
     return llm
 
 
 @pytest.mark.asyncio
-async def test_report_produces_report_result(subgraph_config, result_dao):
-    """Conductor finalizes immediately → save_report_result writes a ReportResult."""
+async def test_report_produces_report_result_with_trusted_findings(
+    subgraph_config, result_dao
+):
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
-
     analysis = _seed_analysis(job_id)
     await result_dao.save_analysis(analysis)
 
-    report_payload = {
-        "executive_summary": (
-            "lodash has a known prototype pollution CVE. Update to 4.17.21."
+    decisions = {
+        "lodash": _finalize(
+            ReportFinding(
+                dep_name="lodash",
+                severity="high",
+                description="CVE-2021-23337: prototype pollution",
+                recommendation="Upgrade to lodash >= 4.17.21",
+            )
         ),
-        "overall_risk_level": "high",
-        "findings": [
-            {
-                "dep_name": "lodash",
-                "severity": "high",
-                "description": "CVE-2021-23337: prototype pollution",
-                "recommendation": "Upgrade to lodash >= 4.17.21",
-                "alternatives": [],
-                "affected_files": [],
-                "evidence": [],
-            }
-        ],
-        "recommendations": ["Upgrade lodash to 4.17.21 immediately"],
+        "axios": _finalize(
+            ReportFinding(
+                dep_name="axios",
+                severity="medium",
+                description="SSRF risk in axios < 1.7",
+                recommendation="Upgrade to axios >= 1.7",
+            )
+        ),
+    }
+    synth_payload = {
+        "executive_summary": "lodash and axios both need upgrades.",
+        "recommendations": ["Upgrade lodash and axios"],
     }
 
     with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm(
-                ReportConductorDecision(
-                    tool_calls=[], finalize=True, reasoning="no enrichment needed"
-                )
-            ),
+        patch.object(finding_enricher_agent, "_llm", _make_enricher_llm(decisions)),
+        patch.object(
+            finding_enricher_agent,
+            "critique_report_finding",
+            AsyncMock(return_value=_ok_verdict()),
         ),
         patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            _make_save_llm(report_payload),
+            "src.main_graph.subgraphs.report.nodes.report_synthesizer._llm",
+            _make_synthesizer_llm(synth_payload),
         ),
     ):
         graph = build_report_subgraph()
@@ -124,106 +144,33 @@ async def test_report_produces_report_result(subgraph_config, result_dao):
                 "concern": "security vulnerabilities",
                 "prep_result_id": "unused-for-report",
                 "analysis_result_id": analysis.id,
-                "tool_results": [],
-            },
-            config=subgraph_config,
-        )
-
-    assert result.get("report_result_id"), "Expected report_result_id in output state"
-
-    report = await result_dao.get_report(result["report_result_id"])
-    assert report.job_id == job_id
-    assert report.overall_risk_level == "high"
-    assert len(report.findings) == 1
-    assert report.findings[0].dep_name == "lodash"
-    assert report.executive_summary
-    assert len(report.recommendations) > 0
-
-
-@pytest.mark.asyncio
-async def test_report_overall_risk_derived_from_findings_on_llm_failure(
-    subgraph_config, result_dao
-):
-    """
-    When the LLM returns unparseable JSON, save_report_result falls back to
-    mapping findings directly and derives overall_risk_level from severity.
-    """
-    job_id = f"rep-{uuid.uuid4().hex[:8]}"
-
-    findings = [
-        FindingNote(
-            dep_name="express",
-            severity="critical",
-            description="RCE in express < 4.19",
-            evidence=[],
-        )
-    ]
-    analysis = _seed_analysis(job_id, findings=findings)
-    await result_dao.save_analysis(analysis)
-
-    broken_llm = MagicMock()
-    broken_llm.ainvoke = AsyncMock(return_value=MagicMock(content="not-valid-json {"))
-
-    with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm(
-                ReportConductorDecision(tool_calls=[], finalize=True, reasoning="done")
-            ),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            broken_llm,
-        ),
-    ):
-        graph = build_report_subgraph()
-        result = await graph.ainvoke(
-            {
-                "job_id": job_id,
-                "concern": "RCE risk",
-                "prep_result_id": "unused",
-                "analysis_result_id": analysis.id,
-                "tool_results": [],
             },
             config=subgraph_config,
         )
 
     assert result.get("report_result_id")
     report = await result_dao.get_report(result["report_result_id"])
-    assert report.overall_risk_level == "critical"
-    assert len(report.findings) == 1
-    assert report.findings[0].dep_name == "express"
+    assert report.job_id == job_id
+    assert len(report.findings) == 2
+    assert all(f.trust for f in report.findings)
+    assert report.overall_risk_level == "high"
+    assert report.executive_summary
 
 
 @pytest.mark.asyncio
 async def test_report_with_empty_findings(subgraph_config, result_dao):
-    """When analysis has no findings, the report is saved with no findings and
-    risk=none."""
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
-
     analysis = _seed_analysis(job_id, findings=[])
     await result_dao.save_analysis(analysis)
 
-    report_payload = {
+    synth_payload = {
         "executive_summary": "No significant risks found in this project.",
-        "overall_risk_level": "none",
-        "findings": [],
         "recommendations": [],
     }
 
-    with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm(
-                ReportConductorDecision(
-                    tool_calls=[], finalize=True, reasoning="nothing to enrich"
-                )
-            ),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            _make_save_llm(report_payload),
-        ),
+    with patch(
+        "src.main_graph.subgraphs.report.nodes.report_synthesizer._llm",
+        _make_synthesizer_llm(synth_payload),
     ):
         graph = build_report_subgraph()
         result = await graph.ainvoke(
@@ -232,7 +179,6 @@ async def test_report_with_empty_findings(subgraph_config, result_dao):
                 "concern": "general review",
                 "prep_result_id": "unused",
                 "analysis_result_id": analysis.id,
-                "tool_results": [],
             },
             config=subgraph_config,
         )
@@ -244,12 +190,144 @@ async def test_report_with_empty_findings(subgraph_config, result_dao):
 
 
 @pytest.mark.asyncio
-async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result_dao):
-    """conductor calls blast_radius -> report_tool_runner invokes the tool via
-    the container port -> save_report_result overwrites affected_files/
-    blast_radius from the real tool output (not the LLM's text)."""
+async def test_report_drops_low_severity_findings_before_enrichment(
+    subgraph_config, result_dao
+):
+    """risk_min_severity="high" filters out the medium finding in
+    report_intake, before it ever reaches a finding_enricher — only the
+    high finding's decision needs to be mocked."""
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
+    findings = [
+        FindingNote(dep_name="lodash", severity="high", description="high risk", evidence=[]),
+        FindingNote(
+            dep_name="axios", severity="medium", description="medium risk", evidence=[]
+        ),
+    ]
+    analysis = _seed_analysis(job_id, findings=findings)
+    await result_dao.save_analysis(analysis)
 
+    decisions = {
+        "lodash": _finalize(
+            ReportFinding(
+                dep_name="lodash",
+                severity="high",
+                description="high risk",
+                recommendation="Upgrade lodash",
+            )
+        )
+    }
+    synth_payload = {"executive_summary": "lodash is high risk.", "recommendations": []}
+
+    with (
+        patch.object(finding_enricher_agent, "_llm", _make_enricher_llm(decisions)),
+        patch.object(
+            finding_enricher_agent,
+            "critique_report_finding",
+            AsyncMock(return_value=_ok_verdict()),
+        ),
+        patch(
+            "src.main_graph.subgraphs.report.nodes.report_synthesizer._llm",
+            _make_synthesizer_llm(synth_payload),
+        ),
+        patch(
+            "src.main_graph.subgraphs.report.nodes.report_intake.settings"
+        ) as mock_settings,
+    ):
+        mock_settings.risk_min_severity = "high"
+        graph = build_report_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "security vulnerabilities",
+                "prep_result_id": "unused-for-report",
+                "analysis_result_id": analysis.id,
+            },
+            config=subgraph_config,
+        )
+
+    assert result.get("report_result_id")
+    report = await result_dao.get_report(result["report_result_id"])
+    assert len(report.findings) == 1
+    assert report.findings[0].dep_name == "lodash"
+
+
+@pytest.mark.asyncio
+async def test_report_keeps_untrusted_finding_instead_of_dropping(
+    subgraph_config, result_dao
+):
+    """A finding whose evidence fails critique stays in the report, flagged
+    trust=False with the critique feedback as observation — never dropped."""
+    job_id = f"rep-{uuid.uuid4().hex[:8]}"
+    findings = [
+        FindingNote(
+            dep_name="left-pad",
+            severity="high",
+            description="GPL-incompatible copyleft dependency",
+            evidence=[],
+        )
+    ]
+    analysis = _seed_analysis(job_id, findings=findings)
+    await result_dao.save_analysis(analysis)
+
+    decisions = {
+        "left-pad": _finalize(
+            ReportFinding(
+                dep_name="left-pad",
+                severity="high",
+                description="GPL-incompatible copyleft dependency",
+                recommendation="Remove or replace left-pad",
+            )
+        )
+    }
+    synth_payload = {
+        "executive_summary": "left-pad is GPL-incompatible.",
+        "recommendations": [],
+    }
+
+    with (
+        patch.object(finding_enricher_agent, "_llm", _make_enricher_llm(decisions)),
+        patch.object(finding_enricher_agent, "_MAX_ITERATIONS", 1),
+        patch.object(
+            finding_enricher_agent,
+            "critique_report_finding",
+            AsyncMock(
+                return_value=FindingVerdict(
+                    ok=False,
+                    feedback="business_impact is not grounded in tool output",
+                    calibrated_confidence=0.2,
+                )
+            ),
+        ),
+        patch(
+            "src.main_graph.subgraphs.report.nodes.report_synthesizer._llm",
+            _make_synthesizer_llm(synth_payload),
+        ),
+    ):
+        graph = build_report_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "license compliance",
+                "prep_result_id": "unused-for-report",
+                "analysis_result_id": analysis.id,
+            },
+            config=subgraph_config,
+        )
+
+    assert result.get("report_result_id")
+    report = await result_dao.get_report(result["report_result_id"])
+    assert len(report.findings) == 1  # kept, not dropped
+    finding = report.findings[0]
+    assert finding.trust is False
+    assert finding.observation == "business_impact is not grounded in tool output"
+
+
+@pytest.mark.asyncio
+async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result_dao):
+    """finding_enricher's own blast_radius tool call -> container port ->
+    the resulting draft's blast_radius/affected_files come from the real
+    tool output, not the LLM's placeholder text."""
+    job_id = f"rep-{uuid.uuid4().hex[:8]}"
     findings = [
         FindingNote(
             dep_name="left-pad",
@@ -292,49 +370,50 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
         return_value=(0, json.dumps(codegraph_output), "")
     )
 
-    report_payload = {
-        "executive_summary": "left-pad is GPL-incompatible but low exposure.",
-        "overall_risk_level": "high",
-        "findings": [
-            {
-                "dep_name": "left-pad",
-                "severity": "high",
-                "description": "GPL-incompatible copyleft dependency",
-                "recommendation": "Remove or replace left-pad",
-                "alternatives": [],
-                "affected_files": ["should-be-overwritten.js:1"],
-                "business_impact": "Only used in a build script, never shipped.",
-                "evidence": [],
-            }
+    from src.models.conductor import ToolCall
+
+    tool_call_decision = FindingEnrichmentDecision(
+        tool_calls=[
+            ToolCall(
+                tool="blast_radius",
+                args={"package_name": "left-pad"},
+                reason="check real usage depth",
+            )
         ],
+        finding=None,
+        finalize=False,
+        reasoning="enrich with blast radius",
+    )
+    final_decision = _finalize(
+        ReportFinding(
+            dep_name="left-pad",
+            severity="high",
+            description="GPL-incompatible copyleft dependency",
+            recommendation="Remove or replace left-pad",
+            affected_files=["should-be-overwritten.js:1"],
+            business_impact="Only used in a build script, never shipped.",
+        )
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=[tool_call_decision, final_decision]
+    )
+    synth_payload = {
+        "executive_summary": "left-pad is GPL-incompatible but low exposure.",
         "recommendations": ["Replace left-pad with String.prototype.padStart"],
     }
 
     with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm_sequence(
-                [
-                    ReportConductorDecision(
-                        tool_calls=[
-                            ToolCall(
-                                tool="blast_radius",
-                                args={"package_name": "left-pad"},
-                                reason="check real usage depth",
-                            )
-                        ],
-                        finalize=False,
-                        reasoning="enrich with blast radius",
-                    ),
-                    ReportConductorDecision(
-                        tool_calls=[], finalize=True, reasoning="enriched"
-                    ),
-                ]
-            ),
+        patch.object(finding_enricher_agent, "_llm", mock_llm),
+        patch.object(
+            finding_enricher_agent,
+            "critique_report_finding",
+            AsyncMock(return_value=_ok_verdict()),
         ),
         patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            _make_save_llm(report_payload),
+            "src.main_graph.subgraphs.report.nodes.report_synthesizer._llm",
+            _make_synthesizer_llm(synth_payload),
         ),
     ):
         graph = build_report_subgraph()
@@ -344,7 +423,6 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
                 "concern": "license compliance",
                 "prep_result_id": prep_result_id,
                 "analysis_result_id": analysis.id,
-                "tool_results": [],
             },
             config=subgraph_config,
         )
@@ -358,250 +436,3 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
     assert finding.blast_radius.isolated_to_tests_or_scripts is True
     # grounded from the real tool output, not the LLM's placeholder text
     assert finding.affected_files == ["scripts/build.js:1"]
-
-
-@pytest.mark.asyncio
-async def test_report_drops_findings_below_min_severity(subgraph_config, result_dao):
-    """risk_min_severity="high" discards medium/low findings from the saved
-    report, independent of vuln_min_severity (which only gates npm-audit CVEs)."""
-    job_id = f"rep-{uuid.uuid4().hex[:8]}"
-
-    findings = [
-        FindingNote(
-            dep_name="lodash", severity="high", description="high risk", evidence=[]
-        ),
-        FindingNote(
-            dep_name="axios",
-            severity="medium",
-            description="medium risk",
-            evidence=[],
-        ),
-    ]
-    analysis = _seed_analysis(job_id, findings=findings)
-    await result_dao.save_analysis(analysis)
-
-    report_payload = {
-        "executive_summary": "lodash is high risk, axios is medium risk.",
-        "overall_risk_level": "high",
-        "findings": [
-            {
-                "dep_name": "lodash",
-                "severity": "high",
-                "description": "high risk",
-                "recommendation": "Upgrade lodash",
-                "alternatives": [],
-                "affected_files": [],
-                "evidence": [],
-            },
-            {
-                "dep_name": "axios",
-                "severity": "medium",
-                "description": "medium risk",
-                "recommendation": "Upgrade axios",
-                "alternatives": [],
-                "affected_files": [],
-                "evidence": [],
-            },
-        ],
-        "recommendations": [],
-    }
-
-    with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm(
-                ReportConductorDecision(
-                    tool_calls=[], finalize=True, reasoning="no enrichment needed"
-                )
-            ),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            _make_save_llm(report_payload),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result.settings"
-        ) as mock_settings,
-    ):
-        mock_settings.risk_min_severity = "high"
-        graph = build_report_subgraph()
-        result = await graph.ainvoke(
-            {
-                "job_id": job_id,
-                "concern": "security vulnerabilities",
-                "prep_result_id": "unused-for-report",
-                "analysis_result_id": analysis.id,
-                "tool_results": [],
-            },
-            config=subgraph_config,
-        )
-
-    assert result.get("report_result_id")
-    report = await result_dao.get_report(result["report_result_id"])
-    assert len(report.findings) == 1
-    assert report.findings[0].dep_name == "lodash"
-
-
-@pytest.mark.asyncio
-async def test_report_strips_alternative_that_is_itself_a_flagged_dependency(
-    subgraph_config, result_dao
-):
-    """The LLM suggested zod as an alternative to class-transformer, but zod is
-    also flagged as a finding in this same report — that's self-contradictory,
-    so the alternative must be stripped even though the LLM proposed it."""
-    job_id = f"rep-{uuid.uuid4().hex[:8]}"
-
-    findings = [
-        FindingNote(
-            dep_name="class-transformer",
-            severity="high",
-            description="prototype pollution risk",
-            evidence=[],
-        ),
-        FindingNote(
-            dep_name="zod",
-            severity="medium",
-            description="unmaintained for 18 months",
-            evidence=[],
-        ),
-    ]
-    analysis = _seed_analysis(job_id, findings=findings)
-    await result_dao.save_analysis(analysis)
-
-    tool_results_state = [
-        ToolResult(
-            id="tr-1",
-            tool="web_search",
-            args={"query": "class-transformer alternatives"},
-            output={"results": [{"title": "zod vs class-transformer"}]},
-            error=None,
-            duration_ms=1,
-        )
-    ]
-
-    report_payload = {
-        "executive_summary": "class-transformer has a prototype pollution risk.",
-        "overall_risk_level": "high",
-        "findings": [
-            {
-                "dep_name": "class-transformer",
-                "severity": "high",
-                "description": "prototype pollution risk",
-                "recommendation": "Replace with zod",
-                "alternatives": ["zod"],
-                "affected_files": [],
-                "evidence": [],
-            },
-            {
-                "dep_name": "zod",
-                "severity": "medium",
-                "description": "unmaintained for 18 months",
-                "recommendation": "Monitor for a maintenance fork",
-                "alternatives": [],
-                "affected_files": [],
-                "evidence": [],
-            },
-        ],
-        "recommendations": [],
-    }
-
-    with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm(
-                ReportConductorDecision(
-                    tool_calls=[], finalize=True, reasoning="no enrichment needed"
-                )
-            ),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            _make_save_llm(report_payload),
-        ),
-    ):
-        graph = build_report_subgraph()
-        result = await graph.ainvoke(
-            {
-                "job_id": job_id,
-                "concern": "security vulnerabilities",
-                "prep_result_id": "unused-for-report",
-                "analysis_result_id": analysis.id,
-                "tool_results": tool_results_state,
-            },
-            config=subgraph_config,
-        )
-
-    assert result.get("report_result_id")
-    report = await result_dao.get_report(result["report_result_id"])
-    finding = next(f for f in report.findings if f.dep_name == "class-transformer")
-    assert finding.alternatives == []
-
-
-@pytest.mark.asyncio
-async def test_report_overall_risk_reflects_filtered_findings(
-    subgraph_config, result_dao
-):
-    """overall_risk_level is derived from the post-filter findings, not the raw
-    analysis findings — filtering everything out yields risk=none, not the
-    severity of a finding that was dropped from the report."""
-    job_id = f"rep-{uuid.uuid4().hex[:8]}"
-
-    findings = [
-        FindingNote(
-            dep_name="axios", severity="medium", description="medium risk", evidence=[]
-        ),
-    ]
-    analysis = _seed_analysis(job_id, findings=findings)
-    await result_dao.save_analysis(analysis)
-
-    report_payload = {
-        "executive_summary": "axios is medium risk.",
-        "overall_risk_level": "medium",
-        "findings": [
-            {
-                "dep_name": "axios",
-                "severity": "medium",
-                "description": "medium risk",
-                "recommendation": "Upgrade axios",
-                "alternatives": [],
-                "affected_files": [],
-                "evidence": [],
-            },
-        ],
-        "recommendations": [],
-    }
-
-    with (
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_conductor._llm",
-            _make_conductor_llm(
-                ReportConductorDecision(
-                    tool_calls=[], finalize=True, reasoning="no enrichment needed"
-                )
-            ),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result._llm",
-            _make_save_llm(report_payload),
-        ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.save_report_result.settings"
-        ) as mock_settings,
-    ):
-        mock_settings.risk_min_severity = "critical"
-        graph = build_report_subgraph()
-        result = await graph.ainvoke(
-            {
-                "job_id": job_id,
-                "concern": "security vulnerabilities",
-                "prep_result_id": "unused-for-report",
-                "analysis_result_id": analysis.id,
-                "tool_results": [],
-            },
-            config=subgraph_config,
-        )
-
-    assert result.get("report_result_id")
-    report = await result_dao.get_report(result["report_result_id"])
-    assert report.findings == []
-    assert report.overall_risk_level == "none"
