@@ -266,17 +266,22 @@ def resolve(expression: str | None) -> tuple[str, LicenseEntry] | None:
     expressions, or an id outside the curated table — returns None. The
     caller must record this as a manual-review finding, never guess.
     """
-    expr = (expression or "").strip()
+    if not isinstance(expression, str):
+        return None
+    expr = expression.strip()
     if not expr or "(" in expr or ")" in expr:
         return None
     if expr in LICENSES:
         return expr, LICENSES[expr]
     if " OR " in expr:
         left, right = (side.strip() for side in expr.split(" OR ", 1))
-        for side in (left, right):
-            if side in LICENSES:
-                return side, LICENSES[side]
-        return None
+        candidates = [side for side in (left, right) if side in LICENSES]
+        if not candidates:
+            return None
+        chosen = min(
+            candidates, key=lambda side: _CATEGORY_RANK[LICENSES[side].category]
+        )
+        return chosen, LICENSES[chosen]
     if " AND " in expr:
         left, right = (side.strip() for side in expr.split(" AND ", 1))
         if left in LICENSES and right in LICENSES:

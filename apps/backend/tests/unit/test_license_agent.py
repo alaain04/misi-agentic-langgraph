@@ -105,3 +105,24 @@ async def test_license_agent_treats_missing_project_license_as_unlicensed():
     assert any(
         f.severity == "low" and "notice" in f.description for f in bundle.findings
     )
+
+
+@pytest.mark.asyncio
+async def test_license_agent_handles_legacy_dict_shaped_project_license():
+    from src.main_graph.subgraphs.analysis.agents import license_agent
+
+    collected = {"gpl-lib@1.0.0": "GPL-3.0-only"}
+    with (
+        patch.object(
+            license_agent, "collect_licenses", AsyncMock(return_value=collected)
+        ),
+        patch.object(
+            license_agent, "_load_pkg", return_value={"license": {"type": "MIT"}}
+        ),
+    ):
+        bundle, _, _ = await license_agent.LicenseAgent().run(_dispatch(), _prep())
+
+    # must not crash, and the dict's "type" must actually resolve to MIT (not fall
+    # back to UNLICENSED) -- proven by the same C3 high-severity finding a real
+    # MIT project produces against a GPL-3.0-only dependency
+    assert any(f.severity == "high" for f in bundle.findings)

@@ -33,6 +33,17 @@ def test_resolve_or_unknown_when_neither_side_known():
     assert resolve("Foo OR Bar") is None
 
 
+def test_resolve_or_picks_least_restrictive_side_regardless_of_order():
+    # dual-licensed package: recipient may choose MIT even though the
+    # copyleft option is listed first -- must not resolve to the more
+    # restrictive side just because it's leftmost
+    resolved = resolve("GPL-2.0-or-later OR MIT")
+    assert resolved is not None
+    key, entry = resolved
+    assert key == "MIT"
+    assert entry.category == "permissive"
+
+
 def test_resolve_and_combines_both_sides_most_restrictive():
     resolved = resolve("MIT AND Apache-2.0")
     assert resolved is not None
@@ -68,3 +79,8 @@ def test_unlicensed_sentinel_is_proprietary_and_grants_nothing():
     assert entry.category == "proprietary"
     assert entry.sublicense == "cannot"
     assert entry.commercial_use == "cannot"
+
+
+def test_resolve_non_string_input_returns_none():
+    assert resolve({"type": "MIT"}) is None  # type: ignore[arg-type]
+    assert resolve(123) is None  # type: ignore[arg-type]

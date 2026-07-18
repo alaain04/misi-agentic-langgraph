@@ -48,7 +48,10 @@ class LicenseAgent(BaseAgent):
         container: ContainerRunPort | None = None,
     ) -> tuple[EvidenceBundle, list[str], int]:
         pkg = _load_pkg(prep.repo_path)
-        project_license_str = pkg.get("license") or UNLICENSED_ID
+        project_license_raw = pkg.get("license")
+        if isinstance(project_license_raw, dict):  # legacy {"type": "MIT"} shape
+            project_license_raw = project_license_raw.get("type")
+        project_license_str = project_license_raw or UNLICENSED_ID
         project_resolved = resolve(project_license_str)
         project_id, project_entry = (
             project_resolved
