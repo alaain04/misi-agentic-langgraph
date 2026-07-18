@@ -13,8 +13,9 @@ Usage:
         --prep-result-id <id> \\
         --concern "security vulnerabilities"
 
-    # Run report (needs an analysis_result_id):
+    # Run report (needs a prep_result_id and an analysis_result_id):
     uv run python scripts/run_subgraph.py report \\
+        --prep-result-id <id> \\
         --analysis-result-id <id> \\
         --concern "security vulnerabilities"
 
@@ -85,7 +86,9 @@ async def _run_discovery(args) -> None:
 
 async def _run_analysis(args) -> None:
     from src.db.result_dao import ResultDAO
+    from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
     from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
+    from src.services.job_dao import JobDAO
 
     job_id = args.job_id or str(uuid.uuid4())[:8]
     dao = ResultDAO()
@@ -93,9 +96,9 @@ async def _run_analysis(args) -> None:
     config: RunnableConfig = {
         "configurable": {
             "result_dao": dao,
-            "container": None,
+            "container": DockerContainerAdapter(),
             "docker_tool": None,
-            "job_repo": None,
+            "job_repo": JobDAO(),
         }
     }
 
@@ -146,7 +149,7 @@ async def _run_report(args) -> None:
         {
             "job_id": job_id,
             "concern": args.concern,
-            "prep_result_id": "",
+            "prep_result_id": args.prep_result_id,
             "analysis_result_id": args.analysis_result_id,
             "tool_results": [],
         },
@@ -174,7 +177,8 @@ def main() -> None:
 
     parser.add_argument("--repo", help="[discovery] GitHub repo URL")
     parser.add_argument(
-        "--prep-result-id", help="[analysis] PrepResult ID from a prior discovery run"
+        "--prep-result-id",
+        help="[analysis, report] PrepResult ID from a prior discovery run",
     )
     parser.add_argument(
         "--analysis-result-id",
@@ -189,6 +193,8 @@ def main() -> None:
         parser.error("--prep-result-id is required for analysis")
     if args.subgraph == "report" and not args.analysis_result_id:
         parser.error("--analysis-result-id is required for report")
+    if args.subgraph == "report" and not args.prep_result_id:
+        parser.error("--prep-result-id is required for report")
 
     runners = {
         "discovery": _run_discovery,

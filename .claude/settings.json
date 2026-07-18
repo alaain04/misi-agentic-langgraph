@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "mcp__codegraph__*"
+      "mcp__codegraph__*",
+      "mcp__engram__*",
+      "mcp__plugin_engram_engram__*"
     ]
   },
   "hooks": {
@@ -15,5 +17,25 @@
         ]
       }
     ]
-  }
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "engram@engram": true
+  },
+  "extraKnownMarketplaces": {
+    "engram": {
+      "source": {
+        "source": "github",
+        "repo": "Gentleman-Programming/engram"
+      }
+    }
+  },
+  "deny": [
+    "Bash(git push --force*)",
+    "Bash(git push -f*)",
+    "Bash(git reset --hard*)",
+    "Bash(git clean -f*)",
+    "Bash(rm -rf*)",
+    "Bash(rm -fr*)"
+  ]
 }
