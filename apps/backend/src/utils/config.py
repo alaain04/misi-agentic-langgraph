@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # npm/pnpm `audit --json` is not filtered by --audit-level, so we filter here.
     # Values: low | medium | high | critical  (default: high)
     vuln_min_severity: str = "high"
+    # Cap on concurrent npm registry lookups when resolving licenses for
+    # packages whose lockfile doesn't carry a "license" field (yarn/pnpm
+    # always; npm when the field is missing) — caps concurrency, not
+    # coverage, to avoid hammering the registry on large trees.
+    license_lookup_concurrency: int = 10
 
 
 settings = Settings()

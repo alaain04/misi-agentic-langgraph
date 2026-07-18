@@ -44,6 +44,9 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
     - The vulnerability_agent audits the ENTIRE dependency tree in one run. Dispatch
       it at most once, leave packages_to_focus empty for it, and never shard it —
       extra dispatches add no coverage.
+    - The license_agent analyzes license compatibility across the ENTIRE dependency
+      tree in one run. Dispatch it at most once, leave packages_to_focus empty for
+      it, and never shard it — extra dispatches add no coverage.
     - Later iterations: dispatch only to close a specific gap or chase a lead from a
       prior bundle. Spend early iterations on breadth, later ones on depth.
 

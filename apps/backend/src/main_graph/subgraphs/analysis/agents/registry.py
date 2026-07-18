@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
+from src.main_graph.subgraphs.analysis.agents.license_agent import LicenseAgent
 from src.main_graph.subgraphs.analysis.agents.maintenance_agent import MaintenanceAgent
 from src.main_graph.subgraphs.analysis.agents.supply_chain_agent import SupplyChainAgent
 from src.main_graph.subgraphs.analysis.agents.vulnerability_agent import (
@@ -13,6 +14,7 @@ REGISTRY: dict[str, type[BaseAgent]] = {
     "maintenance_agent": MaintenanceAgent,
     "supply_chain_agent": SupplyChainAgent,
     "web_research_agent": WebResearchAgent,
+    "license_agent": LicenseAgent,
 }
 
 

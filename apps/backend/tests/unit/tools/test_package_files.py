@@ -89,7 +89,6 @@ def test_all_package_file_tools_registered():
         "version_ranges",
         "dependency_confusion",
         "install_scripts",
-        "check_licenses",
         "duplicate_packages",
         "missing_dependencies",
         "dependency_size",

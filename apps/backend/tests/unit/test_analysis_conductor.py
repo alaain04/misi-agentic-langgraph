@@ -38,3 +38,14 @@ def test_system_prompt_mentions_flagged_bundles():
 
     system = _build_system(4)
     assert "unresolved" in system.lower()
+
+
+def test_system_prompt_mentions_license_agent_dispatch_strategy():
+    from src.main_graph.subgraphs.analysis.nodes.analysis_conductor import _build_system
+
+    system = _build_system(4)
+    # appears once via the auto-generated roster, and once more via the
+    # explicit dispatch-strategy line -- proves the guidance line was added,
+    # not just agent registration
+    assert system.count("license_agent") >= 2
+    assert "never shard it" in system
