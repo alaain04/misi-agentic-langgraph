@@ -8,7 +8,6 @@ LangGraph-powered dependency risk analysis tool. Given a GitHub repository URL a
 |---|---|---|
 | backend | FastAPI + LangGraph pipeline, MongoDB job persistence | [apps/backend](apps/backend/README.md) |
 | frontend | React + TypeScript web client | [apps/frontend](apps/frontend/README.md) |
-| workers | NATS JetStream consumer for npm/GitHub entity fetching | [apps/workers](apps/workers/README.md) |
 
 ## API Reference
 Runnable HTTP request files are in [http-docs/](http-docs/) (compatible with httpYac / REST Client):
@@ -17,4 +16,3 @@ Runnable HTTP request files are in [http-docs/](http-docs/) (compatible with htt
 |---|---|
 | [http-docs/analyze.http](http-docs/analyze.http) | Backend — submit and monitor analysis jobs |
 | [http-docs/jobs.http](http-docs/jobs.http) | Backend — list and filter jobs |
-| [http-docs/workers.http](http-docs/workers.http) | Workers — trigger and monitor entity fetch jobs |

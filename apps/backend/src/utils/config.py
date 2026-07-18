@@ -23,9 +23,6 @@ class Settings(BaseSettings):
     docker_cpu_limit: float = 1.0
     script_timeout_seconds: int = 120
 
-    # Workers service
-    workers_url: str = "http://localhost:8001"
-
     # Tavily (web search for conductor)
     tavily_api_key: str = ""
 

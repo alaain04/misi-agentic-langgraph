@@ -8,7 +8,6 @@ This file provides guidance for Claude Code when working with this repository.
 apps/
   backend/   # Python/LangGraph API (FastAPI, LangGraph, MongoDB)
   frontend/  # React + TypeScript + Vite web client
-  workers/   # Python NATS JetStream entity-fetch consumer
 docs/
   api.md              # REST API entry point (endpoints + links to domain docs)
   backend/
@@ -38,11 +37,7 @@ Before working on any component, read its documentation:
 - [Artifacts](docs/backend/artifacts.md) — per-node progress data for pipeline visualization
 - [Report](docs/backend/report.md) — final analysis_report shape
 
-**Workers** (`apps/workers/`)
-- [Architecture](apps/workers/docs/architecture.md) — hexagonal layers, ports, adapters, NATS JetStream, MongoDB
-
 ## Integration
 
 - Backend exposes REST API at `http://localhost:8000` — see [docs/api.md](docs/api.md)
-- Workers API at `http://localhost:8001` (default) — see [http-docs/workers.http](http-docs/workers.http)
 - Frontend consumes the backend API; keep them independently runnable
