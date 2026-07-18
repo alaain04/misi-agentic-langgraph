@@ -251,5 +251,10 @@ async def enrich_finding(
             )
             tool_results.extend(new_results)
 
-    assert draft is not None
+    if draft is None:
+        logger.warning(
+            "finding_enricher: no successful decision for %s, using fallback",
+            finding.dep_name,
+        )
+        draft = _fallback_finding(finding)
     return draft, [tr.tool for tr in tool_results]

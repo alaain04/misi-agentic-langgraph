@@ -171,6 +171,33 @@ async def test_enrich_finding_marks_untrusted_when_budget_exhausted():
 
 
 @pytest.mark.asyncio
+async def test_enrich_finding_falls_back_when_llm_never_succeeds():
+    """A total LLM outage for this one finding must degrade to a fallback
+    finding, not crash the whole enrichment pipeline."""
+    from src.main_graph.subgraphs.report.agents import finding_enricher_agent
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=RuntimeError("LLM outage")
+    )
+    critic = AsyncMock(return_value=_ok_verdict())
+
+    with (
+        patch.object(finding_enricher_agent, "_llm", mock_llm),
+        patch.object(finding_enricher_agent, "_MAX_ITERATIONS", 2),
+        patch.object(finding_enricher_agent, "critique_report_finding", critic),
+    ):
+        draft, tools_used = await finding_enricher_agent.enrich_finding(
+            _finding(), _prep(), []
+        )
+
+    assert draft.dep_name == "left-pad"
+    assert draft.recommendation == "Review manually"
+    assert tools_used == []
+    critic.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_enrich_finding_critic_failure_degrades_to_trusted():
     from src.main_graph.subgraphs.report.agents import finding_enricher_agent
 
