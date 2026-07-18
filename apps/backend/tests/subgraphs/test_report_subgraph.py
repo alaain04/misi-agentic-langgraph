@@ -362,7 +362,7 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
 
 @pytest.mark.asyncio
 async def test_report_drops_findings_below_min_severity(subgraph_config, result_dao):
-    """report_min_severity="high" discards medium/low findings from the saved
+    """risk_min_severity="high" discards medium/low findings from the saved
     report, independent of vuln_min_severity (which only gates npm-audit CVEs)."""
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
 
@@ -423,7 +423,7 @@ async def test_report_drops_findings_below_min_severity(subgraph_config, result_
             "src.main_graph.subgraphs.report.nodes.save_report_result.settings"
         ) as mock_settings,
     ):
-        mock_settings.report_min_severity = "high"
+        mock_settings.risk_min_severity = "high"
         graph = build_report_subgraph()
         result = await graph.ainvoke(
             {
@@ -588,7 +588,7 @@ async def test_report_overall_risk_reflects_filtered_findings(
             "src.main_graph.subgraphs.report.nodes.save_report_result.settings"
         ) as mock_settings,
     ):
-        mock_settings.report_min_severity = "critical"
+        mock_settings.risk_min_severity = "critical"
         graph = build_report_subgraph()
         result = await graph.ainvoke(
             {

@@ -6,5 +6,13 @@ services:
     volumes:
       - mongodb_data:/data/db
 
+  codegraph:
+    build:
+      context: ./docker/codegraph
+    image: codegraph-cli:latest
+    profiles:
+      - build-only
+    command: ["true"]
+
 volumes:
   mongodb_data:

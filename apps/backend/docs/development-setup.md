@@ -2,6 +2,7 @@
 - Python 3.12+
 - MongoDB (docker-compose provided for local setup)
 - OpenAI API key (for LLM calls)
+- Docker (for the `codegraph-cli` image used by blast-radius analysis in the report subgraph — build it once with `make docker-build-codegraph`; without it, `blast_radius` findings report as unavailable for every package in a job)
 
 
 ## Development setup

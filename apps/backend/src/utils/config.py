@@ -11,31 +11,33 @@ class Settings(BaseSettings):
     openai_api_key: str
 
     # LangSmith
-    langsmith_api_key: str = ""
-    langsmith_project: str = "default"
+    langsmith_api_key: str
+    langsmith_project: str
 
     # GitHub
-    github_token: str = ""
+    github_token: str
 
     # CodeGraph (blast-radius analysis of the target repo)
-    codegraph_docker_image: str = "codegraph-cli:latest"
+    codegraph_docker_image: str
 
     # Tavily (web search for conductor)
-    tavily_api_key: str = ""
+    tavily_api_key: str
 
-    # Minimum severity for findings kept in the final report. Findings below this
-    # threshold are dropped by save_report_result before persisting.
-    # Values: any | low | medium | high | critical  (default: any)
-    report_min_severity: str = "any"
+    # Minimum severity for risk findings. Findings below this threshold are
+    # dropped by save_analysis_result before the report subgraph enriches them
+    # (no web_search/blast_radius spent on them), and dropped again by
+    # save_report_result as a final guard before persisting.
+    # Values: any | low | medium | high | critical
+    risk_min_severity: str
     # Minimum severity for vulnerability findings from the dependency audit.
     # npm/pnpm `audit --json` is not filtered by --audit-level, so we filter here.
-    # Values: low | medium | high | critical  (default: high)
-    vuln_min_severity: str = "high"
+    # Values: low | medium | high | critical
+    vuln_min_severity: str
     # Cap on concurrent npm registry lookups when resolving licenses for
     # packages whose lockfile doesn't carry a "license" field (yarn/pnpm
     # always; npm when the field is missing) — caps concurrency, not
     # coverage, to avoid hammering the registry on large trees.
-    license_lookup_concurrency: int = 10
+    license_lookup_concurrency: int
 
 
 settings = Settings()

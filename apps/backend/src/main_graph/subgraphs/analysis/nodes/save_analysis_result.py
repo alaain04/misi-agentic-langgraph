@@ -8,6 +8,8 @@ from src.main_graph.config import get_services
 from src.main_graph.constants import ANALYSIS
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.models.results import AnalysisResult
+from src.utils.config import settings
+from src.utils.severity import filter_by_min_severity
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ async def save_analysis_result(state: AnalysisState, config: RunnableConfig) -> 
     bundles = await dao.get_bundles(bundle_ids)
 
     all_findings = [f for b in bundles for f in b.findings]
+    all_findings = filter_by_min_severity(all_findings, settings.risk_min_severity)
 
     result = AnalysisResult(
         job_id=state["job_id"],

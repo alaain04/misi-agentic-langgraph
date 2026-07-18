@@ -15,12 +15,11 @@ from src.models.results import (
 )
 from src.utils.config import settings
 from src.utils.llm import Model, get_llm, parse_llm_json
+from src.utils.severity import SEVERITY_ORDER, filter_by_min_severity
 
 logger = logging.getLogger(__name__)
 
 _llm = get_llm(Model.GPT_5_4_MINI)
-
-_SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
 _BLAST_RADIUS_FIELDS = set(BlastRadiusSummary.model_fields)
 
@@ -145,15 +144,6 @@ def _group_enrichment_by_dep(
     return {"by_dependency": by_dep, "general": general}
 
 
-def _filter_by_severity(
-    findings: list[ReportFinding], min_severity: str
-) -> list[ReportFinding]:
-    if min_severity == "any":
-        return findings
-    threshold = _SEVERITY_ORDER.get(min_severity, 0)
-    return [f for f in findings if _SEVERITY_ORDER.get(f.severity, 0) >= threshold]
-
-
 def _grounded_blast_radius(
     tool_results: list[ToolResult], dep_name: str
 ) -> BlastRadiusSummary | None:
@@ -231,11 +221,11 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
             finding.blast_radius = grounded
             finding.affected_files = grounded.affected_files
 
-    findings = _filter_by_severity(findings, settings.report_min_severity)
+    findings = filter_by_min_severity(findings, settings.risk_min_severity)
 
     overall = max(
         (f.severity for f in findings),
-        key=lambda s: _SEVERITY_ORDER.get(s, 0),
+        key=lambda s: SEVERITY_ORDER.get(s, 0),
         default="none",
     )
 

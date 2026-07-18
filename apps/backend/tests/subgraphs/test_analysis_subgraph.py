@@ -336,3 +336,89 @@ async def test_analysis_accumulates_bundles_from_parallel_agents(
     for c in agent_calls:
         assert c["started_at"]
         assert c["finished_at"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_drops_findings_below_min_severity(subgraph_config, result_dao):
+    """risk_min_severity="high" discards the medium finding before the
+    AnalysisResult is saved, so the report subgraph never sees it (no
+    enrichment work spent on findings that will be dropped anyway)."""
+    job_id = f"anal-{uuid.uuid4().hex[:8]}"
+
+    prep = _seed_prep(job_id)
+    await result_dao.save_prep(prep)
+
+    dispatches = [
+        AgentDispatch(
+            domain="vulnerability",
+            hypothesis="CVEs in lodash",
+            packages_to_focus=["lodash"],
+            agent_type="vulnerability_agent",
+        ),
+        AgentDispatch(
+            domain="maintenance",
+            hypothesis="Is lodash maintained?",
+            packages_to_focus=["lodash"],
+            agent_type="maintenance_agent",
+        ),
+    ]
+
+    conductor_decisions = [
+        AnalysisConductorDecision(
+            dispatches=dispatches, finalize=False, reasoning="parallel check"
+        ),
+        AnalysisConductorDecision(dispatches=[], finalize=True, reasoning="done"),
+    ]
+
+    agent_decision = DomainAgentDecision(
+        tool_calls=[],
+        findings=[
+            FindingNote(
+                dep_name="lodash",
+                severity="medium",
+                description="Finding from parallel agent",
+                evidence=[],
+            )
+        ],
+        summary="One finding found",
+        confidence=0.8,
+        finalize=True,
+        reasoning="done",
+    )
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.analysis_conductor._llm",
+            _make_conductor_llm(conductor_decisions),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
+            _make_agent_llm(agent_decision),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent.npm_audit",
+            AsyncMock(return_value=_AUDIT_FIXTURE),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.save_analysis_result.settings"
+        ) as mock_settings,
+    ):
+        mock_settings.risk_min_severity = "high"
+        graph = build_analysis_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "dependency health",
+                "prep_result_id": prep.id,
+                "bundle_ids": [],
+            },
+            config=subgraph_config,
+        )
+
+    analysis = await result_dao.get_analysis(result["analysis_result_id"])
+    # Both bundles are still recorded (evidence isn't discarded), but the
+    # medium-severity finding is dropped from the saved AnalysisResult.
+    assert len(analysis.evidence_bundle_ids) == 2
+    assert len(analysis.findings) == 1
+    assert analysis.findings[0].dep_name == "lodash"
+    assert analysis.findings[0].severity == "high"
