@@ -108,12 +108,6 @@ class FindingEnrichmentDecision(BaseModel):
     reasoning: str
 
 
-class ReportConductorDecision(BaseModel):
-    tool_calls: list[ToolCall]
-    finalize: bool = False
-    reasoning: str
-
-
 class ReportResult(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     job_id: str
