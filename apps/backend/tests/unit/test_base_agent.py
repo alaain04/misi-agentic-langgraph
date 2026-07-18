@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
+from src.models.conductor import FindingNote
 from src.models.results import (
     AgentDispatch,
+    DomainAgentDecision,
     EvidenceBundle,
     PrepResult,
-    DomainAgentDecision,
 )
-from src.models.conductor import FindingNote
 
 
 def _prep() -> PrepResult:
@@ -87,7 +89,8 @@ async def test_vulnerability_agent_run_extracts_all_audit_findings():
 
 @pytest.mark.asyncio
 async def test_vulnerability_agent_run_passes_container_and_docker_image():
-    """run() forwards the injected container port and the prep's docker_image to npm_audit."""
+    """run() forwards the injected container port and the prep's docker_image to
+    npm_audit."""
     from src.main_graph.subgraphs.analysis.agents import vulnerability_agent
 
     audit = AsyncMock(return_value={"advisories": {}})
@@ -129,7 +132,8 @@ async def test_agent_run_accepts_bare_async_functions():
             _dispatch(),
             _prep(),
             [npm_audit],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "{max_iter}",
         )
 
     assert isinstance(bundle, EvidenceBundle)
@@ -170,7 +174,7 @@ def test_format_params_excludes_injected_params():
         detected_package_manager: str,
         container,
         docker_image: str,
-    ) -> dict: ...
+    ): ...
 
     sig = _format_params(some_tool)
     assert "package_name" in sig
@@ -239,7 +243,8 @@ async def test_react_loop_self_corrects_then_passes():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "{max_iter}",
         )
 
     assert bundle.confidence == 0.85
@@ -279,7 +284,8 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "{max_iter}",
         )
 
     assert bundle.findings == [finding]  # kept, not pruned
@@ -310,7 +316,8 @@ async def test_react_loop_critic_failure_degrades_to_pass():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "{max_iter}",
         )
 
     assert bundle.confidence == 0.9
@@ -348,7 +355,8 @@ async def test_react_loop_survives_malformed_decision_then_recovers():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "{max_iter}",
         )
 
     assert bundle.findings == [finding]
@@ -376,7 +384,8 @@ async def test_react_loop_skips_critic_when_no_findings():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} {max_iter}",
+            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "{max_iter}",
         )
 
     assert bundle.confidence == 0.4

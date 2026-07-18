@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 _llm = get_llm(Model.GPT_4O_MINI)
 
 _SYSTEM = textwrap.dedent("""\
-    You are analyzing a Node.js project. Given its package.json contents and the user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
+    You are analyzing a Node.js project. Given its package.json contents and the \
+user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
     - Names the project and its stated purpose
     - Lists key dependency groups most relevant to the concern
     - Flags anything immediately notable (scripts, workspaces, unusual dependencies)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from src.main_graph.subgraphs.discovery.constants import (
+    BUILD_PROJECT_CONTEXT,
+    INDEX_REPO,
+    INSPECT_REPO,
+    INSTALL_DEPS,
+)
 from src.main_graph.subgraphs.discovery.graph import (
     _route_after_clone,
     _route_after_inspect,
-)
-from src.main_graph.subgraphs.discovery.constants import (
-    BUILD_PROJECT_CONTEXT,
-    INSPECT_REPO,
-    INSTALL_DEPS,
-    INDEX_REPO,
 )
 
 

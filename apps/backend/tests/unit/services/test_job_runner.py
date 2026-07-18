@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.models.job import JobStatus
 from src.services.job_runner import run_analysis
 
 

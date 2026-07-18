@@ -1,6 +1,7 @@
-from src.main_graph.graph import _after_prep, _after_analysis
-from src.main_graph.constants import ANALYSIS, REPORT
 from langgraph.graph import END
+
+from src.main_graph.constants import ANALYSIS, REPORT
+from src.main_graph.graph import _after_analysis, _after_prep
 
 
 def test_prep_error_goes_to_end():

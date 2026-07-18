@@ -1,15 +1,14 @@
+from src.models.conductor import FindingNote
 from src.models.results import (
-    PrepResult,
+    AgentCallRecord,
     AgentDispatch,
     AnalysisConductorDecision,
+    DomainAgentDecision,
     EvidenceBundle,
-    AgentCallRecord,
-    AnalysisResult,
+    PrepResult,
     ReportFinding,
     ReportResult,
-    DomainAgentDecision,
 )
-from src.models.conductor import FindingNote, EvidenceRef
 
 
 def _finding() -> FindingNote:

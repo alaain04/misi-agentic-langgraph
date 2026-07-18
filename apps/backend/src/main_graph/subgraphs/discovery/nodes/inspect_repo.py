@@ -38,7 +38,8 @@ def _select_node_image(min_node: int, pm: str, pm_version: str) -> str:
 
 
 def inspect_repo(state: DiscoveryState) -> dict:
-    """Read package.json and lock files to determine package manager, version, and Docker image."""
+    """Read package.json and lock files to determine package manager, version,
+    and Docker image."""
     repo_path = state.get("repo_path", "")
 
     pkg: dict = {}

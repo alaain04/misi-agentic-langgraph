@@ -3,7 +3,7 @@ from __future__ import annotations
 from langgraph.types import Send
 
 from src.main_graph.subgraphs.analysis.graph import _after_conductor
-from src.models.results import AnalysisConductorDecision, AgentDispatch
+from src.models.results import AgentDispatch, AnalysisConductorDecision
 
 
 def _decision(**kwargs) -> AnalysisConductorDecision:

@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from config.settings import Settings
 from domain.models.errors import PermanentFetchError, RateLimitError, TransientFetchError
 from domain.ports.entity_cache_port import EntityCachePort
 from domain.ports.fetcher_port import FetcherPort
@@ -21,7 +22,7 @@ class ConsumerService:
         fetcher_registry: dict[str, FetcherPort],
         entity_cache: EntityCachePort,
         job_repo: JobRepositoryPort,
-        settings: Any,
+        settings: Settings,
     ) -> None:
         self._messaging = messaging
         self._fetcher_registry = fetcher_registry
@@ -62,7 +63,7 @@ class ConsumerService:
                 await asyncio.sleep(0.1)
 
     def _backoff(self, num_delivered: int) -> float:
-        delay = self._settings.NATS_TRANSIENT_BACKOFF_BASE * (2 ** (num_delivered - 1))
+        delay = self._settings.NATS_TRANSIENT_BACKOFF_BASE * (2.0 ** (num_delivered - 1))
         return min(delay, self._settings.NATS_TRANSIENT_BACKOFF_CAP)
 
     async def _process(self, msg: Any, client: httpx.AsyncClient) -> None:

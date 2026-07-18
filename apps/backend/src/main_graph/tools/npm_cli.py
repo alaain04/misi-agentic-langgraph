@@ -1,4 +1,5 @@
-"""npm tools executed inside a sandboxed container: npm_list, npm_audit, npm_outdated."""
+"""npm tools executed inside a sandboxed container: npm_list, npm_audit,
+npm_outdated."""
 
 from __future__ import annotations
 
@@ -55,7 +56,8 @@ async def npm_list(
 
 @register(
     "npm_audit",
-    "Runs the package manager's audit command (npm/pnpm/yarn); returns vulnerabilities, severities, and affected packages",
+    "Runs the package manager's audit command (npm/pnpm/yarn); returns "
+    "vulnerabilities, severities, and affected packages",
 )
 async def npm_audit(
     repo_path: str,
@@ -120,7 +122,8 @@ def _find_chain(deps: dict, target: str, prefix: str = "") -> str:
 
 @register(
     "resolve_transitive_parent",
-    "Determines if a package is a direct or transitive dependency and identifies which direct deps bring it in",
+    "Determines if a package is a direct or transitive dependency and identifies "
+    "which direct deps bring it in",
 )
 async def resolve_transitive_parent(
     repo_path: str,

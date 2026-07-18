@@ -6,7 +6,7 @@ from domain.ports.job_repository_port import JobRepositoryPort
 
 
 class MongoJobRepository(JobRepositoryPort):
-    def __init__(self, db: AsyncDatabase) -> None:
+    def __init__(self, db: AsyncDatabase[dict[str, object]]) -> None:
         self._col = db["ingest_jobs"]
 
     async def create(self, job_id: str, packages: list[str]) -> None:
@@ -46,7 +46,7 @@ class MongoJobRepository(JobRepositoryPort):
             {"$set": {"status": "done", "updated_at": datetime.now(UTC)}},
         )
 
-    async def get_status(self, job_id: str) -> dict | None:
+    async def get_status(self, job_id: str) -> dict[str, object] | None:
         doc = await self._col.find_one(
             {"_id": job_id},
             {"_id": 0, "status": 1, "total": 1, "completed": 1, "failed": 1},

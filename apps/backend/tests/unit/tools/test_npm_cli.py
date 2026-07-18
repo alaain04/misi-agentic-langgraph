@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import src.main_graph.tools.npm_cli  # trigger registration
 from src.main_graph.tools.registry import TOOL_REGISTRY
 
 
@@ -42,7 +41,10 @@ async def test_npm_list_returns_error_on_failure():
 
 @pytest.mark.asyncio
 async def test_npm_audit_parses_vulnerabilities():
-    fake_output = '{"vulnerabilities": {"lodash": {"severity": "high", "name": "lodash"}}, "metadata": {"vulnerabilities": {"high": 1}}}'
+    fake_output = (
+        '{"vulnerabilities": {"lodash": {"severity": "high", "name": '
+        '"lodash"}}, "metadata": {"vulnerabilities": {"high": 1}}}'
+    )
     container = _container(stdout=fake_output)
     result = await TOOL_REGISTRY["npm_audit"](
         repo_path="/tmp/repo", container=container, docker_image="node:lts-alpine"
@@ -116,7 +118,8 @@ def repo_with_pkg(tmp_path):
 
 @pytest.mark.asyncio
 async def test_resolve_transitive_parent_direct_dep(repo_with_pkg):
-    """express is a direct dep — is_direct should be True, and no container run is needed."""
+    """express is a direct dep — is_direct should be True, and no container run
+    is needed."""
     container = _container(stdout="{}")
     result = await TOOL_REGISTRY["resolve_transitive_parent"](
         repo_path=repo_with_pkg,

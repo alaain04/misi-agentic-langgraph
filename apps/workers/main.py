@@ -15,7 +15,7 @@ from config.settings import settings
 logging.basicConfig(level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
-_consumer_task: asyncio.Task | None = None
+_consumer_task: asyncio.Task[None] | None = None
 
 
 @asynccontextmanager

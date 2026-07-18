@@ -75,7 +75,8 @@ def test_domain_ports_have_no_infrastructure_imports():
 
 
 def test_service_files_do_not_import_from_langgraph():
-    """subgraph service.py files must not import from langgraph (orchestration belongs in nodes)."""
+    """subgraph service.py files must not import from langgraph (orchestration
+    belongs in nodes)."""
     violations = []
     service_files = list(_SRC.glob("main_graph/**/service.py")) + list(
         _SRC.glob("main_graph/nodes/*_service.py")

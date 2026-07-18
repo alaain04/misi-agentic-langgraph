@@ -110,7 +110,8 @@ class JobDAO(JobRepositoryPort):
         """Append a chat message to the artifact's messages array.
 
         Upserts the artifact with status 'running' if it does not exist yet.
-        This handles finding_reviewer, which calls this before the runner creates its artifact.
+        This handles finding_reviewer, which calls this before the runner creates
+        its artifact.
         """
         result = await self._col.update_one(
             {"_id": job_id, "artifacts.node": node},

@@ -1,4 +1,5 @@
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from src.main_graph.subgraphs.discovery.constants import (
     BUILD_PROJECT_CONTEXT,
@@ -27,7 +28,7 @@ def _route_after_inspect(state: DiscoveryState) -> str:
     return INSTALL_DEPS if not state.get("has_lock_file") else INDEX_REPO
 
 
-def build_discovery_subgraph() -> StateGraph:
+def build_discovery_subgraph() -> CompiledStateGraph:
     builder = StateGraph(DiscoveryState)
 
     builder.add_node(CLONE_REPO, clone_repo)

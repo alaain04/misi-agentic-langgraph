@@ -35,7 +35,8 @@ def _normalize(severity: str) -> str:
 def parse_audit_findings(
     audit_output: dict, min_severity: str = "high"
 ) -> list[FindingNote]:
-    """Convert audit output into findings at or above `min_severity`, most severe first."""
+    """Convert audit output into findings at or above `min_severity`, most severe
+    first."""
     output = audit_output or {}
     threshold = _rank(min_severity)
     if "advisories" in output:
@@ -67,8 +68,8 @@ def _from_advisories(advisories: dict, threshold: int) -> list[FindingNote]:
                 severity=_normalize(severity),
                 description=(
                     f"{adv.get('title', 'Known vulnerability')}. "
-                    f"Installed {installed} is within the vulnerable range {vulnerable}; "
-                    f"patched in {patched}. CVEs: {cves}."
+                    f"Installed {installed} is within the vulnerable range "
+                    f"{vulnerable}; patched in {patched}. CVEs: {cves}."
                 ),
                 evidence=[
                     EvidenceRef(
@@ -105,7 +106,10 @@ def _from_vulnerabilities(vulnerabilities: dict, threshold: int) -> list[Finding
                     EvidenceRef(
                         tool="npm_audit",
                         url=url,
-                        log_snippet=f"severity={severity}; range={vulnerable}; fixAvailable={entry.get('fixAvailable')}",
+                        log_snippet=(
+                            f"severity={severity}; range={vulnerable}; "
+                            f"fixAvailable={entry.get('fixAvailable')}"
+                        ),
                     )
                 ],
             )
@@ -118,5 +122,8 @@ def _fix_note(fix) -> str:
         return "A compatible fix is available."
     if isinstance(fix, dict):
         breaking = fix.get("isSemVerMajor")
-        return f"Fix requires {fix.get('name')}@{fix.get('version')} (breaking change: {breaking})."
+        return (
+            f"Fix requires {fix.get('name')}@{fix.get('version')} "
+            f"(breaking change: {breaking})."
+        )
     return "No fix currently available."

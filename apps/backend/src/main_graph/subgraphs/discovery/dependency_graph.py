@@ -90,8 +90,8 @@ def build_dependency_graph(
         # already are names (npm/yarn) — pnpm supplies its own root_keys
         # since multiple snapshots can share a name.
         root_keys = {}
-        for key, (name, _version) in installed.items():
-            root_keys.setdefault(name, key)
+        for k, (name, _version) in installed.items():
+            root_keys.setdefault(name, k)
 
     direct = {}
     packages: dict[str, dict] = {}
@@ -202,7 +202,7 @@ def _parse_pnpm_lock(
     edges: dict[str, list[str]] = {}
     for raw_key, entry in edge_source.items():
         name, version = _split_pnpm_key(raw_key)
-        if not name:
+        if not name or version is None:
             continue
         installed[raw_key] = (name, version)
         entry = entry or {}
@@ -318,9 +318,9 @@ def _parse_yarn_classic_lock(
 
     root_keys: dict[str, str] = {}
     for name, declared in direct_names.items():
-        key = descriptor_to_key.get(f"{name}@{declared}")
-        if key:
-            root_keys[name] = key
+        root_key = descriptor_to_key.get(f"{name}@{declared}")
+        if root_key:
+            root_keys[name] = root_key
 
     return installed, edges, root_keys
 
@@ -359,9 +359,9 @@ def _parse_yarn_berry_lock(lock: dict, direct_names: dict[str, str]) -> _ParsedL
 
     root_keys: dict[str, str] = {}
     for name, declared in direct_names.items():
-        key = descriptor_to_key.get(f"{name}@npm:{declared}")
-        if key:
-            root_keys[name] = key
+        root_key = descriptor_to_key.get(f"{name}@npm:{declared}")
+        if root_key:
+            root_keys[name] = root_key
 
     return installed, edges, root_keys
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 
@@ -15,7 +16,7 @@ from src.utils.config import settings
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 10.0
-_cache: dict[str, dict] = {}
+_cache: dict[str, Any] = {}
 
 
 def clear_cache() -> None:
@@ -118,7 +119,9 @@ async def osv_lookup(
     key = f"osv:{ecosystem}:{package_name}:{version}"
     if key in _cache:
         return _cache[key]
-    payload = {"package": {"name": package_name, "ecosystem": ecosystem}}
+    payload: dict[str, Any] = {
+        "package": {"name": package_name, "ecosystem": ecosystem}
+    }
     if version:
         payload["version"] = version
     try:
@@ -141,7 +144,8 @@ async def osv_lookup(
 
 @register(
     "package_reputation",
-    "Reports package age, maintainers, release cadence, popularity, and weekly downloads via npm registry",
+    "Reports package age, maintainers, release cadence, popularity, and weekly "
+    "downloads via npm registry",
 )
 async def package_reputation(package_name: str) -> dict:
     meta, weekly_downloads = await asyncio.gather(
@@ -262,7 +266,8 @@ async def typosquat_detection(repo_path: str) -> dict:
 
 @register(
     "high_risk_packages",
-    "Flags packages with unusual risk characteristics (new, single-maintainer, abandoned)",
+    "Flags packages with unusual risk characteristics (new, single-maintainer, "
+    "abandoned)",
 )
 async def high_risk_packages(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
@@ -301,7 +306,8 @@ async def high_risk_packages(repo_path: str) -> dict:
 
 @register(
     "web_search",
-    "Searches the web for package alternatives, security advisories, or migration guides",
+    "Searches the web for package alternatives, security advisories, or migration "
+    "guides",
 )
 async def web_search(query: str) -> dict:
     if not settings.tavily_api_key:

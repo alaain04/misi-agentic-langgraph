@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from src.main_graph.subgraphs.report.graph import _after_conductor
-from src.models.results import ReportConductorDecision
 from src.models.conductor import ToolCall
+from src.models.results import ReportConductorDecision
 
 
 def _decision(**kwargs) -> ReportConductorDecision:

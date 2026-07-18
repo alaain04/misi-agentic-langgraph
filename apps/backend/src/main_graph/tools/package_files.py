@@ -54,7 +54,8 @@ async def package_json(repo_path: str) -> dict:
 
 @register(
     "package_lock",
-    "Parses package-lock.json or lockfile; returns resolved versions and integrity hashes",
+    "Parses package-lock.json or lockfile; returns resolved versions and integrity "
+    "hashes",
 )
 async def package_lock(repo_path: str) -> dict:
     for name in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
@@ -92,7 +93,8 @@ async def version_ranges(repo_path: str) -> dict:
 
 @register(
     "dependency_confusion",
-    "Detects internal/private package names that may be vulnerable to dependency confusion",
+    "Detects internal/private package names that may be vulnerable to dependency "
+    "confusion",
 )
 async def dependency_confusion(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
@@ -175,8 +177,10 @@ async def check_licenses(repo_path: str) -> dict:
                 with open(pkg_path) as f:
                     dep_pkg = json.load(f)
                 lic = dep_pkg.get("license", "UNKNOWN")
-                flagged = str(lic).lower() not in permissive
-                results.append({"package": entry, "license": lic, "flagged": flagged})
+                is_flagged = str(lic).lower() not in permissive
+                results.append(
+                    {"package": entry, "license": lic, "flagged": is_flagged}
+                )
             except Exception:
                 pass
     flagged = [r for r in results if r["flagged"]]

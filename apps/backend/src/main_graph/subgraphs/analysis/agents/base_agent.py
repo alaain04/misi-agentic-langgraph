@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 import inspect
 import json
@@ -7,7 +8,7 @@ import textwrap
 import time
 import uuid
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.critique import critique_findings
@@ -39,7 +40,8 @@ _INJECTED_PARAMS = {
 
 
 def _format_params(t) -> str:
-    """Render a tool's real argument names/types so the LLM doesn't have to guess them."""
+    """Render a tool's real argument names/types so the LLM doesn't have to
+    guess them."""
     if hasattr(t, "args"):  # LangChain StructuredTool (e.g. search_code)
         parts = []
         for pname, schema in t.args.items():
@@ -85,7 +87,7 @@ def _format_packages(names: list[str], dependency_graph: dict) -> str:
 def _format_tools(tools: list) -> str:
     lines = []
     for t in tools:
-        name = getattr(t, "name", None) or getattr(t, "__name__", repr(t))
+        name = str(getattr(t, "name", None) or getattr(t, "__name__", repr(t)))
         desc = getattr(t, "description", "") or TOOL_DESCRIPTIONS.get(name, "")
         params = _format_params(t)
         lines.append(f"- {name}({params}): {desc}")
@@ -209,17 +211,21 @@ async def _react_loop(
             )
         )
         try:
-            decision = await structured.ainvoke(
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": prompt},
-                ]
+            decision = cast(
+                DomainAgentDecision,
+                await structured.ainvoke(
+                    [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ]
+                ),
             )
         except Exception as exc:
             logger.warning("structured decision failed, retrying: %s", exc)
             continue
 
         last = iteration == _MAX_ITERATIONS - 1
+        assert decision is not None
         if decision.finalize or last:
             if not decision.findings:
                 confidence = decision.confidence

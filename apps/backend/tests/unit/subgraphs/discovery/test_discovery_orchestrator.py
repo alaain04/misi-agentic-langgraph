@@ -1,4 +1,5 @@
-"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo, install_deps."""
+"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo,
+install_deps."""
 
 import json
 from unittest.mock import AsyncMock, patch

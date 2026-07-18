@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import textwrap
+from typing import cast
 
 from langchain_core.runnables import RunnableConfig
 
@@ -72,11 +73,14 @@ async def report_conductor(state, config: RunnableConfig) -> dict:
     structured = _llm.with_structured_output(
         ReportConductorDecision, method="function_calling"
     )
-    decision: ReportConductorDecision = await structured.ainvoke(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
-        ]
+    decision = cast(
+        ReportConductorDecision,
+        await structured.ainvoke(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ]
+        ),
     )
 
     if iteration >= _MAX_ITERATIONS:

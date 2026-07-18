@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import textwrap
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -71,9 +72,12 @@ async def critique_findings(
         f"Findings to verify:\n{_format_findings(findings, installed_versions)}"
     )
     structured = _llm.with_structured_output(FindingsVerdict, method="function_calling")
-    return await structured.ainvoke(
-        [
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": user},
-        ]
+    return cast(
+        FindingsVerdict,
+        await structured.ainvoke(
+            [
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": user},
+            ]
+        ),
     )

@@ -20,7 +20,10 @@ _LOCK_FILE_NAMES = {
 
 def _install_command(pm: str, pm_version: str) -> str:
     if pm == "pnpm":
-        return f"cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g pnpm@{pm_version} && pnpm install"
+        return (
+            f"cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g "
+            f"pnpm@{pm_version} && pnpm install"
+        )
     return "cd /workspace && NO_UPDATE_NOTIFIER=1 npm install --ignore-scripts"
 
 

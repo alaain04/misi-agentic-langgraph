@@ -39,6 +39,7 @@ class DockerContainerAdapter(ContainerRunPort):
             await proc.wait()
             return -1, "", f"timed out after {_TIMEOUT}s"
 
+        assert proc.returncode is not None  # communicate() waits for exit
         return (
             proc.returncode,
             stdout_b.decode(errors="replace"),

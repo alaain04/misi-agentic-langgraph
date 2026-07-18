@@ -32,7 +32,8 @@ Output ONLY valid JSON:
       "recommendation": "<actionable fix>",
       "alternatives": ["<alternative package>"],
       "affected_files": ["<file:line>"],
-      "evidence": [{"tool": "<tool>", "url": "<url or null>", "log_snippet": "<excerpt>"}]
+      "evidence": [{"tool": "<tool>", "url": "<url or null>", "log_snippet": \
+"<excerpt>"}]
     }
   ],
   "recommendations": ["<top-level recommendation>"]
@@ -66,7 +67,8 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
     )
 
     try:
-        data = parse_llm_json(response.content or "")
+        content = response.content if isinstance(response.content, str) else ""
+        data = parse_llm_json(content)
         findings = [ReportFinding(**f) for f in data.get("findings", [])]
     except Exception:
         findings = [

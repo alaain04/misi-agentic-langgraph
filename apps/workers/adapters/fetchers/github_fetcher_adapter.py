@@ -38,8 +38,10 @@ class _GithubBaseFetcher(FetcherPort):
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
-    async def _get_pages(self, client: httpx.AsyncClient, url: str) -> list[dict]:
-        results: list[dict] = []
+    async def _get_pages(
+        self, client: httpx.AsyncClient, url: str
+    ) -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
         next_url: str | None = url
         while next_url:
             for attempt in range(self._max_retries):
@@ -84,7 +86,7 @@ class GithubIssuesFetcherAdapter(_GithubBaseFetcher):
         super().__init__(rate_limiter, token, max_retries)
         self._lookback_days = lookback_days
 
-    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict:
+    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict[str, object]:
         since = (datetime.now(UTC) - timedelta(days=self._lookback_days)).isoformat()
         url = f"{_BASE}/repos/{name}/issues?state=all&since={since}&per_page=100"
         issues = await self._get_pages(client, url)
@@ -104,22 +106,22 @@ class GithubReleasesFetcherAdapter(_GithubBaseFetcher):
         super().__init__(rate_limiter, token, max_retries)
         self._lookback_days = lookback_days
 
-    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict:
+    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict[str, object]:
         url = f"{_BASE}/repos/{name}/releases?per_page=100"
         all_releases = await self._get_pages(client, url)
         cutoff = datetime.now(UTC) - timedelta(days=self._lookback_days)
-        recent = [
-            r
-            for r in all_releases
-            if r.get("published_at") and datetime.fromisoformat(r["published_at"]) >= cutoff
-        ]
+        recent = []
+        for r in all_releases:
+            published_at = r.get("published_at")
+            if isinstance(published_at, str) and datetime.fromisoformat(published_at) >= cutoff:
+                recent.append(r)
         return {"releases": recent}
 
 
 class GithubAdvisoriesFetcherAdapter(_GithubBaseFetcher):
     collection = "github_advisories_cache"
 
-    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict:
+    async def fetch(self, client: httpx.AsyncClient, name: str) -> dict[str, object]:
         url = f"{_BASE}/repos/{name}/security-advisories?per_page=100"
         advisories = await self._get_pages(client, url)
         return {"advisories": advisories}

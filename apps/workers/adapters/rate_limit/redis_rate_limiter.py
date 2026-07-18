@@ -4,6 +4,8 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Awaitable
+from typing import cast
 
 import redis.asyncio as aioredis
 
@@ -51,14 +53,19 @@ class RedisRateLimiter(RateLimitPort):
         """Block until a request slot is available for group."""
         windows = self._windows[group]  # KeyError for unknown group
         await self._ensure_loaded()
+        sha = self._sha
+        assert sha is not None
         keys = [f"ratelimit:{group}:{w}" for w, _ in windows]
         argv_pairs = [str(v) for w, m in windows for v in (w, m)]
 
         while True:
             now = time.time()
             req_id = str(uuid.uuid4())
-            result = await self._client.evalsha(
-                self._sha, len(keys), *keys, str(now), req_id, *argv_pairs
+            result = await cast(
+                Awaitable[int],
+                self._client.evalsha(
+                    sha, len(keys), *keys, str(now), req_id, *argv_pairs
+                ),
             )
             if result == 1:
                 return

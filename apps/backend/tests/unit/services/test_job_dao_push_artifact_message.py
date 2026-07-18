@@ -1,7 +1,8 @@
 """Unit test: push_artifact_message contract via the abstract port."""
 
-from src.domain.ports.job_repository_port import JobRepositoryPort
 import inspect
+
+from src.domain.ports.job_repository_port import JobRepositoryPort
 
 
 def test_push_artifact_message_is_on_port():

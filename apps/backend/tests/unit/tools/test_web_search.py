@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import src.main_graph.tools.external_api  # trigger registration
 from src.main_graph.tools.registry import TOOL_REGISTRY
 
 

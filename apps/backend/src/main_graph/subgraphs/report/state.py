@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import operator
 from typing import Annotated, NotRequired
+
 from typing_extensions import TypedDict
 
 from src.models.conductor import ToolResult

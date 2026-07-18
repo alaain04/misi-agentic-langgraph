@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import os
 import tempfile
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 
 def test_make_search_code_tool_returns_tool():

@@ -71,6 +71,7 @@ def test_job_metadata_autopilot_defaults_false():
 
 def test_job_dao_implements_save_dep_tree():
     import inspect
+
     from src.domain.ports.job_repository_port import JobRepositoryPort
     from src.services.job_dao import JobDAO
 
@@ -83,6 +84,7 @@ def test_job_dao_implements_save_dep_tree():
 
 def test_job_dao_implements_get_dep_tree():
     import inspect
+
     from src.domain.ports.job_repository_port import JobRepositoryPort
     from src.services.job_dao import JobDAO
 

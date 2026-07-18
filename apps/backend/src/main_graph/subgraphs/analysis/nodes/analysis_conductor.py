@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import textwrap
+from typing import cast
 
 from langchain_core.runnables import RunnableConfig
 
@@ -111,11 +112,14 @@ async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> di
     structured = _llm.with_structured_output(
         AnalysisConductorDecision, method="function_calling"
     )
-    decision: AnalysisConductorDecision = await structured.ainvoke(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
-        ]
+    decision = cast(
+        AnalysisConductorDecision,
+        await structured.ainvoke(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ]
+        ),
     )
 
     if iteration >= _MAX_ITERATIONS:

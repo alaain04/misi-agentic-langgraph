@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
 from src.models.conductor import EvidenceRef, FindingNote
 from src.models.results import (
     AgentDispatch,
@@ -26,7 +27,6 @@ from src.models.results import (
     DomainAgentDecision,
     PrepResult,
 )
-from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
 
 
 def _seed_prep(job_id: str) -> PrepResult:

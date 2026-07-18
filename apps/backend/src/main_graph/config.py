@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from typing_extensions import TypedDict
@@ -19,4 +21,4 @@ class PipelineConfigurable(TypedDict):
 
 
 def get_services(config: RunnableConfig) -> PipelineConfigurable:
-    return config["configurable"]
+    return cast(PipelineConfigurable, config["configurable"])
