@@ -9,7 +9,7 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.main_graph.tools.search_code import _SOURCE_EXTENSIONS, set_vector_store
+from src.main_graph.tools.search_code import is_indexable_source_file, set_vector_store
 from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ def _walk_source_files(repo_path: str) -> list[tuple[str, str]]:
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         for fname in files:
-            if os.path.splitext(fname)[1] not in _SOURCE_EXTENSIONS:
+            if not is_indexable_source_file(fname):
                 continue
             full = os.path.join(root, fname)
             rel = os.path.relpath(full, repo_path)

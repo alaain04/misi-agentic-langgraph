@@ -32,7 +32,9 @@ async def test_web_search_returns_results():
         ),
     ):
         mock_settings.tavily_api_key = "test-key"
-        result = await TOOL_REGISTRY["web_search"](query="lodash alternatives npm")
+        result = await TOOL_REGISTRY["web_search"](
+            package_name="lodash", query="alternatives npm"
+        )
 
     assert result["query"] == "lodash alternatives npm"
     assert len(result["results"]) == 1
@@ -43,7 +45,9 @@ async def test_web_search_returns_results():
 async def test_web_search_returns_error_when_no_api_key():
     with patch("src.main_graph.tools.external_api.settings") as mock_settings:
         mock_settings.tavily_api_key = ""
-        result = await TOOL_REGISTRY["web_search"](query="test")
+        result = await TOOL_REGISTRY["web_search"](
+            package_name="test-pkg", query="test"
+        )
     assert "error" in result
     assert result["results"] == []
 
@@ -63,7 +67,9 @@ async def test_web_search_handles_http_error():
         ),
     ):
         mock_settings.tavily_api_key = "test-key"
-        result = await TOOL_REGISTRY["web_search"](query="test")
+        result = await TOOL_REGISTRY["web_search"](
+            package_name="test-pkg", query="test"
+        )
 
     assert "error" in result
     assert result["results"] == []

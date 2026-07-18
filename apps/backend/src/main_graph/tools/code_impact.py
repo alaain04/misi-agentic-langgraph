@@ -4,6 +4,21 @@ from langchain_core.tools import tool
 
 from src.main_graph.tools.search_code import _store_cache
 
+_SNIPPET_RADIUS = 150
+
+
+def _snippet_around_match(content: str, needle: str) -> str:
+    """Return a window centered on `needle` rather than a blind prefix slice,
+    so the snippet shown as evidence actually contains the matched usage."""
+    idx = content.find(needle)
+    if idx == -1:
+        return content[:300]
+    start = max(0, idx - _SNIPPET_RADIUS)
+    end = min(len(content), idx + len(needle) + _SNIPPET_RADIUS)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(content) else ""
+    return f"{prefix}{content[start:end]}{suffix}"
+
 
 def make_code_impact_tool(vector_store_id: str):
     @tool
@@ -15,7 +30,10 @@ def make_code_impact_tool(vector_store_id: str):
         query = f"import {package_name} require {package_name}"
         results = await store.asimilarity_search(query, k=20)
         return [
-            {"file": doc.metadata.get("file", ""), "snippet": doc.page_content[:300]}
+            {
+                "file": doc.metadata.get("file", ""),
+                "snippet": _snippet_around_match(doc.page_content, package_name),
+            }
             for doc in results
             if package_name in doc.page_content
         ]

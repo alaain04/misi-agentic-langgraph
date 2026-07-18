@@ -266,8 +266,9 @@ async def typosquat_detection(repo_path: str) -> dict:
 
 @register(
     "high_risk_packages",
-    "Flags packages with unusual risk characteristics (new, single-maintainer, "
-    "abandoned)",
+    "Flags packages with unusual risk characteristics (very new or abandoned). "
+    "Maintainer count alone is never used as a risk signal — a single maintainer "
+    "is normal for the npm ecosystem and is not, by itself, evidence of risk.",
 )
 async def high_risk_packages(repo_path: str) -> dict:
     pkg = _load_pkg(repo_path)
@@ -283,7 +284,6 @@ async def high_risk_packages(repo_path: str) -> dict:
         time_data = meta.get("time", {})
         created_str = time_data.get("created", "")
         modified_str = time_data.get("modified", "")
-        maintainer_count = len(meta.get("maintainers", []))
         reasons = []
         try:
             created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
@@ -297,28 +297,46 @@ async def high_risk_packages(repo_path: str) -> dict:
                 reasons.append("abandoned (>2 years no release)")
         except Exception:
             pass
-        if maintainer_count == 1:
-            reasons.append("single maintainer")
         if reasons:
             flagged.append({"package": dep, "reasons": reasons})
     return {"high_risk": flagged, "checked": min(len(deps), 30)}
 
 
+def _package_name_variants(package_name: str) -> set[str]:
+    variants = {package_name.lower()}
+    variants.add(package_name.lstrip("@").split("/")[-1].lower())
+    return variants
+
+
+def _mentions_package(item: dict, package_name: str) -> bool:
+    text = (item.get("title", "") + " " + item.get("content", "")).lower()
+    return any(v in text for v in _package_name_variants(package_name))
+
+
 @register(
     "web_search",
-    "Searches the web for package alternatives, security advisories, or migration "
-    "guides",
+    "Searches the web for evidence (advisories, issues, releases, migration guides) "
+    "about a SPECIFIC package's SPECIFIC flagged reason. Always scoped to "
+    "package_name — query must describe the concrete reason it was flagged (a CVE "
+    "id, 'prototype pollution', 'license conflict', etc.), never the bare package "
+    "name alone. Results that don't actually mention package_name are dropped "
+    "server-side so this never surfaces evidence about an unrelated package.",
 )
-async def web_search(query: str) -> dict:
+async def web_search(package_name: str, query: str) -> dict:
     if not settings.tavily_api_key:
         return {"error": "TAVILY_API_KEY not configured", "results": []}
+    full_query = (
+        query
+        if package_name.lower() in query.lower()
+        else f"{package_name} {query}"
+    )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": settings.tavily_api_key,
-                    "query": query,
+                    "query": full_query,
                     "max_results": 5,
                 },
             )
@@ -331,7 +349,8 @@ async def web_search(query: str) -> dict:
                 "snippet": item.get("content", ""),
             }
             for item in data.get("results", [])
+            if _mentions_package(item, package_name)
         ]
-        return {"query": query, "results": results}
+        return {"query": full_query, "package_name": package_name, "results": results}
     except Exception as exc:
         return {"error": str(exc), "results": []}

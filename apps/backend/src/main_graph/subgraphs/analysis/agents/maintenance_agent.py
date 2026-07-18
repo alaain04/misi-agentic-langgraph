@@ -28,14 +28,20 @@ class MaintenanceAgent(BaseAgent):
         Investigation strategy:
         1. Call unmaintained_packages to identify packages with no recent commits or \
 no active maintainer.
-        2. Call high_risk_packages to flag packages with known risk signals (single \
-maintainer, no tests, low downloads).
+        2. Call high_risk_packages to flag packages that are very new (<90 days) or \
+abandoned (>2 years without a release).
         3. For packages flagged by either tool, call package_reputation to get \
 download trends and community signals.
         4. A package is a maintenance risk if: last commit > 12 months ago AND has \
 open issues with no response, OR total weekly downloads dropped > 50% over 6 months.
-        5. Record the package name, last release date, maintainer status, and risk \
-rationale in each FindingNote.
+        5. Record the package name, last release date, and risk rationale in each \
+FindingNote.
+
+        Rules on maintainer count:
+        - A single-maintainer package is NOT, by itself, a finding. Most healthy,
+          widely-used npm packages (lodash, many @nestjs/* scopes, etc.) have one
+          maintainer. Never create or justify a finding using maintainer count alone
+          — only the recency/activity criteria in steps 2 and 4 above count as risk.
 
         Rules:
         - Never repeat a tool call with the same arguments.

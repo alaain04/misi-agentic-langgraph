@@ -84,6 +84,8 @@
         "report",
         "--analysis-result-id",
         "${input:analysisResultId}",
+        "--prep-result-id",
+        "${input:prepResultId}",
         "--concern",
         "${input:concern}"
       ],

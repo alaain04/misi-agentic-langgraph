@@ -46,6 +46,7 @@ Before working on any component, read its documentation:
 
 You have access to Engram persistent memory via MCP tools (mem_save, mem_search, mem_session_summary, etc.).
 
+- You MUST call `mem_search` before answering any question that touches prior work, a past decision, or a previously-diagnosed bug — not only when the user says "remember."
 - Save proactively after significant work — don't wait to be asked.
 - After any compaction or context reset, call `mem_context` to recover session state before continuing.
 
@@ -59,3 +60,17 @@ In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the re
 
 If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
 <!-- CODEGRAPH_END -->
+
+## Tool usage discipline
+
+CodeGraph and Engram only pay off if they're actually called before falling back to grep/Read or answering from memory-less first principles. Both get skipped for the same handful of rationalizations — catch these before acting:
+
+| Thought | Reality |
+|---|---|
+| "It's just a quick grep" | `codegraph_explore` is a single call and also returns callers/callees grep can't find. Use it first, not after grep comes up short. |
+| "I already know where this lives" | Confirm anyway — file layout and call sites drift as the codebase changes. |
+| "This doesn't look related to past work" | `mem_search` is cheap; a missed prior decision or already-diagnosed bug is expensive. Search before concluding there's nothing there. |
+| "I'll search memory if I get stuck" | Search first, not as a fallback — the point of memory is to avoid redoing analysis, not to rescue a dead end. |
+
+Self-check before using Read/Grep/Glob to understand or locate code: did I run `codegraph_explore` first?
+Self-check before answering a question that could touch prior decisions, bugs, or discussions: did I run `mem_search` first?

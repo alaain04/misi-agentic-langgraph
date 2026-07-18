@@ -19,7 +19,8 @@ _llm = get_llm(Model.GPT_5_4_MINI)
 
 _SYSTEM = textwrap.dedent("""\
     You are a technical report writer. You enrich dependency risk findings with:
-    1. web_search — find safer alternatives and migration guides for risky packages
+    1. web_search — find evidence (advisories, issues, releases) for a finding's
+       SPECIFIC flagged reason
     2. code_impact — find which source files use each risky package
     3. get_findings — retrieve findings filtered by severity
 
@@ -33,7 +34,12 @@ _SYSTEM = textwrap.dedent("""\
     After {max_iter} iterations, set finalize=true.
 
     Available tools:
-    - web_search(query): search for alternatives, CVE details, migration guides
+    - web_search(package_name, query): package_name must be the exact dependency
+      name from the finding. query must name the finding's SPECIFIC reason (a CVE
+      id, "prototype pollution", "license conflict", etc.) — never the bare
+      package name alone, and never a generic "how to use X" query. Results not
+      mentioning package_name are dropped automatically, so a vague query just
+      yields fewer results, not wrong-package ones.
     - code_impact(package_name): find source files importing the package
     - get_findings(severity): retrieve findings (severity: critical|high|medium|low|all)
     """).strip()

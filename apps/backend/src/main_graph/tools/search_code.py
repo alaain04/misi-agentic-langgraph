@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from langchain_core.tools import tool
 from langchain_core.vectorstores import InMemoryVectorStore
@@ -24,6 +25,21 @@ _SOURCE_EXTENSIONS = {
     ".mts",
     ".cts",
 }
+
+# Manifests/lockfiles list every dependency by name, so they trivially match any
+# "does this file use package X" query without the file actually using it —
+# excluded so code_impact only surfaces real usage sites.
+_EXCLUDED_BASENAMES = {
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+}
+
+
+def is_indexable_source_file(filename: str) -> bool:
+    if filename in _EXCLUDED_BASENAMES:
+        return False
+    return os.path.splitext(filename)[1] in _SOURCE_EXTENSIONS
 
 
 def get_vector_store(vector_store_id: str) -> InMemoryVectorStore | None:

@@ -20,6 +20,11 @@ _SYSTEM = """\
 You are a technical report writer. Given dependency risk findings and enrichment data
 (web search results + code impact), produce a JSON report.
 
+Every affected_files entry and every evidence entry for a finding must be about that
+finding's own dep_name specifically — never carry over a file or web result that
+belongs to a different package's enrichment data, even if it appears nearby in the
+enrichment section.
+
 Output ONLY valid JSON:
 {
   "executive_summary": "<2-4 sentence summary>",
@@ -39,6 +44,32 @@ Output ONLY valid JSON:
   "recommendations": ["<top-level recommendation>"]
 }
 """
+
+
+def _package_name_variants(package_name: str) -> set[str]:
+    variants = {package_name.lower()}
+    variants.add(package_name.lstrip("@").split("/")[-1].lower())
+    return variants
+
+
+def _evidence_matches_dep(evidence: dict, dep_name: str) -> bool:
+    text = (
+        str(evidence.get("log_snippet", "")) + " " + str(evidence.get("url", ""))
+    ).lower()
+    return any(v in text for v in _package_name_variants(dep_name))
+
+
+def _drop_mismatched_evidence(findings: list[ReportFinding]) -> list[ReportFinding]:
+    """Deterministic guard: the LLM can still misattribute evidence across
+    findings even when instructed not to, so strip evidence entries that don't
+    actually mention the finding's own package."""
+    for finding in findings:
+        finding.evidence = [
+            e
+            for e in finding.evidence
+            if isinstance(e, dict) and _evidence_matches_dep(e, finding.dep_name)
+        ]
+    return findings
 
 
 async def save_report_result(state, config: RunnableConfig) -> dict:
@@ -69,7 +100,9 @@ async def save_report_result(state, config: RunnableConfig) -> dict:
     try:
         content = response.content if isinstance(response.content, str) else ""
         data = parse_llm_json(content)
-        findings = [ReportFinding(**f) for f in data.get("findings", [])]
+        findings = _drop_mismatched_evidence(
+            [ReportFinding(**f) for f in data.get("findings", [])]
+        )
     except Exception:
         findings = [
             ReportFinding(
