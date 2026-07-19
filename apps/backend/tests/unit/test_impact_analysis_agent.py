@@ -219,6 +219,83 @@ async def test_analyze_impact_forces_package_name_on_internal_tool_calls():
 
 
 @pytest.mark.asyncio
+async def test_analyze_impact_degrades_gracefully_on_malformed_tool_output():
+    """A malformed field in the real blast_radius tool's output (e.g. from
+    parsing external codegraph CLI JSON) must not let a Pydantic
+    ValidationError escape analyze_impact's "never raises" contract."""
+    from src.main_graph.subgraphs.report.agents import impact_analysis_agent
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=[_blast_radius_call(), _finalize("Used in checkout.", ["checkout"])]
+    )
+
+    with (
+        patch.object(impact_analysis_agent, "_llm", mock_llm),
+        patch.object(
+            impact_analysis_agent,
+            "make_blast_radius_tool",
+            _fake_blast_radius_factory(
+                available=True, affected_file_count="not-a-number"
+            ),
+        ),
+    ):
+        summary = await impact_analysis_agent.analyze_impact(
+            _finding(), _prep(), container=None
+        )
+
+    assert summary == BlastRadiusSummary(available=False, source="unavailable")
+
+
+@pytest.mark.asyncio
+async def test_analyze_impact_forces_depth_on_internal_tool_calls():
+    """The nested loop's own LLM cannot silently ignore the caller's depth
+    control, mirroring the package_name force-injection guarantee."""
+    from src.main_graph.subgraphs.report.agents import impact_analysis_agent
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=[
+            ImpactAnalysisDecision(
+                tool_calls=[
+                    ToolCall(
+                        tool="blast_radius",
+                        args={"package_name": "left-pad", "depth": 1},
+                        reason="check graph",
+                    )
+                ],
+                narrative="",
+                use_cases_impacted=[],
+                finalize=False,
+                reasoning="checking",
+            ),
+            _finalize(),
+        ]
+    )
+
+    received: dict = {}
+
+    def _make(repo_path, container, image):  # sync, matches make_blast_radius_tool
+        @tool
+        async def blast_radius(package_name: str, depth: int = 3) -> dict:
+            """Fake blast_radius tool for testing."""
+            received["depth"] = depth
+            return {"package_name": package_name, "available": True}
+
+        return blast_radius
+
+    with (
+        patch.object(impact_analysis_agent, "_llm", mock_llm),
+        patch.object(impact_analysis_agent, "make_blast_radius_tool", _make),
+    ):
+        await impact_analysis_agent.analyze_impact(
+            _finding(), _prep(), container=None, depth=5
+        )
+
+    assert received["depth"] == 5
+
+
+@pytest.mark.asyncio
 async def test_analyze_impact_degrades_gracefully_on_llm_outage():
     from src.main_graph.subgraphs.report.agents import impact_analysis_agent
 

@@ -10,6 +10,7 @@ import uuid
 from typing import cast
 
 from langchain_core.tools import tool
+from pydantic import ValidationError
 
 from src.main_graph.subgraphs.report.agents.critique import _format_tool_results
 from src.main_graph.tools.blast_radius import make_blast_radius_tool
@@ -149,7 +150,9 @@ def _tool_callable(fn):
     return fn
 
 
-async def _run_internal_tool(tc: ToolCall, tool_map: dict, dep_name: str) -> ToolResult:
+async def _run_internal_tool(
+    tc: ToolCall, tool_map: dict, dep_name: str, depth: int
+) -> ToolResult:
     start = time.monotonic()
     fn = tool_map.get(tc.tool)
     if fn is None:
@@ -168,6 +171,11 @@ async def _run_internal_tool(tc: ToolCall, tool_map: dict, dep_name: str) -> Too
         # different package even if its own LLM tried, mirroring the outer
         # finding_enricher loop's identical guarantee.
         kwargs["package_name"] = dep_name
+    if "depth" in sig.parameters:
+        # Force-injected: analyze_impact's own depth argument is the
+        # authoritative control (per the tool's docstring), not whatever
+        # the nested LLM's tool_calls happened to choose.
+        kwargs["depth"] = depth
     try:
         output = (
             await fn.ainvoke(kwargs) if hasattr(fn, "ainvoke") else await fn(**kwargs)
@@ -274,18 +282,31 @@ async def analyze_impact(
         if decision.tool_calls:
             new_results = await asyncio.gather(
                 *[
-                    _run_internal_tool(tc, tool_map, finding.dep_name)
+                    _run_internal_tool(tc, tool_map, finding.dep_name, depth)
                     for tc in decision.tool_calls
                 ]
             )
             tool_results.extend(new_results)
 
     grounded = _ground_from_tool_results(tool_results)
-    return BlastRadiusSummary(
-        **grounded,
-        narrative=narrative,
-        use_cases_impacted=use_cases_impacted,
-    )
+    try:
+        return BlastRadiusSummary(
+            **grounded,
+            narrative=narrative,
+            use_cases_impacted=use_cases_impacted,
+        )
+    except ValidationError as exc:
+        # grounded's values came straight from parsing an external CLI's
+        # JSON output; a malformed field must not let a ValidationError
+        # escape this "never raises" loop. Treat the whole result as
+        # unavailable rather than mixing possibly-good narrative text with
+        # known-bad grounding.
+        logger.warning(
+            "impact_analysis: grounded tool output failed BlastRadiusSummary "
+            "validation, degrading to unavailable: %s",
+            exc,
+        )
+        return BlastRadiusSummary(available=False, source="unavailable")
 
 
 def make_impact_analysis_tool(finding: FindingNote, prep: PrepResult, container):
