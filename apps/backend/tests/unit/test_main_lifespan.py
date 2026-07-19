@@ -49,7 +49,9 @@ async def test_lifespan_raises_when_mongo_unreachable():
     from src.main import lifespan
 
     mock_client = MagicMock()
-    mock_client.admin.command = AsyncMock(side_effect=RuntimeError("connection refused"))
+    mock_client.admin.command = AsyncMock(
+        side_effect=RuntimeError("connection refused")
+    )
 
     with patch("src.main.get_client", return_value=mock_client):
         with pytest.raises(RuntimeError, match="connection refused"):

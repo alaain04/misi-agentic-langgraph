@@ -501,6 +501,8 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
     assert finding.blast_radius.available is True
     assert finding.blast_radius.source == "codegraph"
     assert finding.blast_radius.isolated_to_tests_or_scripts is True
-    assert finding.blast_radius.narrative == "Only used in a build script, never shipped."
+    assert (
+        finding.blast_radius.narrative == "Only used in a build script, never shipped."
+    )
     # grounded from the real tool output, not either LLM's placeholder text
     assert finding.affected_files == ["scripts/build.js:1"]
