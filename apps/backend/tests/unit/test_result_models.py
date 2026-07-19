@@ -5,6 +5,7 @@ from src.models.results import (
     AnalysisConductorDecision,
     DomainAgentDecision,
     EvidenceBundle,
+    FindingEnrichmentDecision,
     PrepResult,
     ReportFinding,
     ReportResult,
@@ -130,3 +131,30 @@ def test_report_result_round_trip():
     )
     assert r.id
     assert r.findings[0].alternatives == ["fastify"]
+
+
+def test_report_finding_trust_defaults_true_with_empty_observation():
+    f = ReportFinding(
+        dep_name="lodash", severity="high", description="CVE",
+        recommendation="upgrade",
+    )
+    assert f.trust is True
+    assert f.observation == ""
+
+
+def test_report_finding_accepts_untrusted_flag():
+    f = ReportFinding(
+        dep_name="lodash", severity="high", description="CVE",
+        recommendation="upgrade", trust=False,
+        observation="business_impact not grounded in tool output",
+    )
+    assert f.trust is False
+    assert f.observation == "business_impact not grounded in tool output"
+
+
+def test_finding_enrichment_decision_round_trip():
+    d = FindingEnrichmentDecision(
+        tool_calls=[], finding=None, finalize=False, reasoning="need more evidence"
+    )
+    assert d.finalize is False
+    assert d.finding is None

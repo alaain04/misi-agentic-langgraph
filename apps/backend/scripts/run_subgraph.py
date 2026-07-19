@@ -151,7 +151,6 @@ async def _run_report(args) -> None:
             "concern": args.concern,
             "prep_result_id": args.prep_result_id,
             "analysis_result_id": args.analysis_result_id,
-            "tool_results": [],
         },
         config=config,
     )

@@ -1,29 +1,43 @@
 from __future__ import annotations
 
-from src.main_graph.subgraphs.report.graph import _after_conductor
-from src.models.conductor import ToolCall
-from src.models.results import ReportConductorDecision
+from langgraph.types import Send
+
+from src.main_graph.subgraphs.report.graph import _dispatch_findings
 
 
-def _decision(**kwargs) -> ReportConductorDecision:
-    defaults = dict(tool_calls=[], finalize=False, reasoning="r")
-    return ReportConductorDecision(**{**defaults, **kwargs})
+def test_empty_findings_goes_to_synthesizer():
+    assert _dispatch_findings({"findings_to_enrich": []}) == "save_report_result"
 
 
-def test_finalize_goes_to_save():
-    assert (
-        _after_conductor({"conductor_decision": _decision(finalize=True)})
-        == "save_report_result"
-    )
+def test_missing_findings_key_goes_to_synthesizer():
+    assert _dispatch_findings({}) == "save_report_result"
 
 
-def test_tool_calls_go_to_runner():
-    tc = ToolCall(tool="web_search", args={"query": "q"}, reason="r")
-    assert (
-        _after_conductor({"conductor_decision": _decision(tool_calls=[tc])})
-        == "report_tool_runner"
-    )
+def test_findings_fan_out_via_send():
+    finding = {
+        "dep_name": "lodash",
+        "severity": "high",
+        "description": "CVE",
+        "evidence": [],
+    }
+    result = _dispatch_findings({"findings_to_enrich": [finding]})
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert isinstance(result[0], Send)
+    assert result[0].node == "finding_enricher"
 
 
-def test_empty_decision_finalizes():
-    assert _after_conductor({}) == "save_report_result"
+def test_multiple_findings_produce_multiple_sends():
+    findings = [
+        {"dep_name": "lodash", "severity": "high", "description": "d1", "evidence": []},
+        {
+            "dep_name": "axios",
+            "severity": "medium",
+            "description": "d2",
+            "evidence": [],
+        },
+    ]
+    result = _dispatch_findings({"findings_to_enrich": findings})
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert all(isinstance(s, Send) and s.node == "finding_enricher" for s in result)

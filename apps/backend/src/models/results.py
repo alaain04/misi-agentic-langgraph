@@ -97,11 +97,14 @@ class ReportFinding(BaseModel):
     evidence: list = Field(default_factory=list)
     business_impact: str = ""
     blast_radius: BlastRadiusSummary | None = None
+    trust: bool = True
+    observation: str = ""
 
 
-class ReportConductorDecision(BaseModel):
+class FindingEnrichmentDecision(BaseModel):
     tool_calls: list[ToolCall]
-    finalize: bool = False
+    finding: ReportFinding | None
+    finalize: bool
     reasoning: str
 
 
