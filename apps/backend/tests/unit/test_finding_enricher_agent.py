@@ -250,18 +250,17 @@ async def test_enrich_finding_excludes_flagged_alternatives_from_prompt():
     assert "class-transformer" in seen_system["content"]
 
 
-def test_grounded_blast_radius_returns_summary_when_available():
+def test_grounded_impact_analysis_returns_summary_when_present():
     from src.main_graph.subgraphs.report.agents.finding_enricher_agent import (
-        _grounded_blast_radius,
+        _grounded_impact_analysis,
     )
 
     tool_results = [
         ToolResult(
             id="id",
-            tool="blast_radius",
-            args={"package_name": "left-pad"},
+            tool="impact_analysis",
+            args={},
             output={
-                "package_name": "left-pad",
                 "available": True,
                 "affected_file_count": 1,
                 "affected_files": ["scripts/build.js:1"],
@@ -269,21 +268,24 @@ def test_grounded_blast_radius_returns_summary_when_available():
                 "isolated_to_tests_or_scripts": True,
                 "node_count": 3,
                 "depth_searched": 3,
+                "use_cases_impacted": [],
+                "narrative": "Only used in a build script.",
+                "source": "codegraph",
             },
             error=None,
             duration_ms=1,
         )
     ]
-    summary = _grounded_blast_radius(tool_results)
+    summary = _grounded_impact_analysis(tool_results)
     assert summary is not None
     assert summary.affected_file_count == 1
     assert summary.isolated_to_tests_or_scripts is True
-    assert not hasattr(summary, "package_name")
+    assert summary.narrative == "Only used in a build script."
 
 
-def test_grounded_blast_radius_returns_none_when_unavailable():
+def test_grounded_impact_analysis_returns_none_when_absent():
     from src.main_graph.subgraphs.report.agents.finding_enricher_agent import (
-        _grounded_blast_radius,
+        _grounded_impact_analysis,
     )
 
-    assert _grounded_blast_radius([]) is None
+    assert _grounded_impact_analysis([]) is None
