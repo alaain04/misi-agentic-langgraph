@@ -192,6 +192,40 @@ should exercise the real HITL path.
 
 ---
 
+## Group 7 — Determinism (A4 metric)
+
+Measured with `scripts/determinism_check.py --repo <url> --concern <text> --runs N`
+(reliability workstream A4). Reports finding-set stability across N identical
+runs: dep-name Jaccard, (dep_name, severity) tuple Jaccard, count min/mean/max,
+and which findings are unstable. **A high Jaccard is only meaningful when the
+runs actually produced findings and all reached `done`** — the tool warns
+otherwise (all-empty runs give a misleading 1.0).
+
+**Critical operational note:** the metric measures whatever backend is bound to
+the port — a *stale* long-running backend silently serves old code. Always
+restart the backend from the checkout under test before measuring (a stale
+pre-A1 backend produced the misleading pre-A1 row below). See
+[[bugfix-report-subgraph-refixed-on-main]] for the same failure class.
+
+| Date | Backend | repo x N | dep-name Jaccard | tuple Jaccard | count (min/mean/max) | unstable |
+|------|---------|----------|-------------------|----------------|------------------------|----------|
+| 2026-07-20 | **pre-A1** (stale) | chalk x3 | 0.933 | 0.933 | 9 / 13 / 20 | `[yoctodelay]` + gross duplication (run 1 had 20 = ~10 doubled) |
+| 2026-07-20 | **post-A1** | chalk x3 | **1.000** | **1.000** | 11 / 11.7 / 12 | `[]` |
+
+**Result:** A1 (dedup + whole-tree dispatch cap) took the dep-name Jaccard from
+0.933 to **1.000** and collapsed the count spread from 9-20 (2.2x) to 11-12.
+The deterministic-source findings (vulnerability, license) are now perfectly
+reproducible. The residual ±1 count is a description-level distinct finding
+appearing in 2 of 3 runs — genuine, tiny LLM variance that the 1.0 dep-name/
+tuple Jaccard confirms is negligible.
+
+**A2 go/no-go:** with dep-name Jaccard already at 1.0 post-A1, A2 (LLM
+temperature/seed levers) is **likely not worth building** — there is no
+material finding-set variance left to remove. Re-measure on a noisier
+repo/concern (or the fixture corpus, Workstream B) before finalizing that call.
+
+---
+
 ## Group 6 — Cost & performance sanity
 
 Not pass/fail — record and watch for outliers over time.
