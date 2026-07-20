@@ -23,7 +23,7 @@ from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
-_MAX_ITERATIONS = 3
+_MAX_ITERATIONS = 4
 _SNIPPET_RADIUS = 150
 _llm = get_llm(Model.GPT_5_4_MINI)
 _BLAST_RADIUS_FIELDS = {

@@ -72,6 +72,37 @@ async def test_blast_radius_happy_path_classifies_prod_vs_test_files():
 
 
 @pytest.mark.asyncio
+async def test_blast_radius_detects_dot_spec_filename_as_test_file():
+    """Regression: a *.spec.ts file with no "spec"/"test" *directory* segment
+    must still be classified as a test file, not counted as production."""
+    output = {
+        **_CAPTURED_CODEGRAPH_OUTPUT,
+        "affected": [
+            {
+                "name": "left-pad",
+                "kind": "import",
+                "filePath": "src/api/order/event/order-change.listener.ts",
+                "startLine": 7,
+            },
+            {
+                "name": "left-pad",
+                "kind": "import",
+                "filePath": "src/api/order/event/order-change.listener.spec.ts",
+                "startLine": 9,
+            },
+        ],
+    }
+    container = _container(stdout=json.dumps(output))
+    tool = make_blast_radius_tool("/tmp/repo", container, "codegraph-cli:latest")
+
+    result = await tool.ainvoke({"package_name": "left-pad"})
+
+    assert result["affected_file_count"] == 2
+    assert result["production_file_count"] == 1
+    assert result["isolated_to_tests_or_scripts"] is False
+
+
+@pytest.mark.asyncio
 async def test_blast_radius_isolated_to_tests_when_no_prod_files():
     output = {
         **_CAPTURED_CODEGRAPH_OUTPUT,
@@ -108,15 +139,17 @@ async def test_blast_radius_nonzero_exit_returns_unavailable():
 @pytest.mark.asyncio
 async def test_blast_radius_symbol_not_found_swallows_json_flag():
     """codegraph silently ignores --json and prints plain text with rc=0
-    when the symbol/package isn't found — this isn't valid JSON, so it must
-    degrade to available=False rather than crash on json.loads."""
+    when the symbol/package isn't found — that's a real zero-usage answer
+    (isolated dependency), not a tool error, so it must degrade to
+    affected_file_count=0 rather than available=False."""
     container = _container(stdout="Symbol not found", rc=0)
     tool = make_blast_radius_tool("/tmp/repo", container, "codegraph-cli:latest")
 
     result = await tool.ainvoke({"package_name": "nonexistent-pkg"})
 
-    assert result["available"] is False
-    assert "error" in result
+    assert result["available"] is True
+    assert result["affected_file_count"] == 0
+    assert result["affected_files"] == []
 
 
 @pytest.mark.asyncio

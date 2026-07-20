@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 
 from langchain_core.tools import tool
@@ -20,9 +21,16 @@ _TEST_OR_SCRIPT_MARKERS = (
     "dist",
 )
 
+# Matches filename-suffix test conventions (e.g. foo.spec.ts, foo.test.tsx)
+# that directory-segment matching alone can't catch.
+_TEST_FILENAME_PATTERN = re.compile(r"\.(test|spec)\.[jt]sx?\b")
+
 
 def _is_test_or_script(path: str) -> bool:
-    return any(part in _TEST_OR_SCRIPT_MARKERS for part in path.split("/"))
+    file_path = path.split(":")[0]  # strip the trailing ":startLine"
+    if any(part in _TEST_OR_SCRIPT_MARKERS for part in file_path.split("/")):
+        return True
+    return bool(_TEST_FILENAME_PATTERN.search(file_path))
 
 
 def make_blast_radius_tool(repo_path: str, container: ContainerRunPort, image: str):
@@ -51,19 +59,28 @@ def make_blast_radius_tool(repo_path: str, container: ContainerRunPort, image: s
         try:
             data = json.loads(stdout)
         except (json.JSONDecodeError, ValueError):
-            return {
-                "package_name": package_name,
-                "available": False,
-                "error": "unparseable codegraph output",
-            }
+            if "not found" in stdout.lower():
+                # codegraph prints a plain-text "Symbol ... not found" line and
+                # silently ignores --json when the package has zero usages —
+                # that's a real answer (isolated dependency), not a tool error.
+                data = {}
+            else:
+                return {
+                    "package_name": package_name,
+                    "available": False,
+                    "error": "unparseable codegraph output",
+                }
 
         if not isinstance(data, dict) or "affected" not in data:
-            # e.g. "Symbol not found" plain text swallowed the --json flag.
             return {
                 "package_name": package_name,
                 "available": True,
                 "affected_file_count": 0,
                 "affected_files": [],
+                "production_file_count": 0,
+                "isolated_to_tests_or_scripts": False,
+                "node_count": 0,
+                "depth_searched": depth,
             }
 
         files = sorted(

@@ -25,7 +25,7 @@ async def index_codegraph(state: DiscoveryState, config: RunnableConfig) -> dict
     container: ContainerRunPort = get_services(config)["container"]
     rc, _out, err = await container.run(
         image=settings.codegraph_docker_image,
-        command="codegraph init --force -p /workspace",
+        command="codegraph init --force /workspace",
         volume=f"{repo_path}:/workspace",
         run_as_root=True,
     )
