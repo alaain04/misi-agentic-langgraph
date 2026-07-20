@@ -75,6 +75,10 @@ def main() -> None:
     parser.add_argument("--json", dest="json_path", default=None)
     args = parser.parse_args()
 
+    if args.runs < 2:
+        print("ERROR: --runs must be >= 2 to measure stability across runs")
+        sys.exit(1)
+
     global BASE
     BASE = args.base_url
 
@@ -93,21 +97,40 @@ def main() -> None:
         print(f"submitted run {i + 1}/{args.runs}: {resp['trace_id']}")
 
     runs: list[list[dict]] = []
+    statuses: list[str] = []
     for i, tid in enumerate(trace_ids):
         print(f"waiting on run {i + 1}/{args.runs} ({tid})...")
         status = _poll(tid, timeout=args.timeout)
+        statuses.append(status.get("status", "unknown"))
         findings = extract_findings(status)
         runs.append(findings)
-        print(f"  findings: {len(findings)}")
+        print(f"  status={statuses[-1]} findings={len(findings)}")
 
     report = summarize(runs)
+    report["run_statuses"] = statuses
 
     print("\n=== DETERMINISM REPORT ===")
     print(f"runs                 : {report['runs']}")
+    print(f"run statuses         : {statuses}")
     print(f"finding count        : {report['count']}")
     print(f"dep-name jaccard     : {report['dep_name_jaccard']:.3f}")
     print(f"finding-tuple jaccard: {report['finding_tuple_jaccard']:.3f}")
     print(f"unstable dep_names   : {report['unstable_dep_names']}")
+    print(f"unstable tuples      : {report['unstable_finding_tuples']}")
+
+    # A high Jaccard is only meaningful if the runs actually produced findings
+    # and all reached 'done' — otherwise the score is a misleading 1.0.
+    if report["all_runs_empty"]:
+        print(
+            "\nWARNING: every run found zero findings — the 1.0 Jaccard is "
+            "empty-vs-empty, NOT evidence of a stable non-trivial result."
+        )
+    failed = [s for s in statuses if s != "done"]
+    if failed:
+        print(
+            f"\nWARNING: {len(failed)} of {len(statuses)} runs did not reach "
+            f"'done' ({failed}); the metric may be measuring incomplete runs."
+        )
 
     if args.json_path:
         with open(args.json_path, "w") as f:

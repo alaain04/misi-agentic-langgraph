@@ -42,14 +42,33 @@ def count_stats(runs: list[list[dict]]) -> dict:
     return {"min": min(counts), "mean": sum(counts) / len(counts), "max": max(counts)}
 
 
-def unstable_dep_names(runs: list[list[dict]]) -> set[str]:
-    """dep_names present in some runs but not all (the source of instability)."""
-    sets = dep_name_sets(runs)
+def _unstable(sets: list[set]) -> set:
+    """Elements present in some sets but not all (union minus intersection)."""
     if not sets:
         return set()
-    union: set[str] = set().union(*sets)
-    intersection: set[str] = set(sets[0]).intersection(*sets[1:])
-    return union - intersection
+    return set().union(*sets) - set(sets[0]).intersection(*sets[1:])
+
+
+def unstable_dep_names(runs: list[list[dict]]) -> set[str]:
+    """dep_names present in some runs but not all (the source of instability)."""
+    return _unstable(dep_name_sets(runs))
+
+
+def unstable_finding_tuples(runs: list[list[dict]]) -> set[tuple[str, str]]:
+    """(dep_name, severity) tuples present in some runs but not all.
+
+    Catches instability the dep-name diff misses — e.g. a package found in
+    every run but whose severity flips between runs (dep_name stable, tuple not).
+    """
+    return _unstable(finding_tuple_sets(runs))
+
+
+def all_runs_empty(runs: list[list[dict]]) -> bool:
+    """True when every run found nothing. In that case the Jaccard scores are a
+    misleading 1.0 (empty-vs-empty), which reads as 'perfectly stable' but may
+    just mean 'reliably found nothing' or 'every run failed'. Callers must
+    surface this rather than trust the 1.0."""
+    return len(runs) > 0 and all(len(r) == 0 for r in runs)
 
 
 def summarize(runs: list[list[dict]]) -> dict:
@@ -60,4 +79,6 @@ def summarize(runs: list[list[dict]]) -> dict:
         "dep_name_jaccard": mean_pairwise_jaccard(dep_name_sets(runs)),
         "finding_tuple_jaccard": mean_pairwise_jaccard(finding_tuple_sets(runs)),
         "unstable_dep_names": sorted(unstable_dep_names(runs)),
+        "unstable_finding_tuples": sorted(unstable_finding_tuples(runs)),
+        "all_runs_empty": all_runs_empty(runs),
     }
