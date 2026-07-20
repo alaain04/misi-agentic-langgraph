@@ -150,6 +150,8 @@ async def test_install_deps_creates_lock_file(tmp_path):
     result = await install_deps(state, _config(container=container))
 
     assert result["has_lock_file"] is True
+    # Lock already present after the normal install — no lockfile-only fallback needed.
+    assert container.run.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -170,12 +172,97 @@ async def test_install_deps_no_lock_created(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_install_deps_retries_on_peer_conflict(tmp_path):
+async def test_install_deps_npm_falls_back_to_lockfile_only(tmp_path):
+    """Some repos' normal `npm install` completes (rc=0) without ever writing
+    a lock file (e.g. an .npmrc disabling it). install_deps must force one
+    explicitly so the dependency graph still gets transitive data."""
+    lock_path = tmp_path / "package-lock.json"
+
+    def _run_side_effect(*, image, command, volume, run_as_root):
+        if "--package-lock-only" in command:
+            lock_path.write_text("{}")
+        return (0, "", "")
+
     container = AsyncMock()
-    container.run.side_effect = [
-        (1, "", "npm error ERESOLVE: could not resolve peer dependency"),
-        (0, "", ""),
-    ]
+    container.run.side_effect = _run_side_effect
+
+    state = {
+        **_BASE_STATE,
+        "repo_path": str(tmp_path),
+        "detected_package_manager": "npm",
+        "package_manager_version": "latest",
+        "docker_image": "node:20-alpine",
+    }
+    result = await install_deps(state, _config(container=container))
+
+    assert result["has_lock_file"] is True
+    assert container.run.await_count == 2
+    fallback_command = container.run.call_args_list[1].kwargs["command"]
+    assert "--package-lock-only" in fallback_command
+
+
+@pytest.mark.asyncio
+async def test_install_deps_pnpm_falls_back_to_lockfile_only(tmp_path):
+    lock_path = tmp_path / "pnpm-lock.yaml"
+
+    def _run_side_effect(*, image, command, volume, run_as_root):
+        if "--lockfile-only" in command:
+            lock_path.write_text("lockfileVersion: '9.0'\n")
+        return (0, "", "")
+
+    container = AsyncMock()
+    container.run.side_effect = _run_side_effect
+
+    state = {
+        **_BASE_STATE,
+        "repo_path": str(tmp_path),
+        "detected_package_manager": "pnpm",
+        "package_manager_version": "9",
+        "docker_image": "node:20-alpine",
+    }
+    result = await install_deps(state, _config(container=container))
+
+    assert result["has_lock_file"] is True
+    assert container.run.await_count == 2
+    fallback_command = container.run.call_args_list[1].kwargs["command"]
+    assert "--lockfile-only" in fallback_command
+    assert "pnpm@9" in fallback_command
+
+
+@pytest.mark.asyncio
+async def test_install_deps_yarn_has_no_lockfile_only_fallback(tmp_path):
+    """yarn has no clean cross-version lockfile-only flag (Classic vs Berry
+    differ); install_deps must not attempt a second call for it."""
+    container = AsyncMock()
+    container.run.return_value = (0, "", "")
+
+    state = {
+        **_BASE_STATE,
+        "repo_path": str(tmp_path),
+        "detected_package_manager": "yarn",
+        "package_manager_version": "latest",
+        "docker_image": "node:20-alpine",
+    }
+    result = await install_deps(state, _config(container=container))
+
+    assert result["has_lock_file"] is False
+    assert container.run.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_install_deps_retries_on_peer_conflict(tmp_path):
+    lock_path = tmp_path / "package-lock.json"
+    calls: list[str] = []
+
+    def _run_side_effect(*, image, command, volume, run_as_root):
+        calls.append(command)
+        if len(calls) == 1:
+            return (1, "", "npm error ERESOLVE: could not resolve peer dependency")
+        lock_path.write_text("{}")  # simulate the retried install succeeding
+        return (0, "", "")
+
+    container = AsyncMock()
+    container.run.side_effect = _run_side_effect
 
     state = {
         **_BASE_STATE,
@@ -186,13 +273,7 @@ async def test_install_deps_retries_on_peer_conflict(tmp_path):
     }
     await install_deps(state, _config(container=container))
 
+    # Retry succeeded and produced a lock file, so the lockfile-only fallback
+    # is not triggered — call count stays at 2 (initial failure + retry).
     assert container.run.await_count == 2
-    _, kwargs = container.run.call_args_list[1]
-    assert "--legacy-peer-deps" in container.run.call_args_list[1].kwargs.get(
-        "command",
-        container.run.call_args_list[1].args[1]
-        if container.run.call_args_list[1].args
-        else "",
-    ) or any(
-        "--legacy-peer-deps" in str(a) for a in container.run.call_args_list[1].args
-    )
+    assert "--legacy-peer-deps" in calls[1]
