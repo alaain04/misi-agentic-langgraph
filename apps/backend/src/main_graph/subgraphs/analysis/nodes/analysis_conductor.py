@@ -9,12 +9,13 @@ from langchain_core.runnables import RunnableConfig
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.analysis.agents.registry import get_agent_descriptions
 from src.main_graph.subgraphs.analysis.state import AnalysisState
-from src.models.results import AnalysisConductorDecision, PrepResult
+from src.models.results import AgentDispatch, AnalysisConductorDecision, PrepResult
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 4
+_WHOLE_TREE_AGENTS = {"vulnerability_agent", "license_agent"}
 _llm = get_llm(Model.GPT_5_4_MINI)
 
 
@@ -90,6 +91,30 @@ def _format_bundles(bundles: list) -> str:
     return "\n\n".join(parts)
 
 
+def drop_repeat_whole_tree_dispatches(
+    dispatches: list[AgentDispatch], agent_calls: list[dict]
+) -> list[AgentDispatch]:
+    """Cap whole-tree agents (vulnerability, license) to one run per job.
+
+    These agents scan the ENTIRE dependency tree in a single run, so a second
+    dispatch adds zero coverage and only duplicates work, cost, and findings.
+    The conductor prompt already asks for this but does not enforce it; this is
+    the deterministic enforcement. Drops a whole-tree dispatch whose agent_type
+    already ran (recorded in agent_calls) or already appears earlier in this
+    same dispatch list. Package-scoped agents pass through untouched.
+    """
+    already_run = {c.get("agent_type") for c in agent_calls}
+    seen_this_round: set[str] = set()
+    result: list[AgentDispatch] = []
+    for d in dispatches:
+        if d.agent_type in _WHOLE_TREE_AGENTS:
+            if d.agent_type in already_run or d.agent_type in seen_this_round:
+                continue
+            seen_this_round.add(d.agent_type)
+        result.append(d)
+    return result
+
+
 async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> dict:
     iteration = (state.get("conductor_iteration") or 0) + 1
     dao = get_services(config)["result_dao"]
@@ -124,6 +149,12 @@ async def analysis_conductor(state: AnalysisState, config: RunnableConfig) -> di
             ]
         ),
     )
+
+    filtered = drop_repeat_whole_tree_dispatches(
+        decision.dispatches, state.get("agent_calls") or []
+    )
+    if len(filtered) != len(decision.dispatches):
+        decision = decision.model_copy(update={"dispatches": filtered})
 
     if iteration >= _MAX_ITERATIONS:
         decision = decision.model_copy(update={"finalize": True})
