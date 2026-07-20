@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -85,6 +86,9 @@ class BlastRadiusSummary(BaseModel):
     isolated_to_tests_or_scripts: bool = False
     node_count: int = 0
     depth_searched: int = 0
+    use_cases_impacted: list[str] = Field(default_factory=list)
+    narrative: str = ""
+    source: Literal["codegraph", "semantic_search", "unavailable"] = "unavailable"
 
 
 class ReportFinding(BaseModel):
@@ -104,6 +108,14 @@ class ReportFinding(BaseModel):
 class FindingEnrichmentDecision(BaseModel):
     tool_calls: list[ToolCall]
     finding: ReportFinding | None
+    finalize: bool
+    reasoning: str
+
+
+class ImpactAnalysisDecision(BaseModel):
+    tool_calls: list[ToolCall]
+    narrative: str
+    use_cases_impacted: list[str]
     finalize: bool
     reasoning: str
 

@@ -10,8 +10,9 @@ import uuid
 from typing import cast
 
 from src.main_graph.subgraphs.report.agents.critique import critique_report_finding
-from src.main_graph.tools.blast_radius import make_blast_radius_tool
-from src.main_graph.tools.code_impact import make_code_impact_tool
+from src.main_graph.subgraphs.report.agents.impact_analysis_agent import (
+    make_impact_analysis_tool,
+)
 from src.main_graph.tools.external_api import web_search
 from src.models.conductor import FindingNote, ToolCall, ToolResult
 from src.models.results import (
@@ -20,23 +21,20 @@ from src.models.results import (
     PrepResult,
     ReportFinding,
 )
-from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 4
 _llm = get_llm(Model.GPT_5_4_MINI)
-_BLAST_RADIUS_FIELDS = set(BlastRadiusSummary.model_fields)
 
 _TOOL_DESCRIPTIONS = {
     "web_search": "web_search(query: str): search the web for advisories/issues/"
     "releases about this finding's SPECIFIC flagged reason (never a generic query)",
-    "blast_radius": "blast_radius(depth: int = 3): real import/usage graph blast "
-    "radius for this finding's package — affected file count/paths, whether usage "
-    "is isolated to tests/scripts",
-    "code_impact": "code_impact(): fuzzy semantic-search fallback; source files "
-    "importing this finding's package. Use only if blast_radius is unavailable.",
+    "impact_analysis": "impact_analysis(depth: int = 3): investigates this "
+    "package's real usage impact — affected files, whether usage reaches "
+    "production, and which business use cases are actually affected. Always "
+    "available.",
 }
 
 _SYSTEM = textwrap.dedent("""\
@@ -58,28 +56,22 @@ _SYSTEM = textwrap.dedent("""\
     - recommendation: actionable fix
     - alternatives: ONLY packages backed by a web_search result; NEVER include
       any of these already-flagged packages: {excluded_alternatives}
-    - business_impact: derived from blast_radius/code_impact data if present
-      (affected_file_count, isolated_to_tests_or_scripts, or the business
-      capability the affected code implements). If neither tool returned
-      anything, say the business impact could not be determined — never
-      invent file counts or guess.
+    - business_impact: derived from impact_analysis's narrative/
+      use_cases_impacted if present. If impact_analysis could not determine
+      impact, say so — never invent file counts or guess.
     - evidence: only cite results that actually discuss this finding's own
       reason, never a generic tutorial that happens to mention the package.
-    - affected_files: from blast_radius/code_impact output, if any.
+    - affected_files: from impact_analysis output, if any.
 
     After {max_iter} iterations, set finalize=true regardless of coverage.
     """).strip()
 
 
-def _build_tool_map(prep: PrepResult, container) -> dict:
-    tools: dict = {"web_search": web_search}
-    if prep.codegraph_ready:
-        tools["blast_radius"] = make_blast_radius_tool(
-            prep.repo_path, container, settings.codegraph_docker_image
-        )
-    if prep.vector_store_id:
-        tools["code_impact"] = make_code_impact_tool(prep.vector_store_id)
-    return tools
+def _build_tool_map(finding: FindingNote, prep: PrepResult, container) -> dict:
+    return {
+        "web_search": web_search,
+        "impact_analysis": make_impact_analysis_tool(finding, prep, container),
+    }
 
 
 def _format_tools(tool_map: dict) -> str:
@@ -164,12 +156,12 @@ def _feedback_result(feedback: str) -> ToolResult:
     )
 
 
-def _grounded_blast_radius(tool_results: list[ToolResult]) -> BlastRadiusSummary | None:
+def _grounded_impact_analysis(
+    tool_results: list[ToolResult],
+) -> BlastRadiusSummary | None:
     for tr in tool_results:
-        if tr.tool == "blast_radius" and not tr.error and tr.output.get("available"):
-            return BlastRadiusSummary(
-                **{k: v for k, v in tr.output.items() if k in _BLAST_RADIUS_FIELDS}
-            )
+        if tr.tool == "impact_analysis" and not tr.error:
+            return BlastRadiusSummary(**tr.output)
     return None
 
 
@@ -188,7 +180,7 @@ async def enrich_finding(
     all_flagged_dep_names: list[str],
     container=None,
 ) -> tuple[ReportFinding, list[str]]:
-    tool_map = _build_tool_map(prep, container)
+    tool_map = _build_tool_map(finding, prep, container)
     tool_results: list[ToolResult] = []
     draft: ReportFinding | None = None
     excluded = (
@@ -233,7 +225,7 @@ async def enrich_finding(
         last = iteration == _MAX_ITERATIONS - 1
         if decision.finalize or last:
             draft = decision.finding or _fallback_finding(finding)
-            grounded = _grounded_blast_radius(tool_results)
+            grounded = _grounded_impact_analysis(tool_results)
             if grounded is not None:
                 draft.blast_radius = grounded
                 draft.affected_files = grounded.affected_files

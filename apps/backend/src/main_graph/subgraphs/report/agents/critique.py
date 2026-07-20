@@ -20,9 +20,10 @@ _SYSTEM = textwrap.dedent("""\
     Judge whether the draft is adequately supported by ITS OWN tool_results:
     - evidence entries must reference something that actually appears in
       tool_results, not invented and not generic.
-    - business_impact must be grounded in blast_radius/code_impact output
-      present in tool_results. If neither tool returned data, business_impact
-      should say so rather than guess — flag it if it guesses instead.
+    - business_impact must be grounded in impact_analysis output (its
+      narrative/use_cases_impacted, not invented) present in tool_results.
+      If impact_analysis returned nothing usable, business_impact should say
+      so rather than guess — flag it if it guesses instead.
     - alternatives must be backed by a web_search result in tool_results.
     - severity and dep_name must be unchanged from the original finding.
 

@@ -3,9 +3,11 @@ from src.models.results import (
     AgentCallRecord,
     AgentDispatch,
     AnalysisConductorDecision,
+    BlastRadiusSummary,
     DomainAgentDecision,
     EvidenceBundle,
     FindingEnrichmentDecision,
+    ImpactAnalysisDecision,
     PrepResult,
     ReportFinding,
     ReportResult,
@@ -158,3 +160,34 @@ def test_finding_enrichment_decision_round_trip():
     )
     assert d.finalize is False
     assert d.finding is None
+
+
+def test_blast_radius_summary_defaults_narrative_fields_empty():
+    s = BlastRadiusSummary(available=False)
+    assert s.use_cases_impacted == []
+    assert s.narrative == ""
+    assert s.source == "unavailable"
+
+
+def test_blast_radius_summary_accepts_narrative_fields():
+    s = BlastRadiusSummary(
+        available=True,
+        affected_file_count=2,
+        use_cases_impacted=["checkout flow"],
+        narrative="Used to format currency in checkout.",
+        source="codegraph",
+    )
+    assert s.use_cases_impacted == ["checkout flow"]
+    assert s.source == "codegraph"
+
+
+def test_impact_analysis_decision_round_trip():
+    d = ImpactAnalysisDecision(
+        tool_calls=[],
+        narrative="",
+        use_cases_impacted=[],
+        finalize=False,
+        reasoning="need more evidence",
+    )
+    assert d.finalize is False
+    assert d.narrative == ""

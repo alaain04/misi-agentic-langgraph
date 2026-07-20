@@ -22,7 +22,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.report.agents import finding_enricher_agent
+from src.main_graph.subgraphs.report.agents import (
+    finding_enricher_agent,
+    impact_analysis_agent,
+)
 from src.main_graph.subgraphs.report.agents.critique import FindingVerdict
 from src.main_graph.subgraphs.report.graph import build_report_subgraph
 from src.models.conductor import FindingNote
@@ -367,9 +370,10 @@ async def test_report_keeps_untrusted_finding_instead_of_dropping(
 
 @pytest.mark.asyncio
 async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result_dao):
-    """finding_enricher's own blast_radius tool call -> container port ->
-    the resulting draft's blast_radius/affected_files come from the real
-    tool output, not the LLM's placeholder text."""
+    """finding_enricher's impact_analysis tool call -> nested agent's own
+    blast_radius call -> container port -> the resulting draft's
+    blast_radius/affected_files come from the real tool output, not either
+    LLM's placeholder text."""
     job_id = f"rep-{uuid.uuid4().hex[:8]}"
     findings = [
         FindingNote(
@@ -414,20 +418,17 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
     )
 
     from src.models.conductor import ToolCall
+    from src.models.results import ImpactAnalysisDecision
 
-    tool_call_decision = FindingEnrichmentDecision(
+    outer_tool_call_decision = FindingEnrichmentDecision(
         tool_calls=[
-            ToolCall(
-                tool="blast_radius",
-                args={"package_name": "left-pad"},
-                reason="check real usage depth",
-            )
+            ToolCall(tool="impact_analysis", args={}, reason="check real usage")
         ],
         finding=None,
         finalize=False,
-        reasoning="enrich with blast radius",
+        reasoning="enrich with impact analysis",
     )
-    final_decision = _finalize(
+    outer_final_decision = _finalize(
         ReportFinding(
             dep_name="left-pad",
             severity="high",
@@ -438,17 +439,40 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
         )
     )
 
-    mock_llm = MagicMock()
-    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
-        side_effect=[tool_call_decision, final_decision]
+    mock_outer_llm = MagicMock()
+    mock_outer_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=[outer_tool_call_decision, outer_final_decision]
     )
+
+    inner_tool_call_decision = ImpactAnalysisDecision(
+        tool_calls=[
+            ToolCall(tool="blast_radius", args={}, reason="check graph depth")
+        ],
+        narrative="",
+        use_cases_impacted=[],
+        finalize=False,
+        reasoning="checking",
+    )
+    inner_final_decision = ImpactAnalysisDecision(
+        tool_calls=[],
+        narrative="Only used in a build script, never shipped.",
+        use_cases_impacted=[],
+        finalize=True,
+        reasoning="done",
+    )
+    mock_inner_llm = MagicMock()
+    mock_inner_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=[inner_tool_call_decision, inner_final_decision]
+    )
+
     synth_payload = {
         "executive_summary": "left-pad is GPL-incompatible but low exposure.",
         "recommendations": ["Replace left-pad with String.prototype.padStart"],
     }
 
     with (
-        patch.object(finding_enricher_agent, "_llm", mock_llm),
+        patch.object(finding_enricher_agent, "_llm", mock_outer_llm),
+        patch.object(impact_analysis_agent, "_llm", mock_inner_llm),
         patch.object(
             finding_enricher_agent,
             "critique_report_finding",
@@ -475,7 +499,10 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
     finding = report.findings[0]
     assert finding.blast_radius is not None
     assert finding.blast_radius.available is True
-    assert finding.blast_radius.affected_file_count == 1
+    assert finding.blast_radius.source == "codegraph"
     assert finding.blast_radius.isolated_to_tests_or_scripts is True
-    # grounded from the real tool output, not the LLM's placeholder text
+    assert (
+        finding.blast_radius.narrative == "Only used in a build script, never shipped."
+    )
+    # grounded from the real tool output, not either LLM's placeholder text
     assert finding.affected_files == ["scripts/build.js:1"]

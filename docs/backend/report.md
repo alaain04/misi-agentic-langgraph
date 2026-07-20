@@ -52,6 +52,37 @@ interface ReportFinding {
 
 ---
 
+## BlastRadiusSummary
+
+Populated on `ReportFinding.blast_radius` when the per-finding enrichment
+agent's `impact_analysis` tool ran. `null` only if enrichment itself never
+completed (e.g. total LLM outage for that finding).
+
+```typescript
+interface BlastRadiusSummary {
+  available: boolean;                 // false only if neither codegraph nor semantic search found anything
+  affected_file_count: number;
+  affected_files: string[];           // "path:line" entries
+  production_file_count: number;
+  isolated_to_tests_or_scripts: boolean;
+  node_count: number;                 // 0 when source is not "codegraph"
+  depth_searched: number;             // 0 when source is not "codegraph"
+  use_cases_impacted: string[];       // business capabilities the affected code implements
+  narrative: string;                  // 1-3 sentence real-world impact summary
+  source: "codegraph" | "semantic_search" | "unavailable";
+}
+```
+
+Note: `ReportFinding` above (`risk_score`, `confidence`, `summary`,
+`supporting_evidence_count`, `contradictions_count`, `missing_evidence`)
+predates the per-finding-agent refactor and no longer matches
+`src/models/results.py`'s current `ReportFinding` shape (which also has
+`business_impact`, `evidence`, `trust`, `observation`, `blast_radius`).
+Full resync of that section is out of scope for this change — flagged here
+for a follow-up doc pass.
+
+---
+
 ## RiskFinding (raw, in results.risk_findings)
 
 The raw finding objects in `results.risk_findings` carry more detail than the report:
