@@ -27,6 +27,26 @@ def _install_command(pm: str, pm_version: str) -> str:
     return "cd /workspace && NO_UPDATE_NOTIFIER=1 npm install --ignore-scripts"
 
 
+def _lockfile_only_command(pm: str, pm_version: str) -> str | None:
+    """Command to force-generate a lock file without a full install.
+
+    Only npm and pnpm expose a clean, version-stable lockfile-only mode
+    (`--package-lock-only` / `--lockfile-only`). yarn Classic and Berry
+    disagree on the equivalent flag, so yarn has no fallback here.
+    """
+    if pm == "npm":
+        return (
+            "cd /workspace && NO_UPDATE_NOTIFIER=1 npm install "
+            "--package-lock-only --ignore-scripts"
+        )
+    if pm == "pnpm":
+        return (
+            f"cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g "
+            f"pnpm@{pm_version} && pnpm install --lockfile-only"
+        )
+    return None
+
+
 async def _run_with_peer_retry(
     container: ContainerRunPort, image: str, volume: str, cmd: str, pm: str
 ) -> tuple[int, str, str]:
@@ -68,5 +88,27 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
 
     lock_file = _LOCK_FILE_NAMES.get(pm, "package-lock.json")
     lock_created = os.path.exists(os.path.join(repo_path, lock_file))
+
+    if not lock_created:
+        # A full install can exit 0 without ever writing a lock file (e.g. an
+        # .npmrc disabling it). Force one explicitly so the dependency graph
+        # still gets transitive data instead of silently degrading every
+        # finding on this repo to direct-only detection.
+        fallback_cmd = _lockfile_only_command(pm, pm_version)
+        if fallback_cmd is not None:
+            rc2, _out2, err2 = await container.run(
+                image=docker_image,
+                command=fallback_cmd,
+                volume=volume,
+                run_as_root=True,
+            )
+            if rc2 != 0:
+                logger.warning(
+                    "install_deps: lockfile-only fallback failed rc=%d err=%s",
+                    rc2,
+                    err2[:300],
+                )
+            lock_created = os.path.exists(os.path.join(repo_path, lock_file))
+
     logger.info("install_deps: lock_created=%s", lock_created)
     return {"has_lock_file": lock_created}

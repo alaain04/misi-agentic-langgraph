@@ -103,6 +103,12 @@ class ReportFinding(BaseModel):
     blast_radius: BlastRadiusSummary | None = None
     trust: bool = True
     observation: str = ""
+    # Directness attribution: dep_name is always the package where the issue
+    # physically is; is_direct/direct_dependents record whether it is a declared
+    # direct dependency and, if transitive, which direct deps pull it in. The
+    # recommendation is always framed around the direct dependent(s).
+    is_direct: bool = True
+    direct_dependents: list[str] = Field(default_factory=list)
 
 
 class FindingEnrichmentDecision(BaseModel):
