@@ -191,3 +191,23 @@ def test_impact_analysis_decision_round_trip():
     )
     assert d.finalize is False
     assert d.narrative == ""
+
+
+def test_report_finding_directness_defaults():
+    f = ReportFinding(
+        dep_name="express", severity="high", description="CVE",
+        recommendation="upgrade",
+    )
+    assert f.is_direct is True
+    assert f.direct_dependents == []
+
+
+def test_report_finding_accepts_transitive_attribution():
+    f = ReportFinding(
+        dep_name="qs", severity="high", description="CVE",
+        recommendation="update express",
+        is_direct=False,
+        direct_dependents=["express", "webpack"],
+    )
+    assert f.is_direct is False
+    assert f.direct_dependents == ["express", "webpack"]
