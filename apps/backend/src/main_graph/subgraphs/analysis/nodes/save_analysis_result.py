@@ -23,6 +23,16 @@ def dedup_findings(findings: list[FindingNote]) -> list[FindingNote]:
     appear more than once. Key on (dep_name, severity, description): identical
     duplicates collapse, while genuinely distinct issues on the same package
     (different description) are preserved. Order-stable, keeps first occurrence.
+
+    The key is provably safe for the whole-tree agents this bug is about, whose
+    output is deterministic non-LLM text (npm audit / the SPDX rules table) —
+    re-dispatch duplicates are byte-identical. It is theoretically weaker for
+    LLM-narrative agents (maintenance, web_research): two genuinely distinct
+    issues on one package at the same severity could produce identical
+    description text and be collapsed. That is low-probability and still a
+    strict improvement over the prior zero-dedup behavior; tightening the key
+    for LLM-sourced findings (e.g. an evidence/advisory signature) is a possible
+    follow-up if it is ever observed.
     """
     seen: set[tuple[str, str, str]] = set()
     result: list[FindingNote] = []
