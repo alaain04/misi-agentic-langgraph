@@ -59,6 +59,53 @@ def count_dependencies(graph: dict) -> tuple[int, int]:
     return len(direct), transitive_count
 
 
+def is_direct(graph: dict, name: str) -> bool:
+    """True if `name` is a declared direct dependency in this graph."""
+    return name in (graph.get("direct") or {})
+
+
+def _package_name(flat_key: str) -> str:
+    """Recover the package name from a "name@version" graph key, tolerating
+    scoped names like "@scope/pkg@1.2.3"."""
+    return flat_key.rsplit("@", 1)[0]
+
+
+def direct_dependents(graph: dict, name: str) -> list[str]:
+    """Return the direct dependencies whose subtree pulls in `name`, sorted.
+
+    Empty when `name` is itself a direct dependency, or when the flat graph
+    has no transitive data (e.g. package.json fallback) to trace edges
+    through. Walks the recorded `packages` edges upward from every installed
+    version of `name` to whichever direct-dependency roots reach it, so a
+    transitive shared by several direct deps lists all of them.
+    """
+    direct = graph.get("direct") or {}
+    if name in direct:
+        return []
+    packages = graph.get("packages") or {}
+    if not packages:
+        return []
+
+    direct_keys = {f"{n}@{v}" for n, v in direct.items()}
+    parents: dict[str, set[str]] = {}
+    for key, info in packages.items():
+        for child in info.get("dependencies", []):
+            parents.setdefault(child, set()).add(key)
+
+    result: set[str] = set()
+    seen: set[str] = set()
+    stack = [k for k in packages if _package_name(k) == name]
+    while stack:
+        key = stack.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        if key in direct_keys:
+            result.add(_package_name(key))
+        stack.extend(parents.get(key, ()))
+    return sorted(result)
+
+
 def build_dependency_graph(
     repo_path: str, package_manager: str, pkg: dict | None = None
 ) -> dict:
