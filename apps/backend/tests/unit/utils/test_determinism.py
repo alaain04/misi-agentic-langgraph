@@ -86,3 +86,37 @@ def test_summarize_integration():
     assert s["count"] == {"min": 1, "mean": 5 / 3, "max": 2}
     assert 0.0 < s["dep_name_jaccard"] < 1.0
     assert s["unstable_dep_names"] == ["b"]
+
+
+def test_extract_findings_prefers_report_artifact():
+    from scripts.determinism_check import extract_findings
+
+    resp = {
+        "artifacts": [
+            {"node": "analysis"},
+            {
+                "node": "report",
+                "output": {"findings": [{"dep_name": "x", "severity": "high"}]},
+            },
+        ],
+        "results": {"report_result_id": "abc"},
+    }
+    assert extract_findings(resp) == [{"dep_name": "x", "severity": "high"}]
+
+
+def test_extract_findings_falls_back_to_results():
+    from scripts.determinism_check import extract_findings
+
+    resp = {
+        "artifacts": [{"node": "report", "output": {}}],
+        "results": {
+            "analysis_report": {"findings": [{"dep_name": "y", "severity": "low"}]}
+        },
+    }
+    assert extract_findings(resp) == [{"dep_name": "y", "severity": "low"}]
+
+
+def test_extract_findings_empty_when_absent():
+    from scripts.determinism_check import extract_findings
+
+    assert extract_findings({"artifacts": [], "results": {}}) == []
