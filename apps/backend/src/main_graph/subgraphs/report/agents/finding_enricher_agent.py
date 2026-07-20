@@ -9,6 +9,10 @@ import time
 import uuid
 from typing import cast
 
+from src.main_graph.subgraphs.discovery.dependency_graph import (
+    direct_dependents,
+    is_direct,
+)
 from src.main_graph.subgraphs.report.agents.critique import critique_report_finding
 from src.main_graph.subgraphs.report.agents.impact_analysis_agent import (
     make_impact_analysis_tool,
@@ -48,12 +52,18 @@ _SYSTEM = textwrap.dedent("""\
     - severity: {severity}
     - description: {description}
 
+    {directness_guidance}
+
     Available tools:
     {tool_descriptions}
 
     When you have enough evidence, set finalize=true and populate `finding`
     with a complete ReportFinding:
-    - recommendation: actionable fix
+    - recommendation: an action the user can actually take. The user's ONLY
+      levers are on DIRECT dependencies (declared in package.json). Follow the
+      directness guidance above: for a direct package, recommend upgrading or
+      replacing it; for a transitive package, recommend updating the direct
+      dependent(s) named above — never an action on the transitive itself.
     - alternatives: ONLY packages backed by a web_search result; NEVER include
       any of these already-flagged packages: {excluded_alternatives}
     - business_impact: derived from impact_analysis's narrative/
@@ -76,6 +86,36 @@ def _build_tool_map(finding: FindingNote, prep: PrepResult, container) -> dict:
 
 def _format_tools(tool_map: dict) -> str:
     return "\n".join(f"- {_TOOL_DESCRIPTIONS[name]}" for name in tool_map)
+
+
+def _directness_guidance(
+    dep_name: str, is_direct_dep: bool, dependents: list[str]
+) -> str:
+    if is_direct_dep:
+        return (
+            f"'{dep_name}' is a DIRECT dependency (declared in package.json). "
+            "Recommend the concrete fix the user applies directly: upgrade to a "
+            "fixed version, or replace it with a safer package."
+        )
+    parents = ", ".join(dependents) if dependents else "an unknown direct dependency"
+    return (
+        f"'{dep_name}' is a TRANSITIVE dependency. It is NOT in package.json and "
+        f"the user cannot upgrade, replace, pin, or override it directly. It is "
+        f"pulled in by these direct dependencies: {parents}.\n"
+        "Anchor everything actionable on the direct dependent(s) above:\n"
+        f"- recommendation MUST target the direct dependent(s), e.g. \"update "
+        f"<direct-dependent> to a version whose dependency tree no longer includes "
+        f"{dep_name} (or resolves it to a fixed version)\". The finding description "
+        "may already carry the exact fix path from the audit (e.g. \"Fix requires "
+        "X@Y\"); prefer it when present.\n"
+        "- If no direct-dependent update resolves it (description says no fix is "
+        f"available), say so honestly, then suggest replacing the direct "
+        f"dependent(s) or accepting the risk — never patching {dep_name}.\n"
+        f"- Do NOT suggest replacing, forking, or adding overrides/resolutions for "
+        f"{dep_name}, and do NOT put {dep_name} in alternatives.\n"
+        "- alternatives: leave empty unless proposing a replacement for a direct "
+        "dependent."
+    )
 
 
 def _format_results(results: list[ToolResult]) -> str:
@@ -186,6 +226,13 @@ async def enrich_finding(
     excluded = (
         ", ".join(n for n in all_flagged_dep_names if n != finding.dep_name) or "none"
     )
+    finding_is_direct = is_direct(prep.dependency_graph, finding.dep_name)
+    dependents = (
+        []
+        if finding_is_direct
+        else direct_dependents(prep.dependency_graph, finding.dep_name)
+    )
+    guidance = _directness_guidance(finding.dep_name, finding_is_direct, dependents)
 
     structured = _llm.with_structured_output(
         FindingEnrichmentDecision, method="function_calling"
@@ -199,6 +246,7 @@ async def enrich_finding(
             tool_descriptions=_format_tools(tool_map),
             excluded_alternatives=excluded,
             max_iter=_MAX_ITERATIONS,
+            directness_guidance=guidance,
         )
         prompt = (
             f"Tool results so far:\n{_format_results(tool_results)}\n\n"
@@ -264,4 +312,6 @@ async def enrich_finding(
             finding.dep_name,
         )
         draft = _fallback_finding(finding)
+    draft.is_direct = finding_is_direct
+    draft.direct_dependents = dependents
     return draft, [tr.tool for tr in tool_results]

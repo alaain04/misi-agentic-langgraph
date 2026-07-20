@@ -289,3 +289,102 @@ def test_grounded_impact_analysis_returns_none_when_absent():
     )
 
     assert _grounded_impact_analysis([]) is None
+
+
+def _transitive_prep() -> PrepResult:
+    return _prep(
+        dependency_graph={
+            "direct": {"express": "4.18.0"},
+            "packages": {
+                "express@4.18.0": {
+                    "version": "4.18.0",
+                    "dependencies": ["left-pad@1.0.0"],
+                },
+                "left-pad@1.0.0": {"version": "1.0.0", "dependencies": []},
+            },
+        }
+    )
+
+
+def _direct_prep() -> PrepResult:
+    return _prep(
+        dependency_graph={
+            "direct": {"left-pad": "1.0.0"},
+            "packages": {
+                "left-pad@1.0.0": {"version": "1.0.0", "dependencies": []},
+            },
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_enrich_finding_stamps_transitive_attribution():
+    from src.main_graph.subgraphs.report.agents import finding_enricher_agent
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_finalize()
+    )
+    critic = AsyncMock(return_value=_ok_verdict())
+
+    with (
+        patch.object(finding_enricher_agent, "_llm", mock_llm),
+        patch.object(finding_enricher_agent, "critique_report_finding", critic),
+    ):
+        draft, _ = await finding_enricher_agent.enrich_finding(
+            _finding(), _transitive_prep(), []
+        )
+
+    assert draft.is_direct is False
+    assert draft.direct_dependents == ["express"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_finding_stamps_direct_attribution():
+    from src.main_graph.subgraphs.report.agents import finding_enricher_agent
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_finalize()
+    )
+    critic = AsyncMock(return_value=_ok_verdict())
+
+    with (
+        patch.object(finding_enricher_agent, "_llm", mock_llm),
+        patch.object(finding_enricher_agent, "critique_report_finding", critic),
+    ):
+        draft, _ = await finding_enricher_agent.enrich_finding(
+            _finding(), _direct_prep(), []
+        )
+
+    assert draft.is_direct is True
+    assert draft.direct_dependents == []
+
+
+@pytest.mark.asyncio
+async def test_enrich_finding_transitive_prompt_names_direct_dependents():
+    from src.main_graph.subgraphs.report.agents import finding_enricher_agent
+
+    mock_llm = MagicMock()
+    seen_system: dict = {}
+
+    async def _ainvoke(messages):
+        seen_system["content"] = messages[0]["content"]
+        return _finalize()
+
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=_ainvoke
+    )
+    critic = AsyncMock(return_value=_ok_verdict())
+
+    with (
+        patch.object(finding_enricher_agent, "_llm", mock_llm),
+        patch.object(finding_enricher_agent, "critique_report_finding", critic),
+    ):
+        await finding_enricher_agent.enrich_finding(
+            _finding(), _transitive_prep(), []
+        )
+
+    content = seen_system["content"]
+    assert "transitive" in content.lower()
+    assert "express" in content  # the direct dependent to anchor on
