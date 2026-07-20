@@ -132,10 +132,10 @@ and this repo is already confirmed to exercise the lockfile-fallback path
 | # | Concern | Expected agent dispatch | Expected quality signal | Result |
 |---|---------|--------------------------|--------------------------|--------|
 | 1.1 | "Check for outdated or unmaintained dependencies, and any known security vulnerabilities in the dependency tree" | `maintenance_agent` + `vulnerability_agent` | Maintenance findings (`matcha`, `yoctodelay`) always `is_direct: true`; transitive vuln findings (`electron`, `@typescript-eslint/*`, `minimatch`) `is_direct: false` with `direct_dependents` populated and recommendation naming them | **PASS (run twice, 2026-07-20)** — see PR #20 description for full evidence. First run found+fixed the lockfile-fallback bug; second run confirmed `minimatch` → `["ava","c8","xo"]` fan-out with correct recommendation |
-| 1.2 | "Are any dependencies unmaintained or abandoned?" (maintenance-only, no vuln/security wording) | `maintenance_agent` only (verify conductor doesn't also dispatch `vulnerability_agent` unprompted) | Every finding `is_direct: true` (Q5); zero maintenance findings on `electron`/`@typescript-eslint/*`/`minimatch` even though those exist in the tree | not yet run |
-| 1.3 | "Are there any license compatibility issues that would restrict commercial or open-source use?" | `license_agent` | `license_agent` runs full-tree per its deterministic design; check whether any transitive license finding correctly anchors its recommendation on a direct dependent (Q2/Q3) — this agent wasn't covered by the earlier live validation, which only exercised maintenance+vulnerability | not yet run |
-| 1.4 | "Could any dependency be a supply-chain risk — typosquatting, malicious install scripts, suspicious maintainers?" | `supply_chain_agent` | Check `resolve_transitive_parent` tool output (used by this agent) is consistent with the enricher's own `direct_dependents` — two independent mechanisms computing the same thing, per the whole-branch review's Minor note in PR #20 | not yet run |
-| 1.5 | "Is this package safe to use in production?" (broad, no domain hint) | Conductor's choice — record what it actually dispatches | Judge whether the conductor's breadth decision is reasonable (2+ agents, not just 1); this is the least deterministic test in the catalog, expect to *read* the `reasoning` field on `AnalysisConductorDecision` via the `analysis` artifact rather than assert a fixed agent list | not yet run |
+| 1.2 | "Are any dependencies unmaintained or abandoned?" (maintenance-only, no vuln/security wording) | `maintenance_agent` only (verify conductor doesn't also dispatch `vulnerability_agent` unprompted) | Every finding `is_direct: true` (Q5); zero maintenance findings on `electron`/`@typescript-eslint/*`/`minimatch` even though those exist in the tree | **PASS (2026-07-20, trace `6a5e4b55c8151f9c621925f6`)** — only `maintenance_agent` dispatched (no unnecessary vuln check). 2 findings (`matcha`, `yoctodelay`), both `is_direct: true`. Quality flag: `yoctodelay`'s recommendation is the coded fallback string "Review manually" (Q1) — enrichment failed for that finding, not a directness-feature defect but worth tracking if it recurs |
+| 1.3 | "Are there any license compatibility issues that would restrict commercial or open-source use?" | `license_agent` | `license_agent` runs full-tree per its deterministic design; check whether any transitive license finding correctly anchors its recommendation on a direct dependent (Q2/Q3) — this agent wasn't covered by the earlier live validation, which only exercised maintenance+vulnerability | **PASS structurally (2026-07-20, trace `6a5e4c88c8151f9c621925fb`)** — only `license_agent` dispatched. **0 findings**, `overall_risk_level: none` — chalk's tree is license-clean (expected, well-known MIT ecosystem package). Doesn't exercise D2/D3 for this agent; needs a repo with a real GPL/copyleft transitive dependency for a meaningful check — not yet identified |
+| 1.4 | "Could any dependency be a supply-chain risk — typosquatting, malicious install scripts, suspicious maintainers?" | `supply_chain_agent` | Check `resolve_transitive_parent` tool output (used by this agent) is consistent with the enricher's own `direct_dependents` — two independent mechanisms computing the same thing, per the whole-branch review's Minor note in PR #20 | **PASS structurally (2026-07-20, trace `6a5e4d82c8151f9c62192600`)** — `supply_chain_agent` dispatched twice, heavily used `resolve_transitive_parent`. **0 findings** — chalk is supply-chain-clean (expected). Same limitation as 1.3: confirms the tool runs correctly but no finding exists to validate anchoring against |
+| 1.5 | "Is this package safe to use in production?" (broad, no domain hint) | Conductor's choice — record what it actually dispatches | Judge whether the conductor's breadth decision is reasonable (2+ agents, not just 1); this is the least deterministic test in the catalog, expect to *read* the `reasoning` field on `AnalysisConductorDecision` via the `analysis` artifact rather than assert a fixed agent list | **PASS (2026-07-20, trace `6a5e4ea8c8151f9c62192606`)** — conductor dispatched `vulnerability_agent` + `maintenance_agent` + `supply_chain_agent` (reasonable breadth for a vague concern, not over- or under-dispatching). 10 findings, no duplicates this time, `minimatch` fan-out again correct (`["ava","c8","xo"]`), all directness fields correct. Total cost $0.119 |
 
 ---
 
@@ -213,6 +213,10 @@ This is the append-only ground truth; the tables above are the plan.
 |------|--------|----------|------|----------------------|--------|-------------------|------------------------|
 | 2026-07-20 | 1.1 (run 1) | `6a5e3d464dd81365f98233a6` | chalk/chalk | outdated/unmaintained + vulnerabilities | done | 20 findings (dupes present — enricher retries counted twice, see note) | `direct_dependents` empty for all transitive findings — root cause: `install_deps` produced no lockfile. Fixed in commit `aa138a8` |
 | 2026-07-20 | 1.1 (run 2) | `6a5e426977c50f32fbb89366` | chalk/chalk | outdated/unmaintained + vulnerabilities | done | 10 findings, `minimatch` → 3 direct dependents | None — full pass on Q1-Q10 |
+| 2026-07-20 | 1.2 | `6a5e4b55c8151f9c621925f6` | chalk/chalk | unmaintained/abandoned only | done | 2 findings, both `is_direct: true` | `yoctodelay` recommendation fell back to "Review manually" (Q1) — enrichment failure for that one finding, not directness-related |
+| 2026-07-20 | 1.3 | `6a5e4c88c8151f9c621925fb` | chalk/chalk | license compatibility | done | 0 findings, `overall_risk_level: none` | None found; chalk is license-clean, so this run doesn't exercise transitive-license anchoring |
+| 2026-07-20 | 1.4 | `6a5e4d82c8151f9c62192600` | chalk/chalk | supply-chain risk | done | 0 findings, `overall_risk_level: none` | None found; chalk is supply-chain-clean, same coverage gap as 1.3 |
+| 2026-07-20 | 1.5 | `6a5e4ea8c8151f9c62192606` | chalk/chalk | broad "safe for production?" | done | 10 findings, no duplicates, `minimatch` fan-out correct | None — full pass; cost $0.119 |
 
 **Open note from run 1:** the first run showed some `dep_name`s appearing
 twice in `findings` (e.g. `matcha` twice, `electron` twice) with slightly
@@ -220,6 +224,18 @@ different `recommendation` text each time — worth a dedicated look (possibly
 the conductor dispatching the same domain agent twice across iterations
 without the dedup the system prompt claims, or two different agents both
 flagging the same package). Not yet root-caused; add as a follow-up
-investigation, separate from this catalog's scope. Run 2 did not reproduce
-this (10 findings, no duplicates) but the sample size is too small to call it
-resolved — watch for it in future runs and log here if it recurs.
+investigation, separate from this catalog's scope. Runs 1.1(2), 1.2, and 1.5
+did not reproduce this (all duplicate-free) — 4 of 5 chalk runs today were
+clean, only the very first run (before the lockfile fix) showed duplicates.
+Plausible explanation worth checking first in any future investigation: the
+first run's two conductor iterations for the same two agents (see its
+`agent_calls`) may correlate with the doubling — worth confirming whether
+iteration-2 re-dispatch is what produced the duplicates specifically that run.
+
+**Coverage gap identified:** license and supply-chain concerns (1.3, 1.4)
+against chalk both returned 0 findings — chalk is simply clean on those axes.
+Neither test exercises the direct-anchoring behavior for `license_agent` or
+`supply_chain_agent` findings. Needs a repo with a known GPL/copyleft
+transitive dependency (for 1.3) or a deliberately-planted/known
+typosquat-adjacent case (for 1.4) to close this gap — not yet identified;
+add as a follow-up rather than block on finding one now.
