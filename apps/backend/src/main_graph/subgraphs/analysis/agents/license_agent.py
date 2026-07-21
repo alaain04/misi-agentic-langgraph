@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from src.db.input_cache import InputCacheDAO
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
 from src.main_graph.subgraphs.analysis.agents.license_collector import collect_licenses
@@ -46,6 +47,7 @@ class LicenseAgent(BaseAgent):
         dispatch: AgentDispatch,
         prep: PrepResult,
         container: ContainerRunPort | None = None,
+        cache: InputCacheDAO | None = None,
     ) -> tuple[EvidenceBundle, list[str], int]:
         pkg = _load_pkg(prep.repo_path)
         project_license_raw = pkg.get("license")

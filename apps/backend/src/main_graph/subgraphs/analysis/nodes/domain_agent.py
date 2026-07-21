@@ -32,7 +32,9 @@ async def domain_agent(state: AnalysisState, config: RunnableConfig) -> dict:
     )
 
     started_at = datetime.now(UTC).isoformat()
-    bundle, tools_used, react_iterations = await agent.run(dispatch, prep, container)
+    bundle, tools_used, react_iterations = await agent.run(
+        dispatch, prep, container, cache=svc.get("input_cache")
+    )
     finished_at = datetime.now(UTC).isoformat()
 
     bundle_id = await dao.save_bundle(bundle)
