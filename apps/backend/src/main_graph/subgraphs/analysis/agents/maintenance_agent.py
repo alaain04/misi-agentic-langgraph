@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.db.input_cache import InputCacheDAO
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
 from src.main_graph.subgraphs.discovery.dependency_graph import is_direct
@@ -68,6 +69,7 @@ FindingNote.
         dispatch: AgentDispatch,
         prep: PrepResult,
         container: ContainerRunPort | None = None,
+        cache: InputCacheDAO | None = None,
     ) -> tuple[EvidenceBundle, list[str], int]:
         """Maintenance is a quality-proxy analysis: "old"/"unmaintained" is only
         actionable for a dependency the user actually chose. A stale transitive

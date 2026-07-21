@@ -4,6 +4,7 @@ import logging
 
 from langchain_core.runnables import RunnableConfig
 
+from src.db.input_cache import cache_key, get_or_compute
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.discovery.dependency_graph import build_dependency_graph
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
@@ -17,16 +18,40 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         logger.info("save_prep_result: skipping due to discovery_error")
         return {}
 
-    dao = get_services(config)["result_dao"]
+    svc = get_services(config)
+    dao = svc["result_dao"]
+    cache = svc.get("input_cache")
     pm = state.get("detected_package_manager") or "unknown"
+    repo_path = state.get("repo_path", "")
+    repo_url = state.get("repo_url", "")
+    commit_sha = state.get("commit_sha") or ""
+
+    async def _build_graph() -> dict:
+        return build_dependency_graph(repo_path, pm)
+
+    # Cache the dependency graph indefinitely ONLY when the lock file was
+    # committed to the repo — then it is a pure function of the committed source
+    # for this sha. When install_deps had to generate the lock this run, the
+    # graph was resolved against the live registry and the same sha can resolve
+    # differently over time, so it must not be cached under a sha-only key.
+    lock_committed = not state.get("lockfile_generated")
+    if cache is not None and commit_sha and lock_committed:
+        dep_graph = await get_or_compute(
+            cache, cache_key(repo_url, commit_sha, pm, "dependency_graph"), _build_graph
+        )
+    else:
+        dep_graph = await _build_graph()
+
     result = PrepResult(
         job_id=state["job_id"],
-        repo_path=state.get("repo_path", ""),
+        repo_path=repo_path,
         project_metadata=dict(state.get("project_metadata") or {}),
         manifest_files=state.get("manifest_files") or [],
         detected_package_manager=pm,
         docker_image=state.get("docker_image") or "node:lts-alpine",
-        dependency_graph=build_dependency_graph(state.get("repo_path", ""), pm),
+        repo_url=repo_url,
+        commit_sha=commit_sha,
+        dependency_graph=dep_graph,
         discovery_summary=state.get("project_context") or "",
         vector_store_id=state.get("vector_store_id") or "",
         codegraph_ready=state.get("codegraph_ready") or False,

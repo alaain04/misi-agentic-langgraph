@@ -45,7 +45,8 @@ async def test_clone_repo_success(tmp_path):
 
     assert result["repo_path"] == str(tmp_path)
     assert "discovery_error" not in result
-    container.run.assert_awaited_once()
+    # two container runs: git clone, then git rev-parse HEAD for the commit sha
+    assert container.run.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -150,6 +151,9 @@ async def test_install_deps_creates_lock_file(tmp_path):
     result = await install_deps(state, _config(container=container))
 
     assert result["has_lock_file"] is True
+    # install_deps ran, so the lock was generated this run (not committed) —
+    # signals that the dependency graph must not be cached indefinitely.
+    assert result["lockfile_generated"] is True
     # Lock already present after the normal install — no lockfile-only fallback needed.
     assert container.run.await_count == 1
 
@@ -277,3 +281,29 @@ async def test_install_deps_retries_on_peer_conflict(tmp_path):
     # is not triggered — call count stays at 2 (initial failure + retry).
     assert container.run.await_count == 2
     assert "--legacy-peer-deps" in calls[1]
+
+
+@pytest.mark.asyncio
+async def test_clone_repo_captures_commit_sha(tmp_path):
+    container = AsyncMock()
+    # first call: git clone (success); second call: git rev-parse HEAD
+    container.run.side_effect = [(0, "", ""), (0, "abc123def\n", "")]
+
+    state = {**_BASE_STATE, "job_id": "sha-job"}
+    result = await clone_repo(state, _config(container=container))
+
+    assert result.get("commit_sha") == "abc123def"
+    assert "discovery_error" not in result
+
+
+@pytest.mark.asyncio
+async def test_clone_repo_sha_empty_when_rev_parse_fails(tmp_path):
+    container = AsyncMock()
+    container.run.side_effect = [(0, "", ""), (1, "", "fatal")]
+
+    state = {**_BASE_STATE, "job_id": "sha-job2"}
+    result = await clone_repo(state, _config(container=container))
+
+    # clone succeeded, so no discovery_error; sha just unavailable
+    assert result.get("commit_sha") == ""
+    assert "discovery_error" not in result

@@ -14,7 +14,7 @@ from src.main_graph.constants import ANALYSIS, PREP, REPORT
 from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
 from src.main_graph.tools.external_api import clear_cache
 from src.models.job import JobStatus
-from src.services.dependencies import get_result_dao
+from src.services.dependencies import get_input_cache, get_result_dao
 from src.utils.cost import CostCallback
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) ->
             "container": container,
             "docker_tool": make_docker_tool(container),
             "result_dao": get_result_dao(),
+            "input_cache": get_input_cache(),
         },
         "callbacks": [cost_cb],
     }

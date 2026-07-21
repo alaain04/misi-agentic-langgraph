@@ -21,10 +21,12 @@ class DiscoveryState(TypedDict):
 
     # Set by nodes
     repo_path: NotRequired[str]
+    commit_sha: NotRequired[str]
     manifest_files: NotRequired[list[str]]
     detected_package_manager: NotRequired[str]
     package_manager_version: NotRequired[str]
     has_lock_file: NotRequired[bool]
+    lockfile_generated: NotRequired[bool]
     docker_image: NotRequired[str]
 
     # New: set by index_repository

@@ -39,4 +39,12 @@ async def clone_repo(state: DiscoveryState, config: RunnableConfig) -> dict:
         }
 
     logger.info("clone_repo: success repo_url=%s", repo_url)
-    return {"repo_path": tmp_dir}
+
+    sha_rc, sha_out, _sha_err = await container.run(
+        image=_GIT_IMAGE,
+        command="cd /workspace && git rev-parse HEAD",
+        volume=f"{tmp_dir}:/workspace",
+        run_as_root=True,
+    )
+    commit_sha = sha_out.strip() if sha_rc == 0 else ""
+    return {"repo_path": tmp_dir, "commit_sha": commit_sha}

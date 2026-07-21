@@ -21,6 +21,7 @@ async def test_run_analysis_marks_failed_on_exception():
         patch("src.services.job_runner.main_graph") as mock_graph,
         patch("src.services.job_runner.clear_cache"),
         patch("src.services.job_runner.get_result_dao"),
+        patch("src.services.job_runner.get_input_cache"),
     ):
         mock_graph.astream = bad_stream
         await run_analysis(
@@ -46,6 +47,7 @@ async def test_run_analysis_records_cost_per_subgraph():
         patch("src.services.job_runner.main_graph") as mock_graph,
         patch("src.services.job_runner.clear_cache"),
         patch("src.services.job_runner.get_result_dao"),
+        patch("src.services.job_runner.get_input_cache"),
         patch("src.services.job_runner.CostCallback", return_value=fake_cost_cb),
     ):
         mock_graph.astream = fake_stream
