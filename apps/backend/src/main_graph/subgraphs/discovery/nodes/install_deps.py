@@ -111,4 +111,8 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
             lock_created = os.path.exists(os.path.join(repo_path, lock_file))
 
     logger.info("install_deps: lock_created=%s", lock_created)
-    return {"has_lock_file": lock_created}
+    # This node only runs when the repo had NO committed lock file, so any lock
+    # (and thus the resulting dependency graph) was resolved against the live
+    # registry this run — it is NOT a pure function of the committed source and
+    # must not be cached indefinitely. save_prep_result reads this flag.
+    return {"has_lock_file": lock_created, "lockfile_generated": True}

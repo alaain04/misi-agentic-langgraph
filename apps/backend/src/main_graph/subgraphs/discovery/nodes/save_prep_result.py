@@ -29,9 +29,13 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
     async def _build_graph() -> dict:
         return build_dependency_graph(repo_path, pm)
 
-    # The dependency graph is a pure function of the committed source, so it is
-    # cached indefinitely (keyed by commit sha); a cache miss/error recomputes.
-    if cache is not None and commit_sha:
+    # Cache the dependency graph indefinitely ONLY when the lock file was
+    # committed to the repo — then it is a pure function of the committed source
+    # for this sha. When install_deps had to generate the lock this run, the
+    # graph was resolved against the live registry and the same sha can resolve
+    # differently over time, so it must not be cached under a sha-only key.
+    lock_committed = not state.get("lockfile_generated")
+    if cache is not None and commit_sha and lock_committed:
         dep_graph = await get_or_compute(
             cache, cache_key(repo_url, commit_sha, pm, "dependency_graph"), _build_graph
         )

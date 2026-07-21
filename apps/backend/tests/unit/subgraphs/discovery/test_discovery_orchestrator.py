@@ -151,6 +151,9 @@ async def test_install_deps_creates_lock_file(tmp_path):
     result = await install_deps(state, _config(container=container))
 
     assert result["has_lock_file"] is True
+    # install_deps ran, so the lock was generated this run (not committed) —
+    # signals that the dependency graph must not be cached indefinitely.
+    assert result["lockfile_generated"] is True
     # Lock already present after the normal install — no lockfile-only fallback needed.
     assert container.run.await_count == 1
 

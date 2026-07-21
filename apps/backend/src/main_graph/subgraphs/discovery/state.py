@@ -26,6 +26,7 @@ class DiscoveryState(TypedDict):
     detected_package_manager: NotRequired[str]
     package_manager_version: NotRequired[str]
     has_lock_file: NotRequired[bool]
+    lockfile_generated: NotRequired[bool]
     docker_image: NotRequired[str]
 
     # New: set by index_repository

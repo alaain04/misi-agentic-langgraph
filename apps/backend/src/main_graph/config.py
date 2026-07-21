@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import NotRequired, cast
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -19,7 +19,9 @@ class PipelineConfigurable(TypedDict):
     container: ContainerRunPort
     docker_tool: BaseTool
     result_dao: ResultDAO
-    input_cache: InputCacheDAO
+    # Optional: absent in lightweight contexts (run_subgraph script, tests).
+    # Consumers guard with svc.get("input_cache").
+    input_cache: NotRequired[InputCacheDAO]
 
 
 def get_services(config: RunnableConfig) -> PipelineConfigurable:
