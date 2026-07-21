@@ -26,6 +26,8 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         manifest_files=state.get("manifest_files") or [],
         detected_package_manager=pm,
         docker_image=state.get("docker_image") or "node:lts-alpine",
+        repo_url=state.get("repo_url", ""),
+        commit_sha=state.get("commit_sha") or "",
         dependency_graph=build_dependency_graph(state.get("repo_path", ""), pm),
         discovery_summary=state.get("project_context") or "",
         vector_store_id=state.get("vector_store_id") or "",

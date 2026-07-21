@@ -211,3 +211,24 @@ def test_report_finding_accepts_transitive_attribution():
     )
     assert f.is_direct is False
     assert f.direct_dependents == ["express", "webpack"]
+
+
+def test_prep_result_commit_sha_and_repo_url_default_empty():
+    r = PrepResult(
+        job_id="j1", repo_path="/tmp/r", project_metadata={}, manifest_files=[],
+        detected_package_manager="npm", dependency_graph={"direct": {}},
+        discovery_summary="s", vector_store_id="vs1",
+    )
+    assert r.commit_sha == ""
+    assert r.repo_url == ""
+
+
+def test_prep_result_accepts_commit_sha_and_repo_url():
+    r = PrepResult(
+        job_id="j1", repo_path="/tmp/r", project_metadata={}, manifest_files=[],
+        detected_package_manager="npm", dependency_graph={"direct": {}},
+        discovery_summary="s", vector_store_id="vs1",
+        commit_sha="deadbeef", repo_url="https://github.com/x/y",
+    )
+    assert r.commit_sha == "deadbeef"
+    assert r.repo_url == "https://github.com/x/y"

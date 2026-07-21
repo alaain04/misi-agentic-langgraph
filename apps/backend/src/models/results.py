@@ -13,6 +13,8 @@ class PrepResult(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     job_id: str
     repo_path: str
+    repo_url: str = ""
+    commit_sha: str = ""
     project_metadata: dict
     manifest_files: list[str]
     detected_package_manager: str
