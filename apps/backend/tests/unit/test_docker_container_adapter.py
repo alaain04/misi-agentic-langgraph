@@ -69,4 +69,8 @@ async def test_run_with_secret_env_never_logged(caplog):
                 secret_env={"GIT_TOKEN": "ghp_SECRETVALUE"},
             )
 
+    # Positive control: a real log record must have been captured — this
+    # test must not be able to pass vacuously by capturing nothing.
+    assert caplog.records
+    assert "GIT_TOKEN" in caplog.text
     assert "ghp_SECRETVALUE" not in caplog.text
