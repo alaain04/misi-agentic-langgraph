@@ -183,4 +183,20 @@ def validate_manifest_entry(entry: dict) -> list[str]:
             f"'assert' block must have exactly one of {_ASSERT_MODES}, "
             f"found {present_modes}"
         ]
+    if present_modes[0] == "superset":
+        spec_errors: list[str] = []
+        for spec in assert_block["superset"]:
+            severity_min = spec.get("severity_min")
+            if severity_min is not None and severity_min not in SEVERITY_ORDER:
+                spec_errors.append(
+                    f"{spec.get('dep_name')}: severity_min "
+                    f"'{severity_min}' not in {sorted(SEVERITY_ORDER)}"
+                )
+            category = spec.get("category")
+            if category is not None and category not in _CATEGORY_KEYWORDS:
+                spec_errors.append(
+                    f"{spec.get('dep_name')}: category '{category}' not in "
+                    f"{sorted(_CATEGORY_KEYWORDS)}"
+                )
+        return spec_errors
     return []

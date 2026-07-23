@@ -169,6 +169,12 @@ def test_not_flagged_fail():
 # ---------------------------------------------------------------------------
 
 
+def test_evaluate_unrecognized_assert_mode_fails_loudly():
+    failures = evaluate({"nonsense": True}, _report())
+    assert len(failures) == 1
+    assert "no recognized assert mode" in failures[0]
+
+
 def test_manual_never_gates():
     expectations = {"manual": "verify by hand"}
     assert evaluate(expectations, _report(_f("uuidv4"))) == []
@@ -222,3 +228,29 @@ def test_validate_manifest_entry_multiple_assert_modes():
     errors = validate_manifest_entry(entry)
     assert len(errors) == 1
     assert "exactly one" in errors[0]
+
+
+def test_validate_manifest_entry_rejects_unknown_severity_min():
+    entry = {
+        "name": "x",
+        "repo_url": "y",
+        "concern": "z",
+        "assert": {"superset": [{"dep_name": "lodash", "severity_min": "hihg"}]},
+    }
+    errors = validate_manifest_entry(entry)
+    assert len(errors) == 1
+    assert "severity_min" in errors[0]
+    assert "hihg" in errors[0]
+
+
+def test_validate_manifest_entry_rejects_unknown_category():
+    entry = {
+        "name": "x",
+        "repo_url": "y",
+        "concern": "z",
+        "assert": {"superset": [{"dep_name": "lodash", "category": "vuln"}]},
+    }
+    errors = validate_manifest_entry(entry)
+    assert len(errors) == 1
+    assert "category" in errors[0]
+    assert "vuln" in errors[0]
