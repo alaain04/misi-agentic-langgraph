@@ -93,3 +93,17 @@ def test_job_dao_implements_get_dep_tree():
     assert "get_dep_tree" in {
         m for m in dir(JobRepositoryPort) if not m.startswith("_")
     }
+
+
+def test_job_metadata_used_pat_defaults_false():
+    job = Job(metadata=JobMetadata(repo_url=_REPO_URL, concern="security"))
+    assert job.metadata.used_pat is False
+
+
+def test_job_metadata_stores_used_pat():
+    job = Job(
+        metadata=JobMetadata(repo_url=_REPO_URL, concern="security", used_pat=True)
+    )
+    assert job.metadata.used_pat is True
+    doc = job.to_doc()
+    assert doc["metadata"]["used_pat"] is True

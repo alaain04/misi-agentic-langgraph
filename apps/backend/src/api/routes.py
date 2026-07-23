@@ -29,6 +29,7 @@ async def analyze(
             repo_url=request.repo_url,
             concern=request.concern,
             autopilot=request.autopilot,
+            used_pat=bool(request.github_token),
         )
     )
     await dao.create(job)
@@ -39,6 +40,7 @@ async def analyze(
             concern=job.metadata.concern,
             autopilot=request.autopilot,
             dao=dao,
+            github_token=request.github_token,
         )
     )
     return {"trace_id": job.id, "status": job.status}
