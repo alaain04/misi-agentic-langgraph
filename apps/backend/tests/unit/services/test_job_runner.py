@@ -63,3 +63,56 @@ async def test_run_analysis_records_cost_per_subgraph():
     dao.update_artifact_data.assert_any_call("job-2", "prep", {"cost": 0.01})
     dao.update_artifact_data.assert_any_call("job-2", "analysis", {"cost": 0.02})
     dao.update_artifact_data.assert_any_call("job-2", "report", {"cost": 0.04})
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_threads_github_token_into_configurable():
+    dao = _make_dao()
+    captured: dict = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["config"] = args[1]
+        yield {"prep": {}}
+
+    with (
+        patch("src.services.job_runner.main_graph") as mock_graph,
+        patch("src.services.job_runner.clear_cache"),
+        patch("src.services.job_runner.get_result_dao"),
+        patch("src.services.job_runner.get_input_cache"),
+    ):
+        mock_graph.astream = fake_stream
+        mock_graph.aget_state = AsyncMock(return_value=MagicMock(values={}))
+        await run_analysis(
+            "job-5",
+            "https://github.com/x/y",
+            "security",
+            autopilot=False,
+            dao=dao,
+            github_token="ghp_abc123",
+        )
+
+    assert captured["config"]["configurable"]["github_token"] == "ghp_abc123"
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_omits_github_token_when_not_provided():
+    dao = _make_dao()
+    captured: dict = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["config"] = args[1]
+        yield {"prep": {}}
+
+    with (
+        patch("src.services.job_runner.main_graph") as mock_graph,
+        patch("src.services.job_runner.clear_cache"),
+        patch("src.services.job_runner.get_result_dao"),
+        patch("src.services.job_runner.get_input_cache"),
+    ):
+        mock_graph.astream = fake_stream
+        mock_graph.aget_state = AsyncMock(return_value=MagicMock(values={}))
+        await run_analysis(
+            "job-6", "https://github.com/x/y", "security", autopilot=False, dao=dao
+        )
+
+    assert "github_token" not in captured["config"]["configurable"]

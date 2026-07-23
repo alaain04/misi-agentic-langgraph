@@ -22,6 +22,11 @@ class PipelineConfigurable(TypedDict):
     # Optional: absent in lightweight contexts (run_subgraph script, tests).
     # Consumers guard with svc.get("input_cache").
     input_cache: NotRequired[InputCacheDAO]
+    # Optional: per-request PAT for private-repo clone (Workstream D1).
+    # Never persisted — threaded from the /analyze request body only, and
+    # absent from graph state entirely. Consumers guard with
+    # svc.get("github_token").
+    github_token: NotRequired[str]
 
 
 def get_services(config: RunnableConfig) -> PipelineConfigurable:
