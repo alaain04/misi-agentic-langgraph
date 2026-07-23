@@ -307,3 +307,67 @@ async def test_clone_repo_sha_empty_when_rev_parse_fails(tmp_path):
     # clone succeeded, so no discovery_error; sha just unavailable
     assert result.get("commit_sha") == ""
     assert "discovery_error" not in result
+
+
+@pytest.mark.asyncio
+async def test_clone_repo_uses_token_when_configured(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (0, "", "")
+    config = {
+        "configurable": {
+            "container": container,
+            "github_token": "ghp_secret123",
+        }
+    }
+
+    with patch("src.main_graph.subgraphs.discovery.nodes.clone_repo.os.makedirs"):
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.clone_repo.os.path.abspath",
+            return_value=str(tmp_path),
+        ):
+            await clone_repo(_BASE_STATE, config)
+
+    clone_call = container.run.call_args_list[0]
+    assert "$GIT_TOKEN" in clone_call.kwargs["command"]
+    assert "ghp_secret123" not in clone_call.kwargs["command"]
+    assert clone_call.kwargs["secret_env"] == {"GIT_TOKEN": "ghp_secret123"}
+
+
+@pytest.mark.asyncio
+async def test_clone_repo_without_token_matches_existing_behavior(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (0, "", "")
+
+    with patch("src.main_graph.subgraphs.discovery.nodes.clone_repo.os.makedirs"):
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.clone_repo.os.path.abspath",
+            return_value=str(tmp_path),
+        ):
+            result = await clone_repo(_BASE_STATE, _config(container=container))
+
+    clone_call = container.run.call_args_list[0]
+    assert "$GIT_TOKEN" not in clone_call.kwargs["command"]
+    assert clone_call.kwargs.get("secret_env") is None
+    assert result["repo_path"] == str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_clone_repo_rev_parse_call_has_no_secret_env(tmp_path):
+    container = AsyncMock()
+    container.run.return_value = (0, "abc123\n", "")
+    config = {
+        "configurable": {
+            "container": container,
+            "github_token": "ghp_secret123",
+        }
+    }
+
+    with patch("src.main_graph.subgraphs.discovery.nodes.clone_repo.os.makedirs"):
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.clone_repo.os.path.abspath",
+            return_value=str(tmp_path),
+        ):
+            await clone_repo(_BASE_STATE, config)
+
+    rev_parse_call = container.run.call_args_list[1]
+    assert rev_parse_call.kwargs.get("secret_env") is None
