@@ -1,0 +1,78 @@
+# E2E fixture corpus (Reliability B). Ground-truth expectations for 8
+# purpose-built, private GitHub repos — see docs/e2e-test-catalog.md Group 8
+# for what each repo contains and why, and scripts/provision_fixtures.py for
+# how each was built. This file records ONLY where a fixture lives and what
+# it must prove; nothing about how it was built is tracked here — the repo
+# itself is the source of truth for its own content.
+#
+# All repos are PRIVATE. clone_repo has no auth support today (Workstream
+# D1), so scripts/corpus_check.py SKIPs every entry until D1 lands — set
+# CORPUS_PAT_AVAILABLE=1 (or --assert-live) once it does.
+github_owner: alaain04
+
+repos:
+  - name: misi-e2e-validation-cve-direct
+    repo_url: https://github.com/alaain04/misi-e2e-validation-cve-direct
+    concern: "known security vulnerabilities in direct dependencies"
+    assert:
+      superset:
+        - dep_name: lodash
+          is_direct: true
+          severity_min: high
+          category: vulnerability
+
+  - name: misi-e2e-validation-cve-transitive
+    repo_url: https://github.com/alaain04/misi-e2e-validation-cve-transitive
+    concern: "known security vulnerabilities anywhere in the dependency tree"
+    assert:
+      superset:
+        - dep_name: minimist
+          is_direct: false
+          direct_dependents_contains: [mkdirp]
+          severity_min: medium
+          category: vulnerability
+
+  - name: misi-e2e-validation-gpl-license
+    repo_url: https://github.com/alaain04/misi-e2e-validation-gpl-license
+    concern: "license compliance risk in dependencies"
+    assert:
+      superset:
+        - dep_name: ffmpeg-static
+          category: license
+
+  - name: misi-e2e-validation-unmaintained
+    repo_url: https://github.com/alaain04/misi-e2e-validation-unmaintained
+    concern: "unmaintained or abandoned dependencies"
+    assert:
+      superset:
+        - dep_name: matcha
+          is_direct: true
+          category: maintenance
+
+  - name: misi-e2e-validation-supply-chain
+    repo_url: https://github.com/alaain04/misi-e2e-validation-supply-chain
+    concern: "supply-chain risk — typosquatting or suspicious packages"
+    assert:
+      manual: "uuidv4 is a real, safe, MIT package within edit-distance 2 of the popular 'uuid' package; verify the typosquat finding by hand"
+
+  - name: misi-e2e-validation-clean
+    repo_url: https://github.com/alaain04/misi-e2e-validation-clean
+    concern: "any dependency risk — vulnerabilities, licensing, maintenance, supply chain"
+    assert:
+      exactly_zero: true
+
+  - name: misi-e2e-validation-transitive-fanout
+    repo_url: https://github.com/alaain04/misi-e2e-validation-transitive-fanout
+    concern: "known security vulnerabilities anywhere in the dependency tree"
+    assert:
+      superset:
+        - dep_name: minimist
+          is_direct: false
+          direct_dependents_min: 2
+          category: vulnerability
+
+  - name: misi-e2e-validation-false-positive-trap
+    repo_url: https://github.com/alaain04/misi-e2e-validation-false-positive-trap
+    concern: "supply-chain risk — typosquatting or suspicious packages"
+    assert:
+      not_flagged: [lodash.merge]

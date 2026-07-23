@@ -238,6 +238,62 @@ Not pass/fail — record and watch for outliers over time.
 
 ---
 
+## Group 8 — Ground-truth fixture corpus (Reliability B)
+
+Groups 1-7 run real third-party repos and judge finding quality by hand —
+there is no ground truth, so a detector that silently finds nothing is
+indistinguishable from a repo that's genuinely clean (see the "coverage gap
+identified" note below — chalk returned 0 license/supply-chain findings with
+no way to tell which it was). This corpus fixes that: 8 purpose-built,
+private GitHub repos, each with one known, pinned issue and a per-repo golden
+expectation, so every detection category has a positive control that must
+fire and (for `-clean`) a negative control that must stay silent.
+
+**Status: BUILT, EXECUTION BLOCKED ON D1.** All 8 repos exist (private,
+`misi-e2e-validation-*` under the `alaain04` account) and
+`tests/e2e/corpus.yaml` records what each must prove. But `clone_repo` does
+100% anonymous `git clone` with zero auth support today, so the backend
+cannot reach any of them — Workstream D1 (PAT-based read for private repos)
+has not landed. `scripts/corpus_check.py` reflects this honestly: every entry
+prints `SKIP (requires PAT — Workstream D1)` and the run exits 0. The moment
+D1 lands, setting `CORPUS_PAT_AVAILABLE=1` flips every entry to actually
+asserting — no code change needed.
+
+Nothing about a fixture's *content* is tracked in this project — the repo
+itself is the durable source of truth once created (see
+`scripts/provision_fixtures.py`, a one-shot build tool, not part of the
+ongoing harness). `corpus.yaml` records only `repo_url` + the ground-truth
+expectation, which cannot be derived by re-reading the remote repo without
+circularity.
+
+| Fixture | Package manager | Key dependency | Assert mode | Ground truth |
+|---|---|---|---|---|
+| `misi-e2e-validation-cve-direct` | npm | `lodash@4.17.11` (CVE-2019-10744) | superset | vuln finding, `is_direct=true`, severity ≥ high |
+| `misi-e2e-validation-cve-transitive` | pnpm | `mkdirp@0.5.1` → `minimist@0.0.8` (CVE-2020-7598) | superset | finding on `minimist`, `is_direct=false`, `direct_dependents` contains `mkdirp` |
+| `misi-e2e-validation-gpl-license` | yarn | `ffmpeg-static@5.3.0` (license: `GPL-3.0-or-later`, exact SPDX match, 1.45M weekly downloads) | superset | finding with license-category text (copyleft contagion rule C3) |
+| `misi-e2e-validation-unmaintained` | npm | `matcha@0.7.0` (empirically confirmed flaggable — same package the maintenance agent surfaced on chalk's tree, see 1.1/1.2) | superset | finding on `matcha`, `is_direct=true`, maintenance-category text |
+| `misi-e2e-validation-supply-chain` | npm | `uuidv4` (edit-distance 2 from popular `uuid`; real, MIT, safe to install) | **manual** | typosquat finding on `uuidv4`, reported not gated — real-package confidence, not build-time-verifiable the way an SPDX string is |
+| `misi-e2e-validation-clean` | yarn | `date-fns@^3.6.0`, `nanoid@^5.0.0` | exactly_zero | zero findings |
+| `misi-e2e-validation-transitive-fanout` | npm, **no committed lockfile** | `mkdirp@0.5.1` + `optimist@0.6.1` → shared `minimist` | superset | `direct_dependents` on `minimist` has ≥2 entries; also exercises the no-lockfile `install_deps` fallback and the A3 cache-bypass gate (`lockfile_generated=True`) |
+| `misi-e2e-validation-false-positive-trap` | pnpm | `lodash.merge` (edit-distance 6 from `lodash` — correctly not flagged despite looking lodash-adjacent) | not_flagged | `lodash.merge` absent from findings |
+
+PM coverage — npm ×3, pnpm ×2, yarn ×2, no-lockfile ×1 — closes the "not yet
+run" gaps in Group 2.3/2.4 with known-good ground truth instead of an
+unverified real repo. (Group 2.5/2.6, Yarn Berry and workspaces, remain
+open/optional — deliberately not added here: real installs showed Yarn
+Berry's default PnP mode adds install-flow risk this corpus doesn't need for
+one extra lockfile-parser variant.)
+
+**How to run once D1 lands:**
+```bash
+cd apps/backend
+uv run python scripts/provision_fixtures.py       # one-shot, only if repos don't exist yet
+CORPUS_PAT_AVAILABLE=1 uv run python scripts/corpus_check.py --manifest tests/e2e/corpus.yaml
+# exits non-zero on any FAIL; SKIP/MANUAL never fail the run
+```
+
+---
+
 ## Execution log
 
 Append one row per actual run, regardless of which table above it belongs to.
@@ -273,3 +329,9 @@ Neither test exercises the direct-anchoring behavior for `license_agent` or
 transitive dependency (for 1.3) or a deliberately-planted/known
 typosquat-adjacent case (for 1.4) to close this gap — not yet identified;
 add as a follow-up rather than block on finding one now.
+
+**Closed by Group 8:** `misi-e2e-validation-gpl-license` (a known,
+confirmed-single-SPDX GPL dependency) and `misi-e2e-validation-supply-chain`
+(a real package that deterministically trips `typosquat_detection`) are
+exactly the repos this note called for — see Group 8 for details. Execution
+is blocked on Workstream D1 (private-repo auth) until then.
