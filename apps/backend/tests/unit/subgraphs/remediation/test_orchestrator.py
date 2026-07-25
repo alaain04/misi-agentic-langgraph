@@ -191,3 +191,80 @@ async def test_cross_bump_regression_reverts_earlier_green_status():
     by_dep = {r.target_dep: r for r in out}
     assert by_dep["a"].status == "failed"
     assert by_dep["b"].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_skip_reverts_previously_applied_bump():
+    """A dep bumped then later skipped must have its package.json edit
+    reverted immediately, before subsequent verify() calls run over a
+    working copy still carrying the stale, discarded edit."""
+    calls = []
+
+    def spy_apply_bump(work_dir, dep, rng):
+        calls.append((work_dir, dep, rng))
+        return True
+
+    async def verify(targeted):
+        return GREEN
+
+    async def diff():
+        return "PATCH"
+
+    decide = _scripted_decider(
+        [
+            RemediationDecision(action="bump", target_dep="b", to_range="^2.0.0"),
+            RemediationDecision(
+                action="skip", target_dep="b", skip_reason="needs major (Tier 2)"
+            ),
+            RemediationDecision(action="finalize"),
+        ]
+    )
+    out = await run_remediation(
+        [_target("b")], "/w", {}, spy_apply_bump, verify, diff, decide=decide
+    )
+    r = out[0]
+    assert r.status == "skipped"
+    assert calls == [
+        ("/w", "b", "^2.0.0"),
+        ("/w", "b", "^1.0.0"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_failed_dep_reverted_before_patch():
+    """A dep that never resolves (bounded-iterations exhaustion, ending
+    "failed") must have its bump reverted before the final diff() runs,
+    so its leftover edit doesn't leak into another dep's "fixed" patch."""
+    calls = []
+
+    def spy_apply_bump(work_dir, dep, rng):
+        calls.append((work_dir, dep, rng))
+        return True
+
+    async def verify(targeted):
+        return REDTEST  # never green
+
+    async def diff():
+        return "PATCH"
+
+    async def always_bump(_prompt):
+        return RemediationDecision(
+            action="bump", target_dep="lodash", to_range="^4.17.21"
+        )
+
+    out = await run_remediation(
+        [_target("lodash")],
+        "/w",
+        {},
+        spy_apply_bump,
+        verify,
+        diff,
+        decide=always_bump,
+        max_iterations=3,
+    )
+    r = out[0]
+    assert r.status == "failed"
+    lodash_calls = [c for c in calls if c[1] == "lodash"]
+    assert ("/w", "lodash", "^4.17.21") in lodash_calls
+    assert ("/w", "lodash", "^1.0.0") in lodash_calls
+    assert len(lodash_calls) >= 2

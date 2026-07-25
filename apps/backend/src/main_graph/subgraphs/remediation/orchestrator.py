@@ -129,6 +129,9 @@ async def run_remediation(
 
         if decision.action == "skip":
             skip_reason = decision.skip_reason or "no fix"
+            from_range = rem[dep].from_range
+            if dep in applied and from_range is not None:
+                apply_bump(work_dir, dep, from_range)
             rem[dep].status = "skipped"
             rem[dep].skip_reason = skip_reason
             rem[dep].strategy = _infer_strategy(skip_reason)
@@ -170,6 +173,11 @@ async def run_remediation(
         )
         for d in applied:
             rem[d].status = final_status
+        if final_status == "failed":
+            for d in applied:
+                from_range = rem[d].from_range
+                if from_range is not None:
+                    apply_bump(work_dir, d, from_range)
 
     patch = await diff() if any(r.status == "fixed" for r in rem.values()) else ""
     for r in rem.values():
