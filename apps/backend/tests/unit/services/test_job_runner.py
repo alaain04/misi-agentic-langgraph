@@ -127,13 +127,21 @@ def _noop_cb():
 def test_build_config_sets_remediate_and_git_pr():
     from src.services.job_runner import _build_config
 
-    cfg = _build_config("j1", dao=_make_dao(), cost_cb=_noop_cb(), remediate=True)
-    assert cfg["configurable"]["remediate"] is True
-    assert cfg["configurable"]["git_pr"] is not None
+    with (
+        patch("src.services.job_runner.get_result_dao"),
+        patch("src.services.job_runner.get_input_cache"),
+    ):
+        cfg = _build_config("j1", dao=_make_dao(), cost_cb=_noop_cb(), remediate=True)
+        assert cfg["configurable"]["remediate"] is True
+        assert cfg["configurable"]["git_pr"] is not None
 
 
 def test_build_config_remediate_defaults_false():
     from src.services.job_runner import _build_config
 
-    cfg = _build_config("j1", dao=_make_dao(), cost_cb=_noop_cb())
-    assert cfg["configurable"]["remediate"] is False
+    with (
+        patch("src.services.job_runner.get_result_dao"),
+        patch("src.services.job_runner.get_input_cache"),
+    ):
+        cfg = _build_config("j1", dao=_make_dao(), cost_cb=_noop_cb())
+        assert cfg["configurable"]["remediate"] is False
