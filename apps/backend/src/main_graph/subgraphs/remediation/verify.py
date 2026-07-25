@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _PLACEHOLDER_TEST = 'echo "Error: no test specified" && exit 1'
 
 
-def _scripts(work_dir: str) -> dict:
+def _scripts(work_dir: str) -> dict[str, str]:
     try:
         with open(os.path.join(work_dir, "package.json")) as f:
             return json.load(f).get("scripts") or {}

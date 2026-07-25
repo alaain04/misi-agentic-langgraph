@@ -11,7 +11,9 @@ class FakeContainer:
         self._results = list(results)
         self.commands = []
 
-    async def run(self, image, command, volume=None, run_as_root=False, secret_env=None):
+    async def run(
+        self, image, command, volume=None, run_as_root=False, secret_env=None
+    ):
         self.commands.append(command)
         return self._results.pop(0)
 
@@ -44,23 +46,32 @@ async def test_install_failure_short_circuits(work_dir):
 
 @pytest.mark.asyncio
 async def test_no_build_no_test_scripts(tmp_path):
-    (tmp_path / "package.json").write_text(json.dumps(
-        {"name": "x", "dependencies": {"lodash": "^4.17.21"}}))
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "x", "dependencies": {"lodash": "^4.17.21"}})
+    )
     audit = json.dumps({"vulnerabilities": {}})
     c = FakeContainer([(0, "", ""), (0, audit, "")])  # install, audit only
-    v = await verify_working_copy(str(tmp_path), c, "node:lts-alpine", "npm", ["lodash"])
+    v = await verify_working_copy(
+        str(tmp_path), c, "node:lts-alpine", "npm", ["lodash"]
+    )
     assert v.installed and v.built is None and v.tested is None
     assert v.finding_resolved is True
 
 
 @pytest.mark.asyncio
 async def test_placeholder_test_script_is_skipped(tmp_path):
-    (tmp_path / "package.json").write_text(json.dumps(
-        {"name": "x", "scripts": {"test": 'echo "Error: no test specified" && exit 1'},
-         "dependencies": {"lodash": "^4.17.21"}}))
+    (tmp_path / "package.json").write_text(
+        json.dumps({
+            "name": "x",
+            "scripts": {"test": 'echo "Error: no test specified" && exit 1'},
+            "dependencies": {"lodash": "^4.17.21"},
+        })
+    )
     audit = json.dumps({"vulnerabilities": {}})
     c = FakeContainer([(0, "", ""), (0, audit, "")])
-    v = await verify_working_copy(str(tmp_path), c, "node:lts-alpine", "npm", ["lodash"])
+    v = await verify_working_copy(
+        str(tmp_path), c, "node:lts-alpine", "npm", ["lodash"]
+    )
     assert v.tested is None
 
 
