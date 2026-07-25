@@ -916,14 +916,17 @@ git commit -m "feat(remediation): GitPullRequestPort + gh CLI adapter"
 
 **Loop (binding):**
 - Maintain `remediations: dict[str, Remediation]` keyed by `target_dep`, initialized one per target with `status="skipped"`, `skip_reason="not attempted"`, `addresses` from the target.
-- `applied_deps: set[str]` — deps currently applied to the working copy.
+- `applied: set[str]` — deps currently applied to the working copy. `verified_for: set[str] | None` — the `applied` snapshot the most recent `verify()` call corresponds to (used to avoid a redundant re-verify when nothing changed).
 - For up to `max_iterations`:
-  - Build the decision prompt (targets, current per-target status, `applied_deps`, last verification summary, `evidence`).
+  - Build the decision prompt (targets, current per-target status, `applied`, last verification summary, `evidence`).
   - `decision = await decide(prompt)`.
   - `action == "finalize"` → break.
-  - `action == "skip"` → set that target `status="skipped"`, `skip_reason=decision.skip_reason or "no fix"`, `strategy` inferred: `"replace"` if reason mentions "package"/"replace", `"bump_with_codemod"` if reason mentions "major"/"migration", else `"bump"`. Continue.
-  - `action == "bump"` → `apply_bump(work_dir, target_dep, to_range)`; if False → mark that target `failed` ("dep not declared"); else set from/to ranges, `attempts += 1`, `applied_deps.add(target_dep)`, then `v = await verify(sorted(applied_deps ∪ addresses of applied targets))`. Store `v` on the target. If `v` is green (installed and built is not False and tested is not False and finding_resolved is not False) → mark ALL currently-applied targets `status="fixed"`; else feed the failure back (loop continues) — the NEXT decision may adjust/skip; leave statuses as-is but keep `applied_deps` (the orchestrator decides whether to re-bump or skip).
-- After the loop: for every target still not `fixed`, if it was applied but never verified green, set `status="failed"`. Compute `patch` for each `fixed` target from `await diff()` (v1: attach the full working-copy diff to each fixed remediation — a per-dep split is a later refinement; document this).
+  - `action == "skip"` → set that target `status="skipped"`, `skip_reason=decision.skip_reason or "no fix"`, `strategy` inferred: `"replace"` if reason mentions "package"/"replace", `"bump_with_codemod"` if reason mentions "major"/"migration", else `"bump"`. `applied.discard(target_dep)`. Continue.
+  - `action == "bump"` → `apply_bump(work_dir, target_dep, to_range)`; if False → mark that target `failed` ("dep not declared"), do not add to `applied`; else set `strategy="bump"`, from/to ranges, `attempts += 1`, `applied.add(target_dep)`, then `v = await verify(targeted_for(applied))` (targeted = `applied` ∪ every applied target's `addresses`), store `v` on every currently-applied target's `.verification`, set `verified_for = set(applied)`. **Status is NOT set here** — see below.
+- **Status is decided exactly once, after the loop, from the FINAL applied set — never incrementally inside the loop.** This is the invariant: whatever ships verifies TOGETHER. A target that verified green in isolation earlier must not ship as `"fixed"` if a *later* bump of a different target regressed the joint copy — the last word belongs to the last verification of the full set, not to any earlier per-iteration snapshot.
+  - If `applied` is non-empty and `verified_for != applied` (something changed since the last verify — e.g. a `skip` removed a dep after the last bump), run one more `verify(targeted_for(applied))` first.
+  - If `applied` is non-empty: `status = "fixed"` for every dep in `applied` if the (now current) `last_v` is green, else `"failed"` for every dep in `applied`. Deps never in `applied` keep whatever `"skipped"`/`"failed"` status the loop already gave them (undeclared-dep failures, explicit skips, or the untouched `"not attempted"` default).
+  - Compute `patch` from `await diff()` and attach it to every `"fixed"` remediation (v1: the full working-copy diff, not per-dep — a per-dep split is a later refinement; document this).
 - "Green" helper: `installed and built is not False and tested is not False and finding_resolved is not False`.
 
 The default `decide` (when None) builds a `RemediationDecision` via `get_llm(Model.GPT_5_4_MINI).with_structured_output(RemediationDecision, method="function_calling")` — tests always inject `decide`.
@@ -1053,6 +1056,33 @@ async def test_bounded_iterations_marks_unresolved_failed():
     out = await run_remediation([_target("lodash")], "/w", {}, _apply_ok, verify, diff,
                                 decide=always_bump, max_iterations=3)
     assert out[0].status == "failed" and out[0].attempts >= 1
+
+
+@pytest.mark.asyncio
+async def test_cross_bump_regression_reverts_earlier_green_status():
+    """B's bump breaks the joint copy after A alone had verified green.
+
+    The invariant is that whatever ships verifies TOGETHER — an earlier
+    per-target green result must not survive a later regression. Both must
+    end up "failed" since the FINAL joint verification (a+b) never went
+    green, even though a-alone did at one point.
+    """
+    async def verify(targeted):
+        return GREEN if "b" not in targeted else REDTEST
+
+    async def diff():
+        return "PATCH"
+
+    decide = _scripted_decider([
+        RemediationDecision(action="bump", target_dep="a", to_range="^2.0.0"),
+        RemediationDecision(action="bump", target_dep="b", to_range="^3.0.0"),
+        RemediationDecision(action="finalize"),
+    ])
+    targets = [_target("a"), _target("b")]
+    out = await run_remediation(targets, "/w", {}, _apply_ok, verify, diff, decide=decide)
+    by_dep = {r.target_dep: r for r in out}
+    assert by_dep["a"].status == "failed"
+    assert by_dep["b"].status == "failed"
 ```
 
 - [ ] **Step 2: Run, verify fail**
@@ -1162,6 +1192,10 @@ async def run_remediation(
     by_dep = {t.target_dep: t for t in targets}
     applied: set[str] = set()
     last_v: VerificationResult | None = None
+    verified_for: set[str] | None = None  # the `applied` snapshot last_v corresponds to
+
+    def _targeted_for(deps: set[str]) -> list[str]:
+        return sorted(deps | {a for d in deps for a in by_dep[d].addresses})
 
     for _ in range(max_iterations):
         prompt = _SYSTEM.format(
@@ -1196,23 +1230,32 @@ async def run_remediation(
         rem[dep].attempts += 1
         applied.add(dep)
 
-        targeted = sorted(
-            {d for d in applied}
-            | {a for d in applied for a in by_dep[d].addresses}
-        )
-        last_v = await verify(targeted)
+        last_v = await verify(_targeted_for(applied))
+        verified_for = set(applied)
         for d in applied:
             rem[d].verification = last_v
 
-        if _is_green(last_v):
-            for d in applied:
-                rem[d].status = "fixed"
+    # Status is decided ONCE here, from a verification of the FINAL applied
+    # set — never incrementally inside the loop. A dep bumped early and
+    # verified green must NOT ship as "fixed" if a later bump (of a
+    # different target) regressed the joint working copy: the invariant is
+    # that whatever lands in the PR verifies TOGETHER, not that each dep
+    # individually verified at some point in its history. If nothing
+    # changed `applied` since the last verify() call, reuse it instead of
+    # re-running verification for free.
+    if applied and verified_for != applied:
+        last_v = await verify(_targeted_for(applied))
+        verified_for = set(applied)
+        for d in applied:
+            rem[d].verification = last_v
 
-    # finalize statuses + patches
+    if applied:
+        final_status = "fixed" if (last_v is not None and _is_green(last_v)) else "failed"
+        for d in applied:
+            rem[d].status = final_status
+
     patch = await diff() if any(r.status == "fixed" for r in rem.values()) else ""
-    for d, r in rem.items():
-        if d in applied and r.status != "fixed":
-            r.status = "failed"
+    for r in rem.values():
         if r.status == "fixed":
             r.patch = patch
     return list(rem.values())
@@ -1221,7 +1264,7 @@ async def run_remediation(
 - [ ] **Step 4: Run, verify pass**
 
 Run: `cd apps/backend && uv run pytest tests/unit/subgraphs/remediation/test_orchestrator.py -q`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
