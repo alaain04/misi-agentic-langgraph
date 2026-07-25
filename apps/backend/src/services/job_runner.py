@@ -20,17 +20,25 @@ from src.utils.cost import CostCallback
 logger = logging.getLogger(__name__)
 
 
-def _build_config(job_id: str, dao: JobRepositoryPort, cost_cb: CostCallback) -> dict:
+def _build_config(
+    job_id: str,
+    dao: JobRepositoryPort,
+    cost_cb: CostCallback,
+    github_token: str | None = None,
+) -> dict:
     container = DockerContainerAdapter()
+    configurable = {
+        "thread_id": job_id,
+        "job_repo": dao,
+        "container": container,
+        "docker_tool": make_docker_tool(container),
+        "result_dao": get_result_dao(),
+        "input_cache": get_input_cache(),
+    }
+    if github_token:
+        configurable["github_token"] = github_token
     return {
-        "configurable": {
-            "thread_id": job_id,
-            "job_repo": dao,
-            "container": container,
-            "docker_tool": make_docker_tool(container),
-            "result_dao": get_result_dao(),
-            "input_cache": get_input_cache(),
-        },
+        "configurable": configurable,
         "callbacks": [cost_cb],
     }
 
@@ -108,11 +116,12 @@ async def run_analysis(
     concern: str,
     autopilot: bool,
     dao: JobRepositoryPort,
+    github_token: str | None = None,
 ) -> None:
     await dao.update_status(job_id, JobStatus.running)
     await dao.start_artifact(job_id, PREP)
     cost_cb = CostCallback()
-    config = _build_config(job_id, dao, cost_cb)
+    config = _build_config(job_id, dao, cost_cb, github_token=github_token)
     clear_cache()
 
     try:

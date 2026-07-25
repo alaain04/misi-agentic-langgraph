@@ -14,21 +14,43 @@ logger = logging.getLogger(__name__)
 _GIT_IMAGE = "alpine/git"
 
 
+def _clone_command(
+    repo_url: str, github_token: str | None
+) -> tuple[str, dict[str, str] | None]:
+    """Build the clone command. When a token is present, auth is injected via
+    a process-scoped `git -c http.extraHeader` override (never written to
+    the cloned repo's own .git/config) referencing $GIT_TOKEN — the actual
+    value is delivered to the shell only via the container's environment
+    (see ContainerRunPort.run's secret_env), never as a literal here.
+    """
+    if github_token:
+        command = (
+            'git -c http.extraHeader="AUTHORIZATION: basic '
+            "$(printf 'x-access-token:%s' \"$GIT_TOKEN\" | base64)\" "
+            f"clone --depth=1 --single-branch {repo_url} /workspace"
+        )
+        return command, {"GIT_TOKEN": github_token}
+    return f"git clone --depth=1 --single-branch {repo_url} /workspace", None
+
+
 async def clone_repo(state: DiscoveryState, config: RunnableConfig) -> dict:
     """Shallow-clone the repository. Sets repo_path; sets discovery_error on failure."""
     svc = get_services(config)
     container: ContainerRunPort = svc["container"]
+    github_token = svc.get("github_token")
 
     job_id = state["job_id"]
     repo_url = state["repo_url"]
     tmp_dir = os.path.abspath(f"tmp/debug_job_{job_id}")
     os.makedirs(tmp_dir, exist_ok=True)
 
+    command, secret_env = _clone_command(repo_url, github_token)
     rc, _out, stderr = await container.run(
         image=_GIT_IMAGE,
-        command=f"git clone --depth=1 --single-branch {repo_url} /workspace",
+        command=command,
         volume=f"{tmp_dir}:/workspace",
         run_as_root=True,
+        secret_env=secret_env,
     )
 
     if rc != 0:

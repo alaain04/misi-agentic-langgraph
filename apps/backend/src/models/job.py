@@ -19,6 +19,9 @@ class JobMetadata(BaseModel):
     repo_url: str
     concern: str
     autopilot: bool = False
+    # Audit signal only — never the token itself. Set from
+    # bool(request.github_token) in the /analyze route handler.
+    used_pat: bool = False
 
 
 class Job(BaseModel):

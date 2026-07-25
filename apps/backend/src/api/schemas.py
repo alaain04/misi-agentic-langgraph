@@ -9,6 +9,9 @@ class AnalysisRequest(BaseModel):
     repo_url: str
     concern: str
     autopilot: bool = False
+    # Per-request PAT for private-repo clone (Workstream D1). Used for this
+    # job only; never persisted to JobMetadata or any other stored document.
+    github_token: str | None = None
 
 
 class AnalysisStatusResponse(BaseModel):

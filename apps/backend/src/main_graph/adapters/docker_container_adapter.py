@@ -16,19 +16,25 @@ class DockerContainerAdapter(ContainerRunPort):
         command: str,
         volume: str | None = None,
         run_as_root: bool = False,
+        secret_env: dict[str, str] | None = None,
     ) -> tuple[int, str, str]:
         cmd = ["docker", "run", "--rm"]
         if volume:
             cmd += ["-v", volume]
         if not run_as_root:
             cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        if secret_env:
+            for key in secret_env:
+                cmd += ["-e", key]
         cmd += ["--entrypoint", "sh", image, "-c", command]
         logger.info("docker: %s", " ".join(cmd))
 
+        subprocess_env = {**os.environ, **secret_env} if secret_env else None
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=subprocess_env,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
