@@ -11,7 +11,7 @@ from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph import main_graph
 from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
 from src.main_graph.adapters.gh_cli_adapter import GhCliAdapter
-from src.main_graph.constants import ANALYSIS, PREP, REPORT
+from src.main_graph.constants import ANALYSIS, PREP, REMEDIATION, REPORT
 from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
 from src.main_graph.tools.external_api import clear_cache
 from src.models.job import JobStatus
@@ -60,7 +60,7 @@ async def _stream_graph(
         for node_name, node_update in chunk.items():
             logger.info("job=%s node=%s completed", job_id, node_name)
 
-            if node_name in (PREP, ANALYSIS, REPORT):
+            if node_name in (PREP, ANALYSIS, REMEDIATION, REPORT):
                 cost_now = cost_cb.cost()
                 await dao.update_artifact_data(
                     job_id, node_name, {"cost": round(cost_now - prev_cost, 6)}
@@ -76,7 +76,18 @@ async def _stream_graph(
             elif node_name == ANALYSIS:
                 await dao.complete_artifact(job_id, ANALYSIS, "done")
                 if node_update.get("analysis_result_id"):
-                    await dao.start_artifact(job_id, REPORT)
+                    await dao.start_artifact(job_id, REMEDIATION)
+
+            elif node_name == REMEDIATION:
+                await dao.complete_artifact(job_id, REMEDIATION, "done")
+                rem_id = node_update.get("remediation_result_id")
+                if rem_id:
+                    result_dao = get_result_dao()
+                    rem = await result_dao.get_remediation(rem_id)
+                    await dao.update_artifact_data(
+                        job_id, REMEDIATION, {"output": rem.model_dump()}
+                    )
+                await dao.start_artifact(job_id, REPORT)
 
             elif node_name == REPORT:
                 report_result_id = node_update.get("report_result_id")
@@ -110,8 +121,10 @@ async def _finalize(dao: JobRepositoryPort, job_id: str, config: dict) -> None:
             job_id, error=values.get("discovery_error", "prep failed")
         )
     else:
-        report_result_id = values.get("report_result_id", "")
-        await dao.save_result(job_id, {"report_result_id": report_result_id})
+        await dao.save_result(job_id, {
+            "report_result_id": values.get("report_result_id", ""),
+            "remediation_result_id": values.get("remediation_result_id", ""),
+        })
 
 
 async def run_analysis(

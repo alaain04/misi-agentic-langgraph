@@ -16,6 +16,7 @@ class MainState(TypedDict):
     # Inter-layer result IDs
     prep_result_id: NotRequired[str]
     analysis_result_id: NotRequired[str]
+    remediation_result_id: NotRequired[str]
     report_result_id: NotRequired[str]
 
     # Control
