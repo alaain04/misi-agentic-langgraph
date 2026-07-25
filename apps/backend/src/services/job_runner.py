@@ -121,10 +121,13 @@ async def _finalize(dao: JobRepositoryPort, job_id: str, config: dict) -> None:
             job_id, error=values.get("discovery_error", "prep failed")
         )
     else:
-        await dao.save_result(job_id, {
-            "report_result_id": values.get("report_result_id", ""),
-            "remediation_result_id": values.get("remediation_result_id", ""),
-        })
+        await dao.save_result(
+            job_id,
+            {
+                "report_result_id": values.get("report_result_id", ""),
+                "remediation_result_id": values.get("remediation_result_id", ""),
+            },
+        )
 
 
 async def run_analysis(
@@ -139,8 +142,9 @@ async def run_analysis(
     await dao.update_status(job_id, JobStatus.running)
     await dao.start_artifact(job_id, PREP)
     cost_cb = CostCallback()
-    config = _build_config(job_id, dao, cost_cb, github_token=github_token,
-                           remediate=remediate)
+    config = _build_config(
+        job_id, dao, cost_cb, github_token=github_token, remediate=remediate
+    )
     clear_cache()
 
     try:

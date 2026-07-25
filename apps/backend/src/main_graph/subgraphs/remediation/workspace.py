@@ -44,8 +44,12 @@ def apply_bump(work_dir: str, target_dep: str, to_range: str) -> bool:
 
 async def working_copy_diff(work_dir: str) -> str:
     proc = await asyncio.create_subprocess_exec(
-        "git", "-C", work_dir, "diff",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        "git",
+        "-C",
+        work_dir,
+        "diff",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     out, _ = await proc.communicate()
     return out.decode(errors="replace")

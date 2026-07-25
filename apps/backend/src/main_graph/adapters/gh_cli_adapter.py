@@ -16,7 +16,8 @@ class GhCliAdapter(GitPullRequestPort):
         )
         out, err = await proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(err.decode(errors="replace").strip() or f"{args[0]} failed")
+            msg = err.decode(errors="replace").strip() or f"{args[0]} failed"
+            raise RuntimeError(msg)
         return out.decode(errors="replace")
 
     async def open_pr(
@@ -25,7 +26,9 @@ class GhCliAdapter(GitPullRequestPort):
         await self._run("git", "checkout", "-b", branch, cwd=work_dir)
         await self._run("git", "add", "-A", cwd=work_dir)
         await self._run(
-            "git", "-c", "user.email=remediation@misi", "-c", "user.name=misi-remediation",
+            "git",
+            "-c", "user.email=remediation@misi",
+            "-c", "user.name=misi-remediation",
             "commit", "-m", title, cwd=work_dir,
         )
         await self._run("git", "push", "-u", "origin", branch, cwd=work_dir)

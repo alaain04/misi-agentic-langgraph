@@ -71,16 +71,23 @@ async def remediate(state: RemediationState, config: RunnableConfig) -> dict:
 
         async def verify(deps):
             return await verify_working_copy(
-                work_dir, container, prep.docker_image,
-                prep.detected_package_manager, deps,
+                work_dir,
+                container,
+                prep.docker_image,
+                prep.detected_package_manager,
+                deps,
             )
 
         async def diff():
             return await working_copy_diff(work_dir)
 
         remediations = await run_remediation(
-            targets, work_dir, {"audit": audit, "outdated": outdated},
-            apply_bump, verify, diff,
+            targets,
+            work_dir,
+            {"audit": audit, "outdated": outdated},
+            apply_bump,
+            verify,
+            diff,
         )
 
         result = RemediationResult(
