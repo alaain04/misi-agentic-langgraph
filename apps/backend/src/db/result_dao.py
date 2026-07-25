@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.db.connection import get_db
+from src.models.remediation import RemediationResult
 from src.models.results import AnalysisResult, EvidenceBundle, PrepResult, ReportResult
 
 
@@ -11,6 +12,7 @@ class ResultDAO:
         self._bundles = db["evidence_bundles"]
         self._analysis = db["analysis_results"]
         self._report = db["report_results"]
+        self._remediation = db["remediation_results"]
 
     async def save_prep(self, result: PrepResult) -> str:
         await self._prep.insert_one(result.model_dump())
@@ -49,3 +51,13 @@ class ResultDAO:
         if doc is None:
             raise LookupError(f"ReportResult not found: {result_id}")
         return ReportResult(**doc)
+
+    async def save_remediation(self, result: RemediationResult) -> str:
+        await self._remediation.insert_one(result.model_dump())
+        return result.id
+
+    async def get_remediation(self, result_id: str) -> RemediationResult:
+        doc = await self._remediation.find_one({"id": result_id}, {"_id": 0})
+        if doc is None:
+            raise LookupError(f"RemediationResult not found: {result_id}")
+        return RemediationResult(**doc)
