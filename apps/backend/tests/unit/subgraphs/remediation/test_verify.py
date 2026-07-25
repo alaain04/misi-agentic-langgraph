@@ -10,11 +10,19 @@ class FakeContainer:
     def __init__(self, results):
         self._results = list(results)
         self.commands = []
+        self.calls = []  # Track all call kwargs
 
     async def run(
         self, image, command, volume=None, run_as_root=False, secret_env=None
     ):
         self.commands.append(command)
+        self.calls.append({
+            "image": image,
+            "command": command,
+            "volume": volume,
+            "run_as_root": run_as_root,
+            "secret_env": secret_env,
+        })
         return self._results.pop(0)
 
 
@@ -89,3 +97,48 @@ async def test_test_failure_marks_tested_false(work_dir):
     c = FakeContainer([(0, "", ""), (0, "", ""), (1, "", "1 failing"), (0, audit, "")])
     v = await verify_working_copy(work_dir, c, "node:lts-alpine", "npm", ["lodash"])
     assert v.built is True and v.tested is False
+
+
+@pytest.mark.asyncio
+async def test_container_call_args_volume_run_as_root_command_prefix(work_dir):
+    """Verify container.run calls have correct volume, run_as_root, command."""
+    audit = json.dumps({"vulnerabilities": {}})
+    c = FakeContainer([(0, "", ""), (0, "", ""), (0, "", ""), (0, audit, "")])
+    v = await verify_working_copy(work_dir, c, "node:lts-alpine", "npm", ["lodash"])
+
+    # All tests pass
+    assert v.installed and v.built and v.tested and v.finding_resolved is True
+
+    # Verify all 4 calls (install, build, test, audit)
+    assert len(c.calls) == 4
+
+    expected_volume = f"{work_dir}:/workspace"
+    for i, call in enumerate(c.calls):
+        # Every call should have correct volume and run_as_root
+        assert call["volume"] == expected_volume, f"Call {i}: volume mismatch"
+        assert call["run_as_root"] is True, (
+            f"Call {i}: run_as_root should be True"
+        )
+        assert call["command"].startswith("cd /workspace && "), (
+            f"Call {i}: command should start with 'cd /workspace && '"
+        )
+
+    # Verify the install command is the first one
+    assert "npm install" in c.calls[0]["command"]
+
+
+@pytest.mark.asyncio
+async def test_unparseable_json_audit_output_returns_finding_resolved_none(work_dir):
+    """Verify unparseable JSON audit output sets finding_resolved to None."""
+    # Install, build, test succeed; audit returns non-JSON stdout
+    invalid_json = "not valid json {{{"
+    c = FakeContainer([(0, "", ""), (0, "", ""), (0, "", ""), (0, invalid_json, "")])
+    v = await verify_working_copy(work_dir, c, "node:lts-alpine", "npm", ["lodash"])
+
+    # Earlier steps should be successful
+    assert v.installed is True
+    assert v.built is True
+    assert v.tested is True
+
+    # finding_resolved should be None due to unparseable JSON
+    assert v.finding_resolved is None
