@@ -41,6 +41,7 @@ async def analyze(
             autopilot=request.autopilot,
             dao=dao,
             github_token=request.github_token,
+            remediate=request.remediate,
         )
     )
     return {"trace_id": job.id, "status": job.status}

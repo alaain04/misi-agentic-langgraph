@@ -12,6 +12,7 @@ class AnalysisRequest(BaseModel):
     # Per-request PAT for private-repo clone (Workstream D1). Used for this
     # job only; never persisted to JobMetadata or any other stored document.
     github_token: str | None = None
+    remediate: bool = False
 
 
 class AnalysisStatusResponse(BaseModel):

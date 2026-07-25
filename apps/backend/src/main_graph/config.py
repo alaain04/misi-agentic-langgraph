@@ -11,6 +11,7 @@ from typing_extensions import TypedDict
 from src.db.input_cache import InputCacheDAO
 from src.db.result_dao import ResultDAO
 from src.domain.ports.container_run_port import ContainerRunPort
+from src.domain.ports.git_pr_port import GitPullRequestPort
 from src.domain.ports.job_repository_port import JobRepositoryPort
 
 
@@ -27,6 +28,9 @@ class PipelineConfigurable(TypedDict):
     # absent from graph state entirely. Consumers guard with
     # svc.get("github_token").
     github_token: NotRequired[str]
+    # Remediation write consent (Workstream C / D3-lite). Absent => no writes.
+    remediate: NotRequired[bool]
+    git_pr: NotRequired[GitPullRequestPort]
 
 
 def get_services(config: RunnableConfig) -> PipelineConfigurable:

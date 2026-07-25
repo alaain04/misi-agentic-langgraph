@@ -10,6 +10,7 @@ from langgraph.types import Command
 from src.domain.ports.job_repository_port import JobRepositoryPort
 from src.main_graph import main_graph
 from src.main_graph.adapters.docker_container_adapter import DockerContainerAdapter
+from src.main_graph.adapters.gh_cli_adapter import GhCliAdapter
 from src.main_graph.constants import ANALYSIS, PREP, REPORT
 from src.main_graph.subgraphs.discovery.tools.docker import make_docker_tool
 from src.main_graph.tools.external_api import clear_cache
@@ -25,6 +26,7 @@ def _build_config(
     dao: JobRepositoryPort,
     cost_cb: CostCallback,
     github_token: str | None = None,
+    remediate: bool = False,
 ) -> dict:
     container = DockerContainerAdapter()
     configurable = {
@@ -34,6 +36,8 @@ def _build_config(
         "docker_tool": make_docker_tool(container),
         "result_dao": get_result_dao(),
         "input_cache": get_input_cache(),
+        "remediate": remediate,
+        "git_pr": GhCliAdapter(),
     }
     if github_token:
         configurable["github_token"] = github_token
@@ -117,11 +121,13 @@ async def run_analysis(
     autopilot: bool,
     dao: JobRepositoryPort,
     github_token: str | None = None,
+    remediate: bool = False,
 ) -> None:
     await dao.update_status(job_id, JobStatus.running)
     await dao.start_artifact(job_id, PREP)
     cost_cb = CostCallback()
-    config = _build_config(job_id, dao, cost_cb, github_token=github_token)
+    config = _build_config(job_id, dao, cost_cb, github_token=github_token,
+                           remediate=remediate)
     clear_cache()
 
     try:
