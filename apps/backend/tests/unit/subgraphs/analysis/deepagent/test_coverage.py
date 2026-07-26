@@ -17,7 +17,10 @@ def test_whole_tree_and_package_scoped_sets_partition_known_agent_types():
 
 def test_all_direct_deps_covered_returns_empty():
     agent_calls = [
-        {"agent_type": "web_research_agent", "packages_to_focus": ["left-pad", "chalk"]},
+        {
+            "agent_type": "web_research_agent",
+            "packages_to_focus": ["left-pad", "chalk"],
+        },
         {"agent_type": "maintenance_agent", "packages_to_focus": ["left-pad"]},
     ]
     missing = compute_missing_direct_deps(agent_calls, ["left-pad", "chalk"])

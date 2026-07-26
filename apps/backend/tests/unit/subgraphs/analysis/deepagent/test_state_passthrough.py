@@ -8,7 +8,8 @@ not assumed."""
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Sequence
+from collections.abc import Sequence
+from typing import Annotated, Any
 
 import pytest
 from deepagents import CompiledSubAgent, create_deep_agent
@@ -28,7 +29,7 @@ class _ScriptedToolCallingChatModel(FakeMessagesListChatModel):
 
     def bind_tools(
         self, tools: Sequence[Any], **kwargs: Any
-    ) -> "_ScriptedToolCallingChatModel":
+    ) -> _ScriptedToolCallingChatModel:
         return self
 
 
@@ -62,7 +63,10 @@ async def test_subagent_state_update_merges_into_root_state():
                 tool_calls=[
                     {
                         "name": "task",
-                        "args": {"description": "run echo", "subagent_type": "echo_agent"},
+                        "args": {
+                            "description": "run echo",
+                            "subagent_type": "echo_agent",
+                        },
                         "id": "call_1",
                     }
                 ],
