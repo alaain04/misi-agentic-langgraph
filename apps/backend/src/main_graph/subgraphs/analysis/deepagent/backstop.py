@@ -72,6 +72,7 @@ async def deterministic_backstop_dispatch(
                 conductor_iteration=0,
                 agent_type=agent_type,
                 domain=dispatch.domain,
+                packages_to_focus=dispatch.packages_to_focus,
                 tools_used=tools_used,
                 react_iterations=react_iterations,
                 started_at=started_at,

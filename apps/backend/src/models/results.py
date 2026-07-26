@@ -63,6 +63,7 @@ class AgentCallRecord(BaseModel):
     conductor_iteration: int
     agent_type: str
     domain: str
+    packages_to_focus: list[str] = Field(default_factory=list)
     tools_used: list[str]
     react_iterations: int
     started_at: str

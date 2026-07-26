@@ -98,6 +98,7 @@ def build_agent_subagent(agent_type: str) -> CompiledSubAgent:
             # (see spec "Out of scope").
             agent_type=agent_type,
             domain=dispatch.domain,
+            packages_to_focus=dispatch.packages_to_focus,
             tools_used=tools_used,
             react_iterations=react_iterations,
             started_at=started_at,
