@@ -127,19 +127,14 @@ Two new invariants this spec adds, driven directly by the design discussion:
   returns, not positionally — this is the exact fix the analysis-subgraph
   swap needed after a real double-counting bug on a second correction round,
   applied proactively here instead of rediscovered. The same swap's *other*
-  real bug — plain, un-annotated state fields crashing when two `task()`
-  calls land in the same superstep — is guarded against the same way here:
-  `targets` (the dep-name-keyed lookup table the wrapper resolves a
-  dispatched target from) is seeded once by `root_deepagent_node` before the
-  agent run starts and never written to again by any tool, but still uses a
-  `_keep_first`-style reducer (`Annotated[dict[str, dict], _keep_first]`),
-  not a bare `dict`, precisely because this design explicitly allows the
-  root to dispatch more than one target per turn (D2) — a bare, un-annotated
-  field is unsafe the moment concurrent writes are structurally possible,
-  regardless of whether today's logic happens to only ever write it once.
-  Unlike D4's disk isolation this is a LangGraph state-channel concern, not a
-  filesystem one, and needs its own fix applied from the start rather than
-  discovered via a production crash.
+  real bug — plain-`str` state fields crashing when two `task()` calls land
+  in the same superstep — is guarded against the same way here: any
+  non-reducer field on `RemediationDeepAgentState` (e.g. `job_id`) uses a
+  `_keep_first`-style reducer (`Annotated[str, _keep_first]`), not a bare
+  `str`, since this design explicitly allows the root to dispatch more than
+  one target per turn (D2), unlike D4's disk isolation this is a LangGraph
+  state-channel concern, not a filesystem one, and needs its own fix applied
+  from the start rather than discovered via a production crash.
 - **D6 — Group verification is the deterministic backstop; a subagent's own
   "looks green" is never authoritative.** After the root agent considers its
   work done (or hits its bound), a deterministic `group_and_verify_gate`
