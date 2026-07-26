@@ -59,6 +59,21 @@ async def test_wrapper_extracts_dispatch_runs_agent_and_saves_bundle():
     fake_dao.get_prep = AsyncMock(return_value=_make_prep())
     fake_dao.save_bundle = AsyncMock(return_value="bundle-123")
 
+    # get_services is synchronous in production (src/main_graph/config.py:
+    # `def get_services(config): return cast(...)`), so it's mocked with a
+    # plain MagicMock, not AsyncMock, and we inspect its call_args below to
+    # prove the real ambient RunnableConfig reached it (regression test: a
+    # prior version of _run hardcoded `{"configurable": {}}` instead of
+    # declaring a `config` parameter, which would silently drop this).
+    mock_get_services = MagicMock(
+        return_value={
+            "result_dao": fake_dao,
+            "container": MagicMock(),
+            "input_cache": None,
+        }
+    )
+    real_config = {"configurable": {"test_marker": "abc123"}}
+
     with (
         patch(
             "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper._extract_dispatch",
@@ -66,11 +81,7 @@ async def test_wrapper_extracts_dispatch_runs_agent_and_saves_bundle():
         ),
         patch(
             "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper.get_services",
-            return_value={
-                "result_dao": fake_dao,
-                "container": MagicMock(),
-                "input_cache": None,
-            },
+            new=mock_get_services,
         ),
         patch(
             "src.main_graph.subgraphs.analysis.agents.maintenance_agent"
@@ -85,7 +96,7 @@ async def test_wrapper_extracts_dispatch_runs_agent_and_saves_bundle():
                 "prep_result_id": "prep-1",
                 "agent_calls": [],
             },
-            {"configurable": {}},
+            real_config,
         )
 
     assert result["bundle_ids"] == ["bundle-123"]
@@ -94,6 +105,10 @@ async def test_wrapper_extracts_dispatch_runs_agent_and_saves_bundle():
     assert record["agent_type"] == "maintenance_agent"
     assert record["bundle_id"] == "bundle-123"
     fake_dao.save_bundle.assert_awaited_once_with(fake_bundle)
+
+    mock_get_services.assert_called_once()
+    received_config = mock_get_services.call_args.args[0]
+    assert received_config["configurable"].get("test_marker") == "abc123"
 
 
 @pytest.mark.asyncio

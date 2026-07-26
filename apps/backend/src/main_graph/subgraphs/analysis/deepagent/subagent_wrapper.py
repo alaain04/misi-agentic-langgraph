@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Annotated, cast
 
 from deepagents import CompiledSubAgent
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
@@ -68,7 +69,7 @@ def build_agent_subagent(agent_type: str) -> CompiledSubAgent:
     agent_class = REGISTRY[agent_type]
     description = agent_class.description
 
-    async def _run(state: _SubagentState) -> dict:
+    async def _run(state: _SubagentState, config: RunnableConfig) -> dict:
         agent_calls = state.get("agent_calls") or []
 
         if agent_type in WHOLE_TREE_AGENT_TYPES:
@@ -80,7 +81,7 @@ def build_agent_subagent(agent_type: str) -> CompiledSubAgent:
         task_description = state["messages"][-1].content
         dispatch = await _extract_dispatch(task_description, agent_type)
 
-        svc = get_services({"configurable": {}})
+        svc = get_services(config)
         prep = await svc["result_dao"].get_prep(state["prep_result_id"])
 
         started_at = datetime.now(UTC).isoformat()
