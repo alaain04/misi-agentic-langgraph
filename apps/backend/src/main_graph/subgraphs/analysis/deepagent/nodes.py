@@ -120,16 +120,38 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
     # task() fires) still sees round 1's calls in round 2. But AnalysisState's
     # own bundle_ids/agent_calls also use an operator.add reducer, so if we
     # returned the FULL accumulated lists again this round, the outer state
-    # would double-count everything already reported after round 1. Track
-    # what was already there before this call and return only the delta.
-    prev_bundle_count = len(deepagent_state.get("bundle_ids") or [])
-    prev_call_count = len(deepagent_state.get("agent_calls") or [])
+    # would double-count everything already reported after round 1. Return only
+    # the genuinely-new bundles/calls this round produced.
+    #
+    # We diff by bundle_id (a fresh uuid per saved bundle), NOT by list index:
+    # re-invoking the deep agent with the carried-forward messages re-emits the
+    # earlier rounds' task() Command(update=...) into the accumulator (verified
+    # against deepagents 0.6.12 -- the prior round's bundle_id/agent_call
+    # reappear in `result` even though no subagent re-ran), so a positional
+    # `[prev_count:]` slice would re-report an already-counted bundle. Set
+    # membership on bundle_id is immune to that reordering/re-emission.
+    prev_bundle_ids = set(deepagent_state.get("bundle_ids") or [])
+    prev_call_bundle_ids = {
+        c.get("bundle_id") for c in (deepagent_state.get("agent_calls") or [])
+    }
 
     run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
     result = await _deep_agent.ainvoke(deepagent_state, run_config)
 
-    new_bundle_ids = (result.get("bundle_ids") or [])[prev_bundle_count:]
-    new_agent_calls = (result.get("agent_calls") or [])[prev_call_count:]
+    seen_bundle_ids = set(prev_bundle_ids)
+    new_bundle_ids: list[str] = []
+    for bundle_id in result.get("bundle_ids") or []:
+        if bundle_id not in seen_bundle_ids:
+            seen_bundle_ids.add(bundle_id)
+            new_bundle_ids.append(bundle_id)
+
+    seen_call_bundle_ids = set(prev_call_bundle_ids)
+    new_agent_calls: list[dict] = []
+    for call in result.get("agent_calls") or []:
+        bundle_id = call.get("bundle_id")
+        if bundle_id not in seen_call_bundle_ids:
+            seen_call_bundle_ids.add(bundle_id)
+            new_agent_calls.append(call)
 
     return {
         "deepagent_state": result,
