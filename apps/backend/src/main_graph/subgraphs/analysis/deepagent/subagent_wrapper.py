@@ -59,6 +59,28 @@ async def _extract_dispatch(description: str, agent_type: str) -> AgentDispatch:
 
 
 def _existing_bundle_id(agent_calls: list[dict], agent_type: str) -> str | None:
+    """D8: whole-tree agents (vulnerability_agent, license_agent) should run
+    at most once per job. Not concurrency-safe: `agent_calls` is a snapshot
+    of `runtime.state` taken by deepagents' ToolNode BEFORE any sibling
+    task() call in the same root turn executes (verified against
+    langgraph.prebuilt.tool_node.ToolNode._afunc, which builds every
+    ToolRuntime -- and therefore every `state` snapshot -- from the same
+    frozen node input before asyncio.gather runs the calls). If the root deep
+    agent ever dispatches the SAME whole-tree agent_type twice in one turn
+    (now possible after the Finding-1 fix that lets parallel task() calls
+    survive at all), both calls see this identical empty/stale snapshot and
+    both run, producing a duplicate bundle_id/agent_call for one job.
+
+    Accepted as a residual risk rather than fixed here: closing it requires
+    state shared ACROSS the concurrent task() invocations (e.g. a
+    per-job/agent_type lock+cache outside graph state), since each task()
+    call gets an independently-copied state dict and cannot observe its
+    sibling's in-flight write -- a materially larger change than this
+    check. Impact is bounded to wasted work, not wrong output: whole-tree
+    agents are deterministic (npm audit / SPDX rules), so the duplicate
+    bundle's findings are byte-identical to the first and
+    save_analysis_result.dedup_findings collapses them before persistence.
+    """
     for call in agent_calls:
         if call.get("agent_type") == agent_type:
             return call.get("bundle_id")

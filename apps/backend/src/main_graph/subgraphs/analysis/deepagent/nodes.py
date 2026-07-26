@@ -88,7 +88,9 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
 
     deepagent_state = state.get("deepagent_state")
     if deepagent_state is None:
-        direct_deps = list(prep.dependency_graph.get("direct", {}).keys())
+        direct_deps = [
+            f"{n}@{v}" for n, v in prep.dependency_graph.get("direct", {}).items()
+        ]
         system = _SYSTEM_TEMPLATE.format(
             roster=_roster(),
             direct_deps=direct_deps,

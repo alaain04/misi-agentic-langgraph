@@ -36,14 +36,17 @@ real graph actually does (see task-6-report.md for the full write-up):
    normal base_agent react loop -- so the backstop path DOES need base_agent._llm
    mocked (test 2 corrects the brief's "zero extra LLM mocking" claim).
 
-Multiple task() tool_calls packed into a SINGLE scripted AIMessage do both
-execute (deepagents runs each subagent), but that path currently crashes the
-root graph: every CompiledSubAgent echoes job_id/prep_result_id back through a
-Command(update=...), and those two keys are plain (LastValue) channels on
-AnalysisDeepAgentState, so two concurrent identical writes raise
-InvalidUpdateError. The realistic multi-delegation form is therefore sequential
-task() calls (test 3 spreads them across two correction rounds, which also
-exercises the delta-slicing on a genuine second round). See task-6-report.md.
+Multiple task() tool_calls packed into a SINGLE scripted AIMessage both
+execute (deepagents runs each subagent): every CompiledSubAgent echoes
+job_id/prep_result_id back through a Command(update=...), and those two keys
+carry an Annotated[str, _keep_first] reducer on AnalysisDeepAgentState (see
+deepagent/state.py) specifically so two concurrent identical writes in one
+superstep do not raise InvalidUpdateError (test
+`test_parallel_task_calls_in_one_turn_do_not_crash_root_state` below is the
+regression test for that). The realistic multi-delegation form across
+correction rounds is still sequential task() calls (test 3 spreads them
+across two correction rounds, which also exercises the delta-slicing on a
+genuine second round). See task-6-report.md.
 """
 
 from __future__ import annotations
@@ -182,6 +185,25 @@ def _task_call(description: str, subagent_type: str, call_id: str) -> AIMessage:
     )
 
 
+def _multi_task_call(
+    calls: list[tuple[str, str, str]],
+) -> AIMessage:
+    """One AIMessage carrying MULTIPLE task() tool_calls -- the shape a real
+    GPT-5-class root model routinely emits when delegating to several
+    specialists in one turn."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "task",
+                "args": {"description": description, "subagent_type": subagent_type},
+                "id": call_id,
+            }
+            for description, subagent_type, call_id in calls
+        ],
+    )
+
+
 def _build_deep_agent_with_model(model):
     """Build a real deep agent around a given (fake) root model.
 
@@ -227,6 +249,31 @@ def _fake_base_llm(decision: DomainAgentDecision) -> MagicMock:
     the given DomainAgentDecision, every call."""
     chain = MagicMock()
     chain.ainvoke = AsyncMock(return_value=decision)
+    llm = MagicMock()
+    llm.with_structured_output = MagicMock(return_value=chain)
+    return llm
+
+
+def _fake_base_llm_by_hypothesis(
+    routes: dict[str, DomainAgentDecision],
+) -> MagicMock:
+    """Mock base_agent._llm that picks a DomainAgentDecision by matching a
+    substring against the system message content (which _react_loop
+    interpolates dispatch.hypothesis into). Lets two concurrently-dispatched
+    package-scoped agents in the same test return genuinely distinct
+    findings, rather than the byte-identical findings dedup_findings would
+    (correctly) collapse."""
+
+    async def _ainvoke(messages: list[dict]) -> DomainAgentDecision:
+        system_content = str(messages[0]["content"])
+        for needle, decision in routes.items():
+            if needle in system_content:
+                return decision
+        msg = f"no route matched system content: {system_content!r}"
+        raise AssertionError(msg)
+
+    chain = MagicMock()
+    chain.ainvoke = AsyncMock(side_effect=_ainvoke)
     llm = MagicMock()
     llm.with_structured_output = MagicMock(return_value=chain)
     return llm
@@ -469,4 +516,128 @@ async def test_analysis_accumulates_bundles_across_two_correction_rounds(
     assert {c["agent_type"] for c in agent_calls} == {
         "vulnerability_agent",
         "maintenance_agent",
+    }
+
+
+@pytest.mark.asyncio
+async def test_parallel_task_calls_in_one_turn_do_not_crash_root_state(
+    subgraph_config, result_dao
+):
+    """Regression test for the final-review Finding 1 crash: the root deep
+    agent's LLM emits TWO task() tool_calls packed into a SINGLE AIMessage
+    (real GPT-5-class models do this routinely for independent delegations),
+    dispatching to two DIFFERENT package-scoped specialists
+    (maintenance_agent, supply_chain_agent) in the same root turn.
+
+    Both CompiledSubAgent runnables echo job_id/prep_result_id back to the
+    root via Command(update=...) in the SAME superstep. Before the fix,
+    AnalysisDeepAgentState declared job_id/prep_result_id as plain (LastValue)
+    channels, so this raised
+    `InvalidUpdateError: Can receive only one value per step` and crashed the
+    whole job. After the fix (Annotated[str, _keep_first] reducer in
+    deepagent/state.py) both writes are tolerated because the value is
+    invariant across the run, and the graph completes normally with both
+    subagents' findings persisted."""
+    job_id = f"anal-{uuid.uuid4().hex[:8]}"
+    prep = _seed_prep(job_id)
+    await result_dao.save_prep(prep)
+
+    fake_deep_agent = _build_fake_deep_agent(
+        [
+            _multi_task_call(
+                [
+                    (
+                        "Check whether lodash@4.17.20 is still maintained.",
+                        "maintenance_agent",
+                        "call_maint",
+                    ),
+                    (
+                        "Check lodash for typosquatting / supply-chain risk.",
+                        "supply_chain_agent",
+                        "call_supply",
+                    ),
+                ]
+            ),
+            AIMessage(content="Sufficient evidence collected, finalizing."),
+        ]
+    )
+
+    maintenance_decision = DomainAgentDecision(
+        tool_calls=[],
+        findings=[
+            FindingNote(
+                dep_name="lodash",
+                severity="medium",
+                description="lodash maintenance finding",
+                evidence=[EvidenceRef(tool="npm_outdated", url=None, log_snippet="")],
+            )
+        ],
+        summary="maintenance finding",
+        confidence=0.8,
+        finalize=True,
+        reasoning="done",
+    )
+    supply_chain_decision = DomainAgentDecision(
+        tool_calls=[],
+        findings=[
+            FindingNote(
+                dep_name="lodash",
+                severity="medium",
+                description="lodash supply-chain finding",
+                evidence=[
+                    EvidenceRef(tool="typosquat_detection", url=None, log_snippet="")
+                ],
+            )
+        ],
+        summary="supply-chain finding",
+        confidence=0.8,
+        finalize=True,
+        reasoning="done",
+    )
+
+    with (
+        patch.object(deepagent_nodes, "_deep_agent", fake_deep_agent),
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper._extract_dispatch",
+            new=AsyncMock(side_effect=_extract_as),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
+            _fake_base_llm_by_hypothesis(
+                {
+                    "still maintained": maintenance_decision,
+                    "typosquatting": supply_chain_decision,
+                }
+            ),
+        ),
+    ):
+        graph = build_analysis_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "dependency health",
+                "prep_result_id": prep.id,
+                "bundle_ids": [],
+                "agent_calls": [],
+            },
+            config=subgraph_config,
+        )
+
+    assert result.get("analysis_result_id")
+    analysis = await result_dao.get_analysis(result["analysis_result_id"])
+    assert len(analysis.evidence_bundle_ids) == 2
+    assert len(set(analysis.evidence_bundle_ids)) == 2
+    assert len(analysis.findings) == 2
+    assert {f.description for f in analysis.findings} == {
+        "lodash maintenance finding",
+        "lodash supply-chain finding",
+    }
+
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    call = job_repo.update_artifact_data.await_args
+    agent_calls = call.args[2]["agent_calls"]
+    assert len(agent_calls) == 2
+    assert {c["agent_type"] for c in agent_calls} == {
+        "maintenance_agent",
+        "supply_chain_agent",
     }
