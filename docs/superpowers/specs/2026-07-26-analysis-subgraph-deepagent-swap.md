@@ -80,19 +80,31 @@ for another.
   dropping code execution keeps the tool surface close to today's
   fixed-signature, container-scoped registry rather than opening an
   LLM-authored-command-execution risk.
-- **D4 — Results leave the deep agent run via `RunnableConfig`
-  propagation, not deep-agent state.** The node that calls
-  `deep_agent.ainvoke(state, config)` creates a fresh accumulator and threads
-  it through `config["configurable"]`, the same pattern `get_services(config)`
-  already uses throughout this codebase. Each `CompiledSubAgent` wrapper
-  saves its `EvidenceBundle` via `dao.save_bundle` (unchanged) and appends the
-  resulting `bundle_id`/`AgentCallRecord` to that accumulator directly. This
-  relies only on standard LangGraph/LCEL config propagation to nested
-  runnables — a stable, non-deepagents-specific guarantee — rather than on
-  deepagents surfacing custom state keys back through `task()`, which is
-  unverified. After `ainvoke()` returns, the wrapping node merges the
-  accumulator into `AnalysisState.bundle_ids`/`agent_calls`
-  (`operator.add` reducers, same as today).
+- **D4 — Results leave the deep agent run via a custom `state_schema`, the
+  same reducer pattern `AnalysisState` already uses.** Verified directly
+  against installed `deepagents==0.6.12` source
+  (`deepagents/middleware/subagents.py`, `_build_task_tool`/
+  `_return_command_with_state_update`): when a `CompiledSubAgent`'s
+  `runnable` returns state, every key other than `messages`/`todos`/
+  `structured_response` is merged into the **root** deep agent's state via
+  `Command(update=state_update, ...)` — i.e. subagent state updates flow back
+  to the root through ordinary LangGraph reducers, not just as a summarized
+  `ToolMessage`. So: define `AnalysisDeepAgentState(DeepAgentState)` adding
+  `bundle_ids: Annotated[list[str], operator.add]` and
+  `agent_calls: Annotated[list[dict], operator.add]`, pass it as
+  `create_deep_agent(..., state_schema=AnalysisDeepAgentState)`. Each
+  `CompiledSubAgent` wrapper node saves its `EvidenceBundle` via
+  `dao.save_bundle` (unchanged) and returns
+  `{"messages": [...], "bundle_ids": [bundle_id], "agent_calls": [record.model_dump()]}`
+  — no config-threaded side channel needed. (`prep_result_id`/`job_id` flow
+  the same direction in reverse: `_validate_and_prepare_state` passes the
+  root's own state through to each subagent minus only
+  `messages`/`todos`/`structured_response`/agent-private keys, so seeding
+  `create_deep_agent`'s initial state with `prep_result_id`/`job_id` makes
+  them available inside every subagent's state automatically, matching how
+  `AnalysisState` keys already flow into subgraphs by name today.) After
+  `ainvoke()` returns, the wrapping node reads `bundle_ids`/`agent_calls`
+  straight off the final state.
 - **D5 — Coverage guarantee is deterministic, layered on top of the agent,
   not trusted to it.** The root agent is free to call `task()` however it
   judges best (mirrors today's conductor flexibility). Before the subgraph
@@ -126,7 +138,8 @@ for another.
   currently caps `vulnerability_agent`/`license_agent` to one run per job by
   filtering the conductor's dispatch list — that conductor is removed by D1,
   so this needs a new home. Each of those two `CompiledSubAgent` wrappers
-  checks the same config-threaded accumulator (D4) before doing real work: if
+  checks `state["agent_calls"]` (D4's passthrough state, visible inside the
+  subagent the same way it accumulates on the root) before doing real work: if
   an `AgentCallRecord` for its own `agent_type` is already present, it returns
   the existing `bundle_id` as a no-op instead of re-running `agent_class().run()`.
   This is a straight port of the existing rule to the new integration point,
@@ -140,13 +153,14 @@ for another.
 START
   -> analysis_deepagent_node
        - builds initial deep-agent input: concern, prep context, direct-dep
-         list, agent roster (mirrors today's analysis_conductor prompt)
-       - creates a fresh result accumulator, threads it via
-         config["configurable"]
+         list, agent roster (mirrors today's analysis_conductor prompt),
+         plus job_id/prep_result_id (flow into every subagent's state
+         automatically per D4)
        - calls deep_agent.ainvoke(input, config) — deep agent plans, calls
          task() against the 5 CompiledSubAgents zero or more times per its
-         own judgment; each call appends to the accumulator (D4)
-       - merges accumulator into bundle_ids / agent_calls
+         own judgment; each call's state update (bundle_ids/agent_calls)
+         merges into the root's state via reducers (D4)
+       - reads bundle_ids / agent_calls off the final root state
   -> coverage_gate
        - computes missing = direct_deps - covered (package-scoped agents only)
        - if missing and correction_rounds < 2: re-invoke deep agent with the
@@ -173,15 +187,40 @@ START
 - Reproducing today's fine-grained per-iteration observability inside the
   deep agent's own planning loop.
 
-## Open risk (not blocking spec approval, first plan task)
+## Verified against the real library (resolves the prior open risk)
 
-The exact `CompiledSubAgent` field signature is confirmed to exist
-(`docs.langchain.com/oss/python/deepagents/subagents`: *"Any LangGraph
-`CompiledStateGraph` can be passed in as a sub-agent to a Deep Agent"*) but
-not confirmed in full detail — the reference page did not render its type
-definition during review. Pin the exact shape against the installed
-`deepagents` version as the first implementation task before building the
-five wrapper graphs.
+Confirmed by installing `deepagents==0.6.12` into a scratch venv and
+introspecting it directly (not from docs alone):
+
+- `CompiledSubAgent` is `{name: str, description: str, runnable: Runnable}`.
+  The `runnable` must be a `Runnable`/`CompiledStateGraph` whose state
+  includes a `messages` key; it does **not** inherit
+  `create_deep_agent`'s `state_schema`, so if it needs custom fields it must
+  declare its own compatible schema.
+- `create_deep_agent(model, tools=None, *, system_prompt=None,
+  subagents=None, state_schema=None, checkpointer=None, ...)` — `subagents`
+  accepts a mix of `SubAgent` | `CompiledSubAgent` | `AsyncSubAgent`.
+- The `task` tool (`deepagents/middleware/subagents.py::_build_task_tool`)
+  seeds each subagent invocation from a filtered copy of the root's own state
+  (`_EXCLUDED_STATE_KEYS = {"messages", "todos", "structured_response"}` are
+  stripped; everything else, including custom fields like `job_id`/
+  `prep_result_id`, passes through) plus a fresh `messages: [HumanMessage(description)]`.
+  It returns `Command(update={**state_update, "messages": [ToolMessage(...)]})`,
+  where `state_update` is every key the subagent returned other than the
+  three excluded ones — i.e. custom state **does** flow back to the root
+  through ordinary reducers, confirming D4 as written above without a
+  side-channel.
+- Pin `deepagents>=0.6.12,<0.7` in `pyproject.toml` (the introspected
+  version); re-verify this section if the plan is executed against a newer
+  major/minor.
+
+One mechanical detail this exposed, left to the plan rather than re-opening
+this spec: the root agent communicates a task to a subagent as free text (the
+`description` argument to `task()`), not a structured `AgentDispatch`. Each
+`CompiledSubAgent` wrapper's entry step must convert that text into
+`AgentDispatch(domain, hypothesis, packages_to_focus)` — via one small
+`with_structured_output` call, matching this codebase's existing structured-output
+discipline, not regex/text parsing — before calling `agent_class().run()`.
 
 ## Success criteria
 
