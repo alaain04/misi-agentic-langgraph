@@ -2170,14 +2170,21 @@ git commit -m "feat(remediation): add root deep agent + group verification/PR gr
 
 ## Task 9: Wire the new graph, delete the old orchestrator
 
+**Note (controller update, logged in the ledger):** `orchestrator.py`,
+`nodes/remediate.py`, `test_orchestrator.py`, and `test_remediate_node.py`
+were already deleted right after Task 1 landed, not as part of this task —
+Task 1 deleted `RemediationDecision`/moved `branch`/`pr_url` off
+`RemediationResult`, which broke the whole `src.main_graph` import chain
+for every subsequent task's test suite, so the deletion (with a temporary
+`_remediate_placeholder` node standing in for the real graph) had to move
+earlier than planned. `graph.py` currently builds a single-node placeholder
+graph (`_remediate_placeholder`, raises `NotImplementedError`) — this task
+still needs to REPLACE that placeholder with the real wiring below, exactly
+as originally planned; only the *deletion* step already happened.
+
 **Files:**
 - Modify: `apps/backend/src/main_graph/subgraphs/remediation/graph.py`
-- Delete: `apps/backend/src/main_graph/subgraphs/remediation/orchestrator.py`
-- Delete: `apps/backend/src/main_graph/subgraphs/remediation/nodes/remediate.py`
-- Delete: `apps/backend/src/main_graph/subgraphs/remediation/nodes/__init__.py`
-  contents referencing `remediate` (check what else it exports first)
-- Delete: `apps/backend/tests/unit/subgraphs/remediation/test_orchestrator.py`
-- Delete: `apps/backend/tests/unit/subgraphs/remediation/test_remediate_node.py`
+  (replace the placeholder with the real wiring)
 
 **Interfaces:**
 - Produces: `build_remediation_subgraph()` (rewired, using the already-extended
@@ -2188,17 +2195,15 @@ git commit -m "feat(remediation): add root deep agent + group verification/PR gr
   `apps/backend/src/main_graph/graph.py`'s wiring of the remediation
   subgraph needs no changes (it shouldn't — check it, don't just assume).
 
-- [ ] **Step 1: Read what's being deleted, confirm nothing else depends on it**
+- [ ] **Step 1: Confirm nothing references the placeholder or the deleted files**
 
 Run:
 ```bash
-cd apps/backend && grep -rn "from src.main_graph.subgraphs.remediation.orchestrator\|from src.main_graph.subgraphs.remediation.nodes.remediate\|orchestrator import\|nodes.remediate import" src tests
+cd apps/backend && grep -rn "_remediate_placeholder\|from src.main_graph.subgraphs.remediation.orchestrator\|nodes.remediate import" src tests
 ```
-Expected: matches only inside the files this task deletes, plus
-`graph.py` (which this task rewrites) and `nodes/__init__.py` (check its
-current contents — if it only re-exports `remediate`, the file becomes
-empty/near-empty after this task; if it re-exports anything else, keep
-that).
+Expected: `_remediate_placeholder` matches only in `graph.py` (which this
+task rewrites); no matches at all for the other two patterns (both files
+are already gone).
 
 - [ ] **Step 2: Rewrite graph.py**
 
@@ -2237,23 +2242,7 @@ def build_remediation_subgraph():
     return builder.compile()
 ```
 
-- [ ] **Step 3: Delete stale files**
-
-```bash
-cd apps/backend
-git rm src/main_graph/subgraphs/remediation/orchestrator.py
-git rm src/main_graph/subgraphs/remediation/nodes/remediate.py
-git rm tests/unit/subgraphs/remediation/test_orchestrator.py
-git rm tests/unit/subgraphs/remediation/test_remediate_node.py
-```
-
-Check `src/main_graph/subgraphs/remediation/nodes/__init__.py` — if it only
-imports/re-exports `remediate` from the deleted module, delete it too
-(`git rm src/main_graph/subgraphs/remediation/nodes/__init__.py`) along
-with the now-empty `nodes/` directory; if it exports anything else, edit it
-to drop only the `remediate` reference.
-
-- [ ] **Step 4: Confirm the main graph needs no change**
+- [ ] **Step 3: Confirm the main graph needs no change**
 
 Run: `cd apps/backend && grep -n "remediation" src/main_graph/graph.py`
 Expected: the remediation subgraph is wired by calling
@@ -2263,7 +2252,7 @@ edit needed here. If the actual wiring differs from this expectation, fix
 `graph.py` to match the new subgraph's unchanged external contract; do not
 change the contract itself.
 
-- [ ] **Step 5: Run the full backend suite**
+- [ ] **Step 4: Run the full backend suite**
 
 Run: `cd apps/backend && uv run pytest -x -q`
 Expected: PASS (aside from any test files this task hasn't reached yet —
@@ -2274,12 +2263,11 @@ doesn't exist yet at this point).
 Run: `cd apps/backend && uv run ruff check . && uv run ruff format --check . && uv run mypy src`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add apps/backend/src/main_graph/subgraphs/remediation/graph.py
-git add -A apps/backend/src/main_graph/subgraphs/remediation/nodes apps/backend/tests/unit/subgraphs/remediation
-git commit -m "feat(remediation): wire deepagent tier-ladder graph, remove old orchestrator"
+git commit -m "feat(remediation): wire real deepagent tier-ladder graph, replace placeholder"
 ```
 
 ---
