@@ -106,6 +106,30 @@ def direct_dependents(graph: dict, name: str) -> list[str]:
     return sorted(result)
 
 
+def dependents_of(graph: dict, name: str) -> list[str]:
+    """Return every package name in the tree with a recorded dependency on
+    any installed version of `name` - not limited to direct-dependency
+    roots, unlike direct_dependents(). This is what lets a remediation
+    agent check impact on packages that have no associated finding at all
+    (e.g. "does anything else in this tree depend on eslint before I bump
+    it"). Structural only: reflects the resolved graph, not whether a
+    declared version range still holds after a bump - that is what
+    verification checks.
+    """
+    packages = graph.get("packages") or {}
+    if not packages:
+        return []
+    targets = {key for key in packages if _package_name(key) == name}
+    if not targets:
+        return []
+    result = {
+        _package_name(key)
+        for key, info in packages.items()
+        if any(child in targets for child in info.get("dependencies", []))
+    }
+    return sorted(result)
+
+
 def build_dependency_graph(
     repo_path: str, package_manager: str, pkg: dict | None = None
 ) -> dict:
