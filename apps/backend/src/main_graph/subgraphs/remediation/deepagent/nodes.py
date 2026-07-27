@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 
 from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
+from langgraph.errors import GraphRecursionError
 
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.remediation.deepagent.grouping import connected_groups
@@ -111,7 +114,28 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
         "requires_edges": {},
     }
     run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
-    result = await _root_deep_agent.ainvoke(initial_state, run_config)
+    try:
+        result = await _root_deep_agent.ainvoke(initial_state, run_config)
+    except GraphRecursionError:
+        # Spec D10: every bound (recursion limit, correction-round cap,
+        # group cap) must fail honestly into skipped/failed with a reason
+        # instead of crashing the job. Nothing from an aborted run is
+        # trustworthy, so discard remediations/requires_edges entirely --
+        # group_and_verify_gate then sees every target in this round as
+        # never-dispatched and routes it through the same retry mechanism
+        # used for a partial group, eventually failing honestly at the
+        # correction-round cap rather than propagating the exception.
+        logger.warning(
+            "root_deepagent_node: hit recursion_limit=%d before finishing; "
+            "discarding this round's in-progress work",
+            _RECURSION_LIMIT,
+        )
+        return {
+            "targets": targets,
+            "evidence": evidence,
+            "remediations": {},
+            "requires_edges": {},
+        }
 
     return {
         "targets": targets,
@@ -156,6 +180,24 @@ async def group_and_verify_gate(
     for group in groups[:_MAX_GROUPS]:
         members_dicts = [remediations[dep] for dep in group if dep in remediations]
         if len(members_dicts) != len(group):
+            missing = [dep for dep in group if dep not in remediations]
+            if correction_rounds < _MAX_CORRECTION_ROUNDS:
+                # A member named only via `requires` (never in the original
+                # select_remediation_targets output) has no Remediation
+                # record yet -- it was never dispatched, not dispatched-
+                # and-failed. Route it through the same retry mechanism
+                # used for failed verification instead of immediately
+                # failing the whole group: root_deepagent_node's retry-mode
+                # branch synthesizes a target entry for any retry_targets
+                # name not already in state["targets"] and explicitly
+                # instructs the root to dispatch it by name. Leave this
+                # group's already-dispatched members untouched in
+                # `remediations` (the outer state's _merge_replace reducer
+                # preserves them across rounds) and don't settle anything
+                # from this group yet -- its fate is decided once all
+                # members exist.
+                retry_targets.extend(missing)
+                continue
             for member_dict in members_dicts:
                 member_dict["status"] = "failed"
                 member_dict["skip_reason"] = member_dict.get("skip_reason") or (
@@ -258,25 +300,28 @@ async def pr_and_persist_node(state: RemediationState, config: RunnableConfig) -
             continue
         if consent and git_pr:
             work_dir = copy_repo(prep.repo_path)
-            if not await apply_group_changes(work_dir, members):
-                logger.warning(
-                    "pr_and_persist_node: replay failed for group %s, skipping PR",
-                    group,
-                )
-                continue
-            branch = f"remediation/{state['job_id'][:8]}-{group[0]}"
-            title, body = _pr_title_and_body(members)
             try:
-                pr_url = await git_pr.open_pr(work_dir, branch, title, body)
-                for member in members:
-                    member.branch = branch
-                    member.pr_url = pr_url
-            except Exception as exc:
-                logger.warning(
-                    "pr_and_persist_node: PR creation failed for group %s: %s",
-                    group,
-                    exc,
-                )
+                if not await apply_group_changes(work_dir, members):
+                    logger.warning(
+                        "pr_and_persist_node: replay failed for group %s, skipping PR",
+                        group,
+                    )
+                    continue
+                branch = f"remediation/{state['job_id'][:8]}-{group[0]}"
+                title, body = _pr_title_and_body(members)
+                try:
+                    pr_url = await git_pr.open_pr(work_dir, branch, title, body)
+                    for member in members:
+                        member.branch = branch
+                        member.pr_url = pr_url
+                except Exception as exc:
+                    logger.warning(
+                        "pr_and_persist_node: PR creation failed for group %s: %s",
+                        group,
+                        exc,
+                    )
+            finally:
+                shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
 
     result = RemediationResult(
         job_id=state["job_id"],
