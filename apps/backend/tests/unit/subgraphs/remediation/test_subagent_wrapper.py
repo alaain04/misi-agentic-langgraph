@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
+    build_target_subagent,
+)
+from src.models.remediation import RemediationOutcome
+from src.models.results import PrepResult
+
+
+def _prep(**overrides):
+    defaults = dict(
+        id="prep-1",
+        job_id="job-1",
+        repo_path="/tmp/repo",
+        project_metadata={"name": "x"},
+        manifest_files=["package.json"],
+        docker_image="node:lts-alpine",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"eslint": "8.0.0"}, "packages": {}},
+        discovery_summary="a test repo",
+        vector_store_id="",
+    )
+    defaults.update(overrides)
+    return PrepResult(**defaults)
+
+
+class _FakeHumanMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+@pytest.mark.asyncio
+async def test_run_resolves_known_target_and_reports_outcome(tmp_path):
+    spec = build_target_subagent()
+    assert spec["name"] == "remediate_target"
+
+    prep = _prep(repo_path=str(tmp_path))
+    (tmp_path / "package.json").write_text('{"dependencies": {"eslint": "8.0.0"}}')
+
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    container = MagicMock()
+    config = {"configurable": {"result_dao": dao, "container": container}}
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
+            AsyncMock(return_value="eslint"),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
+            return_value=str(tmp_path),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+        ) as mock_create,
+    ):
+        nested_agent = AsyncMock()
+        nested_agent.ainvoke = AsyncMock(
+            return_value={
+                "structured_response": RemediationOutcome(
+                    strategy="bump", to_range="^9.0.0", summary="clean bump"
+                )
+            }
+        )
+        mock_create.return_value = nested_agent
+
+        result = await spec["runnable"].ainvoke(
+            {
+                "messages": [{"role": "user", "content": "Remediate eslint."}],
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "evidence": {},
+                "targets": {
+                    "eslint": {
+                        "target_dep": "eslint",
+                        "addresses": ["eslint"],
+                        "current_range": "8.0.0",
+                    }
+                },
+                "remediations": {},
+                "requires_edges": {},
+            },
+            config,
+        )
+
+    assert result["remediations"]["eslint"]["to_range"] == "^9.0.0"
+    assert (
+        result["remediations"]["eslint"]["status"] == "skipped"
+    )  # provisional, gate sets the real value
+    assert result["requires_edges"] == {}
+
+
+@pytest.mark.asyncio
+async def test_run_records_requires_edge():
+    prep = _prep()
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    spec = build_target_subagent()
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
+            AsyncMock(return_value="eslint"),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
+            return_value="/tmp/fake-clone",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+        ) as mock_create,
+    ):
+        nested_agent = AsyncMock()
+        nested_agent.ainvoke = AsyncMock(
+            return_value={
+                "structured_response": RemediationOutcome(
+                    strategy="bump_with_codemod",
+                    to_range="^9.0.0",
+                    requires=["eslint-plugin-react"],
+                    summary="bumped and adapted call sites; plugin needs a bump too",
+                )
+            }
+        )
+        mock_create.return_value = nested_agent
+
+        result = await spec["runnable"].ainvoke(
+            {
+                "messages": [{"role": "user", "content": "Remediate eslint."}],
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "evidence": {},
+                "targets": {
+                    "eslint": {
+                        "target_dep": "eslint",
+                        "addresses": ["eslint"],
+                        "current_range": "8.0.0",
+                    }
+                },
+                "remediations": {},
+                "requires_edges": {},
+            },
+            config,
+        )
+
+    assert result["requires_edges"]["eslint"] == ["eslint-plugin-react"]
+
+
+@pytest.mark.asyncio
+async def test_run_synthesizes_target_for_unknown_dep_name():
+    prep = _prep(
+        dependency_graph={"direct": {"eslint-plugin-react": "^7.0.0"}, "packages": {}}
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    spec = build_target_subagent()
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
+            AsyncMock(return_value="eslint-plugin-react"),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
+            return_value="/tmp/fake-clone",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+        ) as mock_create,
+    ):
+        nested_agent = AsyncMock()
+        nested_agent.ainvoke = AsyncMock(
+            return_value={
+                "structured_response": RemediationOutcome(
+                    strategy="bump", to_range="^8.0.0"
+                )
+            }
+        )
+        mock_create.return_value = nested_agent
+
+        # note: "targets" does NOT contain eslint-plugin-react - it must be
+        # synthesized from the dependency graph's direct-range lookup
+        result = await spec["runnable"].ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": "Remediate eslint-plugin-react."}
+                ],
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "evidence": {},
+                "targets": {},
+                "remediations": {},
+                "requires_edges": {},
+            },
+            config,
+        )
+
+    remediation = result["remediations"]["eslint-plugin-react"]
+    assert remediation["from_range"] == "^7.0.0"
+    assert remediation["addresses"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_reports_failed_when_agent_produces_no_structured_response():
+    prep = _prep()
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    spec = build_target_subagent()
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
+            AsyncMock(return_value="eslint"),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
+            return_value="/tmp/fake-clone",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+        ) as mock_create,
+    ):
+        nested_agent = AsyncMock()
+        nested_agent.ainvoke = AsyncMock(return_value={})
+        mock_create.return_value = nested_agent
+
+        result = await spec["runnable"].ainvoke(
+            {
+                "messages": [{"role": "user", "content": "Remediate eslint."}],
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "evidence": {},
+                "targets": {
+                    "eslint": {
+                        "target_dep": "eslint",
+                        "addresses": [],
+                        "current_range": "8.0.0",
+                    }
+                },
+                "remediations": {},
+                "requires_edges": {},
+            },
+            config,
+        )
+
+    assert result["remediations"]["eslint"]["status"] == "failed"
+    assert (
+        result["remediations"]["eslint"]["skip_reason"]
+        == "agent produced no structured decision"
+    )
