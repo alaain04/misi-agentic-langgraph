@@ -16,3 +16,5 @@ wheels/
 .env.*.local
 
 .superpowers
+# Git worktrees (local, not part of repo)
+.worktrees/

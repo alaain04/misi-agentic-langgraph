@@ -5,8 +5,6 @@ from typing import Annotated, NotRequired
 
 from typing_extensions import TypedDict
 
-from src.models.results import AnalysisConductorDecision
-
 
 class AnalysisState(TypedDict):
     # From MainState (matched by key name)
@@ -14,16 +12,15 @@ class AnalysisState(TypedDict):
     concern: str
     prep_result_id: str
 
-    # Internal
-    conductor_decision: NotRequired[AnalysisConductorDecision]
-    current_dispatch: NotRequired[
-        dict
-    ]  # AgentDispatch.model_dump() for domain_agent nodes
+    # Internal — deep agent run + coverage loop
+    # deepagent_state: last full state returned by deep_agent.ainvoke()
+    deepagent_state: NotRequired[dict]
+    missing_deps: NotRequired[list[str]]
+    correction_rounds: NotRequired[int]
     bundle_ids: Annotated[list[str], operator.add]
     agent_calls: Annotated[
         list[dict], operator.add
     ]  # AgentCallRecord.model_dump() per domain_agent call
-    conductor_iteration: NotRequired[int]
 
     # Output (written back to MainState)
     analysis_result_id: NotRequired[str]
