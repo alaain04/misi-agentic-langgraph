@@ -15,11 +15,14 @@ from src.main_graph.subgraphs.remediation.deepagent.tools import (
 
 class FakeContainer:
     """Returns queued (rc, stdout, stderr) per run() call, in order."""
+
     def __init__(self, results):
         self._results = list(results)
         self.commands = []
 
-    async def run(self, image, command, volume=None, run_as_root=False, secret_env=None):
+    async def run(
+        self, image, command, volume=None, run_as_root=False, secret_env=None
+    ):
         self.commands.append(command)
         return self._results.pop(0)
 
@@ -92,6 +95,8 @@ async def test_bump_dependency_tool_applies(tmp_path):
 async def test_verify_tool_reports_installed(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"scripts": {}}))
     container = FakeContainer([(0, "", ""), (0, "{}", "")])
-    tool = make_verify_tool(str(tmp_path), container, "node:lts-alpine", "npm", ["eslint"])
+    tool = make_verify_tool(
+        str(tmp_path), container, "node:lts-alpine", "npm", ["eslint"]
+    )
     result = await tool.ainvoke({})
     assert result["installed"] is True
