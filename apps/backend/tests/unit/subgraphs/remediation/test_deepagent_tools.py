@@ -100,3 +100,24 @@ async def test_verify_tool_reports_installed(tmp_path):
     )
     result = await tool.ainvoke({})
     assert result["installed"] is True
+
+
+@pytest.mark.asyncio
+async def test_read_release_notes_safely_quotes_package_name():
+    """Verify that shell metacharacters in package names are safely quoted,
+    preventing command injection."""
+    container = FakeContainer([(1, "", "npm error 404")])
+    tool = make_read_release_notes_tool("/repo", container, "node:lts-alpine")
+    # Use a package name with shell metacharacters
+    malicious_package = "eslint; rm -rf /"
+    result = await tool.ainvoke({"package_name": malicious_package})
+
+    # Verify the command was escaped, not executed as-is
+    assert len(container.commands) == 1
+    executed_command = container.commands[0]
+    # The command should contain the quoted package name, not raw metacharacters
+    assert "'eslint; rm -rf /'" in executed_command or (
+        "eslint" in executed_command and "rm -rf" not in executed_command
+    )
+    # Verify it still failed gracefully without injection
+    assert result["available"] is False

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import shlex
 
 from langchain_core.tools import tool
 
@@ -20,7 +21,7 @@ _GITHUB_REPO_RE = re.compile(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?\s
 async def _resolve_github_repo(
     package_name: str, repo_path: str, container: ContainerRunPort, docker_image: str
 ) -> tuple[str, str] | None:
-    command = f"cd /workspace && npm view {package_name} repository.url"
+    command = f"cd /workspace && npm view {shlex.quote(package_name)} repository.url"
     rc, stdout, _stderr = await container.run(
         image=docker_image,
         command=command,
@@ -55,8 +56,12 @@ def make_read_release_notes_tool(
         owner, repo = resolved
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "api", f"repos/{owner}/{repo}/releases", "--paginate",
-                "-q", ".[:20]",
+                "gh",
+                "api",
+                f"repos/{owner}/{repo}/releases",
+                "--paginate",
+                "-q",
+                ".[:20]",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
