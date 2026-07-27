@@ -100,6 +100,60 @@ async def test_root_deepagent_node_no_targets_short_circuits():
 
 
 @pytest.mark.asyncio
+async def test_root_deepagent_node_retry_synthesizes_unknown_companion_target():
+    """A companion target discovered mid-run purely via a subagent's
+    `requires` signal never gets added to state["targets"] anywhere
+    (subagent_wrapper._run only returns remediations/requires_edges). If
+    group_and_verify_gate puts such a name into retry_targets, the retry
+    round must still explicitly redispatch it instead of silently dropping
+    it from the dict passed to the root agent."""
+    prep = _prep(
+        dependency_graph={
+            "direct": {"lodash": "^4.17.11", "companion-dep": "^2.0.0"},
+            "packages": {},
+        }
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    state = {
+        "job_id": "job-1",
+        "prep_result_id": "prep-1",
+        "analysis_result_id": "a-1",
+        "concern": "c",
+        "retry_targets": ["lodash", "companion-dep"],
+        "targets": {
+            "lodash": {
+                "target_dep": "lodash",
+                "addresses": ["lodash"],
+                "current_range": "^4.17.11",
+            }
+        },
+        "evidence": {},
+    }
+
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes._root_deep_agent"
+    ) as mock_agent:
+        mock_agent.ainvoke = AsyncMock(
+            return_value={"remediations": {}, "requires_edges": {}}
+        )
+        result = await root_deepagent_node(state, config)
+        seeded_state = mock_agent.ainvoke.await_args.args[0]
+
+    assert set(seeded_state["targets"]) == {"lodash", "companion-dep"}
+    assert seeded_state["targets"]["companion-dep"] == {
+        "target_dep": "companion-dep",
+        "addresses": [],
+        "current_range": "^2.0.0",
+    }
+    # Known target keeps its real addresses/current_range untouched.
+    assert seeded_state["targets"]["lodash"]["addresses"] == ["lodash"]
+    assert result["targets"]["companion-dep"]["addresses"] == []
+
+
+@pytest.mark.asyncio
 async def test_group_and_verify_gate_marks_group_fixed_on_green_verification():
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=_prep())
@@ -166,6 +220,46 @@ async def test_group_and_verify_gate_requests_retry_under_cap():
     assert "lodash" not in {
         k: v for k, v in result["remediations"].items() if v["status"] == "fixed"
     }
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_populates_required_by_on_cap_exceeded_skip():
+    """A target pushed past the _MAX_GROUPS cap must still ship with
+    required_by populated from requires_edges, not silently empty."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    # 20 unconnected single-member filler groups sort before the "za"/"zb"
+    # group alphabetically, pushing {za, zb} to be the 21st group -- past
+    # the _MAX_GROUPS=20 cap, into the overflow loop.
+    filler_names = [f"filler{i}" for i in range(20)]
+    targets = {name: {} for name in [*filler_names, "za", "zb"]}
+
+    def _remediation(dep):
+        return {
+            "id": f"r-{dep}",
+            "addresses": [dep],
+            "target_dep": dep,
+            "strategy": "bump",
+            "to_range": "^1.0.0",
+            "status": "skipped",
+        }
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": targets,
+        "remediations": {"za": _remediation("za"), "zb": _remediation("zb")},
+        "requires_edges": {"za": ["zb"]},
+        "correction_rounds": 0,
+    }
+
+    result = await group_and_verify_gate(state, config)
+
+    assert result["remediations"]["zb"]["status"] == "skipped"
+    assert result["remediations"]["zb"]["skip_reason"] == "target/group cap exceeded"
+    assert result["remediations"]["zb"]["required_by"] == ["za"]
+    assert result["remediations"]["za"]["required_by"] == []
 
 
 def test_route_after_group_verify_retries_then_finishes():

@@ -21,7 +21,7 @@ from src.main_graph.subgraphs.remediation.selection import select_remediation_ta
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.main_graph.subgraphs.remediation.workspace import copy_repo
 from src.main_graph.tools.npm_cli import npm_audit, npm_outdated
-from src.models.remediation import Remediation, RemediationResult
+from src.models.remediation import Remediation, RemediationResult, RemediationTarget
 from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
@@ -61,11 +61,24 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
 
     retry_targets = state.get("retry_targets")
     if retry_targets:
-        targets = {
-            dep: t
-            for dep, t in (state.get("targets") or {}).items()
-            if dep in retry_targets
-        }
+        known_targets = state.get("targets") or {}
+        direct = prep.dependency_graph.get("direct") or {}
+        targets = {}
+        for dep in retry_targets:
+            if dep in known_targets:
+                targets[dep] = known_targets[dep]
+            else:
+                # A companion target discovered mid-run purely via a
+                # subagent's `requires` signal is never added to
+                # state["targets"] anywhere (subagent_wrapper._run only
+                # returns remediations/requires_edges). Synthesize a
+                # minimal entry the same way subagent_wrapper._run does
+                # for an unknown target name, so it still gets explicitly
+                # redispatched in the retry round's open_list instead of
+                # being silently dropped.
+                targets[dep] = RemediationTarget(
+                    target_dep=dep, addresses=[], current_range=direct.get(dep)
+                ).model_dump()
         evidence = state.get("evidence") or {}
     else:
         analysis = await dao.get_analysis(state["analysis_result_id"])
@@ -184,6 +197,7 @@ async def group_and_verify_gate(
             if dep in remediations:
                 remediations[dep]["status"] = "skipped"
                 remediations[dep]["skip_reason"] = "target/group cap exceeded"
+                remediations[dep]["required_by"] = sorted(required_by_map.get(dep, []))
                 settled[dep] = remediations[dep]
 
     if retry_targets:
