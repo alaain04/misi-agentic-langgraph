@@ -454,11 +454,25 @@ async def test_pure_bump_target_ships_one_fixed_pr(
     )
 
     captured_work_dirs: list[str] = []
+    captured_notes: list[str] = []
+    _real_rmtree = shutil.rmtree
 
     def _spy_copy_repo(src_repo_path: str) -> str:
         work_dir = _real_copy_repo(src_repo_path)
         captured_work_dirs.append(work_dir)
         return work_dir
+
+    def _spy_rmtree(path, ignore_errors=False):  # noqa: FBT002
+        # subagent_wrapper._run now cleans up its own clone in a finally
+        # block (Finding 3 of the final review) -- that happens inside the
+        # graph run, before graph.ainvoke() below ever returns. Capture the
+        # nested worker's real write_file output here, immediately before
+        # deletion, instead of inspecting the directory afterward (by then
+        # it's gone).
+        notes_path = Path(path) / "repo" / "REMEDIATION_NOTES.md"
+        if notes_path.exists():
+            captured_notes.append(notes_path.read_text())
+        _real_rmtree(path, ignore_errors=ignore_errors)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = True
@@ -477,6 +491,7 @@ async def test_pure_bump_target_ships_one_fixed_pr(
         patch.object(
             subagent_wrapper_module, "copy_repo", MagicMock(side_effect=_spy_copy_repo)
         ),
+        patch.object(subagent_wrapper_module.shutil, "rmtree", _spy_rmtree),
     ):
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
@@ -507,12 +522,15 @@ async def test_pure_bump_target_ships_one_fixed_pr(
         assert "bump" in title
 
         # Concern 2: the nested worker's real read_file/write_file tool
-        # calls actually touched a real file in the real isolated clone.
+        # calls actually touched a real file in the real isolated clone,
+        # captured by the rmtree spy immediately before subagent_wrapper's
+        # own cleanup removed it.
         assert len(captured_work_dirs) == 1
-        notes_file = Path(captured_work_dirs[0]) / "REMEDIATION_NOTES.md"
-        assert notes_file.exists()
-        assert notes_file.read_text() == "Bumped leftpad to ^1.0.1\n"
+        assert captured_notes == ["Bumped leftpad to ^1.0.1\n"]
     finally:
+        # subagent_wrapper._run already cleaned up its own clone (Finding
+        # 3); this is a defensive no-op for any that didn't (ignore_errors
+        # covers the now-common case of an already-removed directory).
         for work_dir in captured_work_dirs:
             shutil.rmtree(Path(work_dir).parent, ignore_errors=True)
 

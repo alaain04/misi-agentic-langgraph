@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,6 +11,20 @@ from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
 )
 from src.models.remediation import RemediationOutcome
 from src.models.results import PrepResult
+
+
+def _cloned_repo() -> tuple[str, str]:
+    """A real dst/repo-shaped temp dir mirroring copy_repo's actual
+    contract (see test_replay.py's mkdtemp_root/repo pattern). _run now
+    cleans up via shutil.rmtree(os.path.dirname(work_dir)) in a finally
+    block, so a mocked copy_repo returning anything not shaped this way
+    (e.g. a bare tmp_path, or "/tmp/fake-clone" whose dirname is "/tmp")
+    would make that cleanup target something dangerously broad instead of
+    the disposable clone directory it's meant to remove."""
+    mkdtemp_root = tempfile.mkdtemp(prefix="test-remediation-")
+    work_dir = os.path.join(mkdtemp_root, "repo")
+    os.makedirs(work_dir)
+    return mkdtemp_root, work_dir
 
 
 def _prep(**overrides):
@@ -46,6 +62,8 @@ async def test_run_resolves_known_target_and_reports_outcome(tmp_path):
     container = MagicMock()
     config = {"configurable": {"result_dao": dao, "container": container}}
 
+    mkdtemp_root, work_dir = _cloned_repo()
+
     with (
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
@@ -53,7 +71,7 @@ async def test_run_resolves_known_target_and_reports_outcome(tmp_path):
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
-            return_value=str(tmp_path),
+            return_value=work_dir,
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
@@ -93,6 +111,9 @@ async def test_run_resolves_known_target_and_reports_outcome(tmp_path):
         result["remediations"]["eslint"]["status"] == "skipped"
     )  # provisional, gate sets the real value
     assert result["requires_edges"] == {}
+    # _run must clean up the clone it made, targeting the mkdtemp root
+    # copy_repo actually created (not the caller's original repo_path).
+    assert not os.path.exists(mkdtemp_root)
 
 
 @pytest.mark.asyncio
@@ -102,6 +123,8 @@ async def test_run_records_requires_edge():
     dao.get_prep = AsyncMock(return_value=prep)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
+    mkdtemp_root, work_dir = _cloned_repo()
+
     spec = build_target_subagent()
     with (
         patch(
@@ -110,7 +133,7 @@ async def test_run_records_requires_edge():
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
-            return_value="/tmp/fake-clone",
+            return_value=work_dir,
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
@@ -149,6 +172,7 @@ async def test_run_records_requires_edge():
         )
 
     assert result["requires_edges"]["eslint"] == ["eslint-plugin-react"]
+    assert not os.path.exists(mkdtemp_root)
 
 
 @pytest.mark.asyncio
@@ -160,6 +184,8 @@ async def test_run_synthesizes_target_for_unknown_dep_name():
     dao.get_prep = AsyncMock(return_value=prep)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
+    mkdtemp_root, work_dir = _cloned_repo()
+
     spec = build_target_subagent()
     with (
         patch(
@@ -168,7 +194,7 @@ async def test_run_synthesizes_target_for_unknown_dep_name():
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
-            return_value="/tmp/fake-clone",
+            return_value=work_dir,
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
@@ -204,6 +230,7 @@ async def test_run_synthesizes_target_for_unknown_dep_name():
     remediation = result["remediations"]["eslint-plugin-react"]
     assert remediation["from_range"] == "^7.0.0"
     assert remediation["addresses"] == []
+    assert not os.path.exists(mkdtemp_root)
 
 
 @pytest.mark.asyncio
@@ -213,6 +240,8 @@ async def test_run_reports_failed_when_agent_produces_no_structured_response():
     dao.get_prep = AsyncMock(return_value=prep)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
+    mkdtemp_root, work_dir = _cloned_repo()
+
     spec = build_target_subagent()
     with (
         patch(
@@ -221,7 +250,7 @@ async def test_run_reports_failed_when_agent_produces_no_structured_response():
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
-            return_value="/tmp/fake-clone",
+            return_value=work_dir,
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
@@ -255,6 +284,7 @@ async def test_run_reports_failed_when_agent_produces_no_structured_response():
         result["remediations"]["eslint"]["skip_reason"]
         == "agent produced no structured decision"
     )
+    assert not os.path.exists(mkdtemp_root)
 
 
 @pytest.mark.asyncio
@@ -268,6 +298,8 @@ async def test_run_reports_failed_when_structured_response_fails_validation():
     dao.get_prep = AsyncMock(return_value=prep)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
+    mkdtemp_root, work_dir = _cloned_repo()
+
     spec = build_target_subagent()
     with (
         patch(
@@ -276,7 +308,7 @@ async def test_run_reports_failed_when_structured_response_fails_validation():
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
-            return_value="/tmp/fake-clone",
+            return_value=work_dir,
         ),
         patch(
             "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
@@ -320,3 +352,4 @@ async def test_run_reports_failed_when_structured_response_fails_validation():
         result["remediations"]["eslint"]["skip_reason"]
         == "agent produced no structured decision"
     )
+    assert not os.path.exists(mkdtemp_root)
