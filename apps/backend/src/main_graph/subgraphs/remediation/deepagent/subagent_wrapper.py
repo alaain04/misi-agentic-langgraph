@@ -18,7 +18,7 @@ from deepagents import CompiledSubAgent, create_deep_agent
 from deepagents.backends import FilesystemBackend
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing_extensions import TypedDict
 
 from src.main_graph.config import get_services
@@ -169,7 +169,13 @@ async def _run(state: _TargetSubagentState, config: RunnableConfig) -> dict:
             ),
             evidence=json.dumps(state.get("evidence") or {})[:4000],
         ),
-        backend=FilesystemBackend(root_dir=work_dir),
+        # virtual_mode=True: blocks '..'/'~' traversal and verifies every
+        # resolved path stays under work_dir (the isolated copy_repo clone),
+        # so a prompt-injected instruction from read_release_notes' third-
+        # party GitHub content can't make the agent write outside it. The
+        # default (virtual_mode=False) performs NO containment check at all
+        # -- see the library's own docstring on FilesystemBackend.
+        backend=FilesystemBackend(root_dir=work_dir, virtual_mode=True),
         response_format=RemediationOutcome,
     )
     result = await nested.ainvoke(
@@ -181,7 +187,18 @@ async def _run(state: _TargetSubagentState, config: RunnableConfig) -> dict:
     if isinstance(raw_outcome, RemediationOutcome):
         outcome = raw_outcome
     elif raw_outcome is not None:
-        outcome = RemediationOutcome.model_validate(raw_outcome)
+        try:
+            outcome = RemediationOutcome.model_validate(raw_outcome)
+        except ValidationError:
+            # A present-but-malformed structured_response degrades the same
+            # way as a wholly absent one (outcome is None below) rather than
+            # crashing this node -- neither is a usable structured decision.
+            logger.warning(
+                "structured_response for %s failed RemediationOutcome validation: %r",
+                target.target_dep,
+                raw_outcome,
+            )
+            outcome = None
     else:
         outcome = None
 

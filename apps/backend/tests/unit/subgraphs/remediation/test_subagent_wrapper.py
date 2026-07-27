@@ -255,3 +255,68 @@ async def test_run_reports_failed_when_agent_produces_no_structured_response():
         result["remediations"]["eslint"]["skip_reason"]
         == "agent produced no structured decision"
     )
+
+
+@pytest.mark.asyncio
+async def test_run_reports_failed_when_structured_response_fails_validation():
+    """A present-but-malformed structured_response (e.g. real deepagents
+    machinery returning a dict with a field of the wrong shape/type) must
+    degrade the same way an absent one does, not crash the node with an
+    uncaught pydantic.ValidationError."""
+    prep = _prep()
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    spec = build_target_subagent()
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
+            AsyncMock(return_value="eslint"),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
+            return_value="/tmp/fake-clone",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+        ) as mock_create,
+    ):
+        nested_agent = AsyncMock()
+        # strategy has an invalid Literal value and requires is the wrong
+        # type entirely -- guaranteed to fail RemediationOutcome validation
+        # without being None or an instance already.
+        nested_agent.ainvoke = AsyncMock(
+            return_value={
+                "structured_response": {
+                    "strategy": "not-a-real-strategy",
+                    "requires": "not-a-list",
+                }
+            }
+        )
+        mock_create.return_value = nested_agent
+
+        result = await spec["runnable"].ainvoke(
+            {
+                "messages": [{"role": "user", "content": "Remediate eslint."}],
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "evidence": {},
+                "targets": {
+                    "eslint": {
+                        "target_dep": "eslint",
+                        "addresses": [],
+                        "current_range": "8.0.0",
+                    }
+                },
+                "remediations": {},
+                "requires_edges": {},
+            },
+            config,
+        )
+
+    assert result["remediations"]["eslint"]["status"] == "failed"
+    assert (
+        result["remediations"]["eslint"]["skip_reason"]
+        == "agent produced no structured decision"
+    )
