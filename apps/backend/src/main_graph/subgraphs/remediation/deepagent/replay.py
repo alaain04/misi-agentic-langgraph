@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 
 from src.domain.ports.container_run_port import ContainerRunPort
@@ -88,4 +89,4 @@ async def replay_and_verify_group(
             work_dir, container, docker_image, package_manager, targeted
         )
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
