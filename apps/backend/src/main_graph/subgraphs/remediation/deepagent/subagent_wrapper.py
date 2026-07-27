@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 from typing import Annotated, cast
 
 from deepagents import CompiledSubAgent, create_deep_agent
@@ -139,102 +141,112 @@ async def _run(state: _TargetSubagentState, config: RunnableConfig) -> dict:
         )
 
     work_dir = copy_repo(prep.repo_path)
-    default_targeted = [target.target_dep, *target.addresses]
-    tools = [
-        make_read_release_notes_tool(work_dir, container, prep.docker_image),
-        make_blast_radius_tool(work_dir, container, prep.docker_image),
-        make_dependents_of_tool(prep.dependency_graph),
-        make_bump_dependency_tool(work_dir),
-        make_verify_tool(
-            work_dir,
-            container,
-            prep.docker_image,
-            prep.detected_package_manager,
-            default_targeted,
-        ),
-    ]
-    if prep.vector_store_id:
-        tools.append(make_search_code_tool(prep.vector_store_id))
-
-    nested = create_deep_agent(
-        model=get_llm(Model.GPT_5_4_MINI),
-        tools=tools,
-        system_prompt=_SYSTEM_PROMPT.format(
-            target_dep=target.target_dep,
-            current_range=target.current_range or "unknown",
-            addresses=", ".join(target.addresses)
-            or (
-                "none (this dependency was pulled in because remediating "
-                "another target requires it)"
+    try:
+        default_targeted = [target.target_dep, *target.addresses]
+        tools = [
+            make_read_release_notes_tool(work_dir, container, prep.docker_image),
+            make_blast_radius_tool(work_dir, container, prep.docker_image),
+            make_dependents_of_tool(prep.dependency_graph),
+            make_bump_dependency_tool(work_dir),
+            make_verify_tool(
+                work_dir,
+                container,
+                prep.docker_image,
+                prep.detected_package_manager,
+                default_targeted,
             ),
-            evidence=json.dumps(state.get("evidence") or {})[:4000],
-        ),
-        # virtual_mode=True: blocks '..'/'~' traversal and verifies every
-        # resolved path stays under work_dir (the isolated copy_repo clone),
-        # so a prompt-injected instruction from read_release_notes' third-
-        # party GitHub content can't make the agent write outside it. The
-        # default (virtual_mode=False) performs NO containment check at all
-        # -- see the library's own docstring on FilesystemBackend.
-        backend=FilesystemBackend(root_dir=work_dir, virtual_mode=True),
-        response_format=RemediationOutcome,
-    )
-    result = await nested.ainvoke(
-        {"messages": [{"role": "user", "content": f"Remediate {target.target_dep}."}]},
-        config,
-    )
-    raw_outcome = result.get("structured_response")
-    outcome: RemediationOutcome | None
-    if isinstance(raw_outcome, RemediationOutcome):
-        outcome = raw_outcome
-    elif raw_outcome is not None:
-        try:
-            outcome = RemediationOutcome.model_validate(raw_outcome)
-        except ValidationError:
-            # A present-but-malformed structured_response degrades the same
-            # way as a wholly absent one (outcome is None below) rather than
-            # crashing this node -- neither is a usable structured decision.
-            logger.warning(
-                "structured_response for %s failed RemediationOutcome validation: %r",
-                target.target_dep,
-                raw_outcome,
-            )
-            outcome = None
-    else:
-        outcome = None
+        ]
+        if prep.vector_store_id:
+            tools.append(make_search_code_tool(prep.vector_store_id))
 
-    if outcome is None:
+        nested = create_deep_agent(
+            model=get_llm(Model.GPT_5_4_MINI),
+            tools=tools,
+            system_prompt=_SYSTEM_PROMPT.format(
+                target_dep=target.target_dep,
+                current_range=target.current_range or "unknown",
+                addresses=", ".join(target.addresses)
+                or (
+                    "none (this dependency was pulled in because remediating "
+                    "another target requires it)"
+                ),
+                evidence=json.dumps(state.get("evidence") or {})[:4000],
+            ),
+            # virtual_mode=True: blocks '..'/'~' traversal and verifies every
+            # resolved path stays under work_dir (the isolated copy_repo clone),
+            # so a prompt-injected instruction from read_release_notes' third-
+            # party GitHub content can't make the agent write outside it. The
+            # default (virtual_mode=False) performs NO containment check at all
+            # -- see the library's own docstring on FilesystemBackend.
+            backend=FilesystemBackend(root_dir=work_dir, virtual_mode=True),
+            response_format=RemediationOutcome,
+        )
+        result = await nested.ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": f"Remediate {target.target_dep}."}
+                ]
+            },
+            config,
+        )
+        raw_outcome = result.get("structured_response")
+        outcome: RemediationOutcome | None
+        if isinstance(raw_outcome, RemediationOutcome):
+            outcome = raw_outcome
+        elif raw_outcome is not None:
+            try:
+                outcome = RemediationOutcome.model_validate(raw_outcome)
+            except ValidationError:
+                # A present-but-malformed structured_response degrades the same
+                # way as a wholly absent one (outcome is None below) rather than
+                # crashing this node -- neither is a usable structured decision.
+                logger.warning(
+                    "structured_response for %s failed RemediationOutcome "
+                    "validation: %r",
+                    target.target_dep,
+                    raw_outcome,
+                )
+                outcome = None
+        else:
+            outcome = None
+
+        if outcome is None:
+            remediation = Remediation(
+                addresses=target.addresses,
+                target_dep=target.target_dep,
+                from_range=target.current_range,
+                status="failed",
+                skip_reason="agent produced no structured decision",
+            )
+            return {
+                "messages": [],
+                "remediations": {target.target_dep: remediation.model_dump()},
+                "requires_edges": {},
+            }
+
         remediation = Remediation(
             addresses=target.addresses,
             target_dep=target.target_dep,
+            strategy=outcome.strategy,
             from_range=target.current_range,
-            status="failed",
-            skip_reason="agent produced no structured decision",
+            to_range=outcome.to_range,
+            replacement_dep=outcome.replacement_dep,
+            replacement_range=outcome.replacement_range,
+            migration_plan=outcome.migration_plan,
+            patch=outcome.code_diff,
+            status="skipped",  # provisional - group_and_verify_gate sets the real value
+            skip_reason=outcome.skip_reason,
+        )
+        requires_edges = (
+            {target.target_dep: outcome.requires} if outcome.requires else {}
         )
         return {
             "messages": [],
             "remediations": {target.target_dep: remediation.model_dump()},
-            "requires_edges": {},
+            "requires_edges": requires_edges,
         }
-
-    remediation = Remediation(
-        addresses=target.addresses,
-        target_dep=target.target_dep,
-        strategy=outcome.strategy,
-        from_range=target.current_range,
-        to_range=outcome.to_range,
-        replacement_dep=outcome.replacement_dep,
-        replacement_range=outcome.replacement_range,
-        migration_plan=outcome.migration_plan,
-        patch=outcome.code_diff,
-        status="skipped",  # provisional - group_and_verify_gate sets the real value
-        skip_reason=outcome.skip_reason,
-    )
-    requires_edges = {target.target_dep: outcome.requires} if outcome.requires else {}
-    return {
-        "messages": [],
-        "remediations": {target.target_dep: remediation.model_dump()},
-        "requires_edges": requires_edges,
-    }
+    finally:
+        shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
 
 
 def build_target_subagent() -> CompiledSubAgent:
