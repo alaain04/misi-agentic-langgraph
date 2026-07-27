@@ -75,6 +75,7 @@ async def result_dao(mongo_uri):
     dao._bundles = db["evidence_bundles"]
     dao._analysis = db["analysis_results"]
     dao._report = db["report_results"]
+    dao._remediation = db["remediation_results"]
 
     yield dao
 
@@ -82,6 +83,7 @@ async def result_dao(mongo_uri):
     await db["evidence_bundles"].drop()
     await db["analysis_results"].drop()
     await db["report_results"].drop()
+    await db["remediation_results"].drop()
     await client.aclose()
 
 
