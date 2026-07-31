@@ -17,10 +17,13 @@ class DockerContainerAdapter(ContainerRunPort):
         volume: str | None = None,
         run_as_root: bool = False,
         secret_env: dict[str, str] | None = None,
+        cache_volume: str | None = None,
     ) -> tuple[int, str, str]:
         cmd = ["docker", "run", "--rm"]
         if volume:
             cmd += ["-v", volume]
+        if cache_volume:
+            cmd += ["-v", cache_volume]
         if not run_as_root:
             cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
         if secret_env:

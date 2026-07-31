@@ -74,3 +74,34 @@ async def test_run_with_secret_env_never_logged(caplog):
     assert caplog.records
     assert "GIT_TOKEN" in caplog.text
     assert "ghp_SECRETVALUE" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_with_cache_volume_adds_second_v_flag():
+    adapter = DockerContainerAdapter()
+    with patch(
+        "asyncio.create_subprocess_exec", return_value=_mock_proc()
+    ) as mock_exec:
+        await adapter.run(
+            image="aquasec/trivy:0.71.2",
+            command="fs /workspace",
+            volume="/repo:/workspace",
+            cache_volume="/host/trivy-cache:/root/.cache/trivy",
+        )
+
+    call_args = mock_exec.call_args.args
+    assert "/repo:/workspace" in call_args
+    assert "/host/trivy-cache:/root/.cache/trivy" in call_args
+    assert call_args.count("-v") == 2
+
+
+@pytest.mark.asyncio
+async def test_run_without_cache_volume_unchanged_behavior():
+    adapter = DockerContainerAdapter()
+    with patch(
+        "asyncio.create_subprocess_exec", return_value=_mock_proc()
+    ) as mock_exec:
+        await adapter.run(image="alpine/git", command="echo hi")
+
+    call_args = mock_exec.call_args.args
+    assert call_args.count("-v") == 0
