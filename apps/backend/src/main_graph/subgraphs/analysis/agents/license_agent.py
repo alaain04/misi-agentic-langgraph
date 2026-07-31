@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from src.db.input_cache import InputCacheDAO
 from src.domain.ports.container_run_port import ContainerRunPort
@@ -61,7 +62,7 @@ class LicenseAgent(BaseAgent):
             else (UNLICENSED_ID, LICENSES[UNLICENSED_ID])
         )
 
-        licenses = await collect_licenses(prep)
+        licenses = await collect_licenses(prep, cast(ContainerRunPort, container))
         findings: list[FindingNote] = []
         for key, raw_license in licenses.items():
             dep_name = key.rsplit("@", 1)[0]
