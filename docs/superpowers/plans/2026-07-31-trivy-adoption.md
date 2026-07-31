@@ -1615,7 +1615,7 @@ Expected: FAIL — current `save_prep_result` calls `build_dependency_graph(repo
 
 - [ ] **Step 4: Update `save_prep_result.py`**
 
-Replace the body of `apps/backend/src/main_graph/subgraphs/discovery/nodes/save_prep_result.py`'s `save_prep_result` function — the caching that used to wrap `_build_graph` is now inside `build_dependency_graph` itself (Task 8), so this simplifies:
+Replace the body of `apps/backend/src/main_graph/subgraphs/discovery/nodes/save_prep_result.py`'s `save_prep_result` function — the caching that used to wrap `_build_graph` is now inside `build_dependency_graph` itself (Task 8), so this simplifies. Note `docker_image` (the Node tooling image, used elsewhere in discovery e.g. `install_deps`) and `settings.trivy_image` (the Trivy image) are two different images — `build_dependency_graph` always takes the latter, since it always runs Trivy, never Node tooling:
 
 ```python
 async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dict:
@@ -1640,7 +1640,7 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         repo_path,
         pm,
         container=svc["container"],
-        docker_image=docker_image,
+        docker_image=settings.trivy_image,
         cache=cache if lock_committed else None,
         repo_url=repo_url,
         commit_sha=commit_sha,
@@ -1665,14 +1665,12 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
     return {"prep_result_id": prep_result_id}
 ```
 
-Remove the now-unused `cache_key`/`get_or_compute` import if nothing else in the file uses it (check with `grep -n "cache_key\|get_or_compute" apps/backend/src/main_graph/subgraphs/discovery/nodes/save_prep_result.py` after editing).
-
-Note: `docker_image` here defaults to `"node:lts-alpine"` (today's Node-tooling default) but is passed to `build_dependency_graph`, which only uses it for the Trivy container image slot — this is a latent inconsistency worth flagging, not fixing in this task: `build_dependency_graph` should really receive `settings.trivy_image`, not `prep`'s Node docker image, since Trivy and Node tooling use different images. Fix this now: change the call above to pass `docker_image=settings.trivy_image` instead of `state.get("docker_image")`, and keep `docker_image=docker_image` (the Node image, unchanged) only in the `PrepResult(...)` construction below it. Import `from src.utils.config import settings` at the top of the file.
+Add `from src.utils.config import settings` to this file's imports. Remove the now-unused `cache_key`/`get_or_compute` import if nothing else in the file uses it (check with `grep -n "cache_key\|get_or_compute" apps/backend/src/main_graph/subgraphs/discovery/nodes/save_prep_result.py` after editing).
 
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd apps/backend && uv run pytest <path-to-test-file> -v -k save_prep_result`
-Expected: PASS. Update the test written in Step 2 to assert `kwargs["docker_image"] == settings.trivy_image` (import `settings` in the test file) instead of the state's `docker_image`, matching the correction made in Step 4.
+Expected: PASS. Update the test written in Step 2 to assert `kwargs["docker_image"] == settings.trivy_image` (import `settings` in the test file) instead of the state's `docker_image` value — Step 4's `build_dependency_graph` call always takes the Trivy image, never the Node tooling image.
 
 - [ ] **Step 6: Lint and typecheck**
 
