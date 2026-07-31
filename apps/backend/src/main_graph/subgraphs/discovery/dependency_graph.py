@@ -191,6 +191,9 @@ async def build_dependency_graph(
     package_manager: str,
     container: ContainerRunPort,
     docker_image: str,
+    # docker_image is currently unused: trivy_sbom_scan sources its scanner
+    # image from settings.trivy_image internally, not from this parameter.
+    # Kept for call-site symmetry with build_dependency_summary/save_prep_result.
     pkg: dict | None = None,
     cache: InputCacheDAO | None = None,
     repo_url: str = "",
@@ -222,7 +225,7 @@ async def build_dependency_graph(
         return await trivy_sbom_scan(repo_path=repo_path, container=container)
 
     if cache is not None and repo_url and commit_sha:
-        key = cache_key(repo_url, commit_sha, package_manager, "dependency_graph")
+        key = cache_key(repo_url, commit_sha, package_manager, "trivy_sbom")
         doc = await get_or_compute(cache, key, _scan)
     else:
         doc = await _scan()

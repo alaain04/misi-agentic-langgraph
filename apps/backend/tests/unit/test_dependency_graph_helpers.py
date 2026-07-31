@@ -273,7 +273,7 @@ async def test_build_dependency_graph_uses_cache_when_available():
         def __init__(self):
             self.store = {
                 cache_key(
-                    "https://github.com/x/y", "sha1", "npm", "dependency_graph"
+                    "https://github.com/x/y", "sha1", "npm", "trivy_sbom"
                 ): cached_graph_doc
             }
 

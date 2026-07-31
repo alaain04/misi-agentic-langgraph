@@ -153,9 +153,9 @@ def _seed_prep(job_id: str) -> PrepResult:
     )
 
 
-# vulnerability_agent is deterministic: it runs `npm audit` (not the LLM) and
-# extracts every advisory. Feed it a canned audit result so the graph wiring
-# can be exercised without a real repo -- same fixture the old test used.
+# vulnerability_agent is deterministic: it runs Trivy, not an LLM, and
+# extracts every advisory. Feed it a canned Trivy scan result so the graph
+# wiring can be exercised without a real repo -- same fixture the old test used.
 _TRIVY_FIXTURE = {
     "SchemaVersion": 2,
     "Results": [
