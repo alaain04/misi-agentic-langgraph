@@ -8,6 +8,7 @@ from src.main_graph.subgraphs.remediation.workspace import (
     apply_bump,
     copy_repo,
     pm_commands,
+    replace_dependency,
     working_copy_diff,
 )
 
@@ -16,13 +17,22 @@ from src.main_graph.subgraphs.remediation.workspace import (
 def git_repo(tmp_path):
     d = tmp_path / "repo"
     d.mkdir()
-    (d / "package.json").write_text(json.dumps(
-        {"name": "x", "dependencies": {"lodash": "^4.17.11"},
-         "devDependencies": {"jest": "^29.0.0"}}))
+    (d / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "x",
+                "dependencies": {"lodash": "^4.17.11"},
+                "devDependencies": {"jest": "^29.0.0"},
+            }
+        )
+    )
     subprocess.run(["git", "init", "-q"], cwd=d, check=True)
     subprocess.run(["git", "add", "-A"], cwd=d, check=True)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
-                    "commit", "-qm", "init"], cwd=d, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+        cwd=d,
+        check=True,
+    )
     return str(d)
 
 
@@ -64,3 +74,18 @@ def test_pm_commands_variants():
     assert pm_commands("pnpm")["install"] == "pnpm install --no-frozen-lockfile"
     assert pm_commands("yarn")["build"] == "yarn build"
     assert pm_commands("weird")["test"] == "npm test"  # fallback
+
+
+def test_replace_dependency_swaps_the_key(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": {"old-pkg": "^1.0.0"}})
+    )
+    assert replace_dependency(str(tmp_path), "old-pkg", "new-pkg", "^1.0.0") is True
+    pkg = json.loads((tmp_path / "package.json").read_text())
+    assert "old-pkg" not in pkg["dependencies"]
+    assert pkg["dependencies"]["new-pkg"] == "^1.0.0"
+
+
+def test_replace_dependency_false_when_not_declared(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {}}))
+    assert replace_dependency(str(tmp_path), "old-pkg", "new-pkg", "^1.0.0") is False

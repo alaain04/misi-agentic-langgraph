@@ -42,6 +42,24 @@ def apply_bump(work_dir: str, target_dep: str, to_range: str) -> bool:
     return False
 
 
+def replace_dependency(
+    work_dir: str, old_dep: str, new_dep: str, new_range: str
+) -> bool:
+    pkg_path = os.path.join(work_dir, "package.json")
+    with open(pkg_path) as f:
+        pkg = json.load(f)
+    for section in ("dependencies", "devDependencies"):
+        bucket = pkg.get(section) or {}
+        if old_dep in bucket:
+            del bucket[old_dep]
+            bucket[new_dep] = new_range
+            with open(pkg_path, "w") as f:
+                json.dump(pkg, f, indent=2)
+                f.write("\n")
+            return True
+    return False
+
+
 async def working_copy_diff(work_dir: str) -> str:
     proc = await asyncio.create_subprocess_exec(
         "git",

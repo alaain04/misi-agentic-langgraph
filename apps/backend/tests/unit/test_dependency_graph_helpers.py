@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.main_graph.subgraphs.discovery.dependency_graph import (
+    dependents_of,
     direct_dependents,
     is_direct,
 )
@@ -69,3 +70,37 @@ def test_direct_dependents_empty_when_no_transitive_data():
 
 def test_direct_dependents_empty_graph():
     assert direct_dependents({}, "anything") == []
+
+
+def test_dependents_of_returns_immediate_parents_only():
+    # qs is depended on directly by body-parser and webpack (not express,
+    # which only reaches qs transitively through body-parser)
+    assert dependents_of(_GRAPH, "qs") == ["body-parser", "webpack"]
+
+
+def test_dependents_of_single_parent():
+    assert dependents_of(_GRAPH, "body-parser") == ["express"]
+
+
+def test_dependents_of_empty_for_a_leaf_nothing_depends_on():
+    assert dependents_of(_GRAPH, "express") == []
+
+
+def test_dependents_of_empty_when_no_transitive_data():
+    graph = {"direct": {"lodash": "^4.17.21"}, "packages": {}}
+    assert dependents_of(graph, "lodash") == []
+
+
+def test_dependents_of_empty_graph():
+    assert dependents_of({}, "anything") == []
+
+
+def test_dependents_of_scoped_package_name():
+    graph = {
+        "direct": {"@nestjs/core": "10.0.0"},
+        "packages": {
+            "@nestjs/core@10.0.0": {"dependencies": ["@scope/leaf@1.0.0"]},
+            "@scope/leaf@1.0.0": {"dependencies": []},
+        },
+    }
+    assert dependents_of(graph, "@scope/leaf") == ["@nestjs/core"]

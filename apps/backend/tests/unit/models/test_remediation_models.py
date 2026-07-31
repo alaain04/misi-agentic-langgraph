@@ -1,6 +1,7 @@
 from src.models.remediation import (
     CodeChange,
     Remediation,
+    RemediationOutcome,
     RemediationResult,
     RemediationTarget,
     VerificationResult,
@@ -27,6 +28,36 @@ def test_verification_partial_is_representable():
     assert v.built is None and v.tested is None and v.finding_resolved is True
 
 
+def test_remediation_carries_required_by_and_pr_fields():
+    r = Remediation(
+        addresses=[],
+        target_dep="eslint-plugin-react",
+        required_by=["eslint"],
+    )
+    assert r.required_by == ["eslint"]
+    assert r.branch is None
+    assert r.pr_url is None
+
+
+def test_remediation_outcome_defaults_are_bump_only():
+    outcome = RemediationOutcome()
+    assert outcome.strategy == "bump"
+    assert outcome.requires == []
+    assert outcome.code_diff == ""
+    assert outcome.status == "skipped"
+
+
+def test_remediation_outcome_replace_fields():
+    outcome = RemediationOutcome(
+        strategy="replace",
+        replacement_dep="fast-glob",
+        replacement_range="^3.0.0",
+        requires=["some-plugin"],
+    )
+    assert outcome.replacement_dep == "fast-glob"
+    assert outcome.requires == ["some-plugin"]
+
+
 def test_remediation_result_round_trip():
     res = RemediationResult(
         job_id="j1",
@@ -38,14 +69,16 @@ def test_remediation_result_round_trip():
                 from_range="^0.5.1",
                 to_range="^0.5.5",
                 status="fixed",
+                branch="remediation/j1-mkdirp",
+                pr_url="https://gh/pr/1",
             )
         ],
-        branch="remediation/j1",
-        pr_url="https://gh/pr/1",
         consent=True,
     )
     doc = res.model_dump()
-    assert RemediationResult(**doc).remediations[0].target_dep == "mkdirp"
+    restored = RemediationResult(**doc)
+    assert restored.remediations[0].target_dep == "mkdirp"
+    assert restored.remediations[0].pr_url == "https://gh/pr/1"
 
 
 def test_remediation_target_carries_addresses():
