@@ -4,11 +4,11 @@ import logging
 
 from langchain_core.runnables import RunnableConfig
 
-from src.db.input_cache import cache_key, get_or_compute
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.discovery.dependency_graph import build_dependency_graph
 from src.main_graph.subgraphs.discovery.state import DiscoveryState
 from src.models.results import PrepResult
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +25,21 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
     repo_path = state.get("repo_path", "")
     repo_url = state.get("repo_url", "")
     commit_sha = state.get("commit_sha") or ""
+    docker_image = state.get("docker_image") or "node:lts-alpine"
 
-    async def _build_graph() -> dict:
-        return build_dependency_graph(repo_path, pm)
-
-    # Cache the dependency graph indefinitely ONLY when the lock file was
-    # committed to the repo — then it is a pure function of the committed source
-    # for this sha. When install_deps had to generate the lock this run, the
-    # graph was resolved against the live registry and the same sha can resolve
-    # differently over time, so it must not be cached under a sha-only key.
+    # A freshly-generated lockfile was resolved against the live registry
+    # this run, so it is NOT a pure function of commit_sha alone and must not
+    # be cached indefinitely.
     lock_committed = not state.get("lockfile_generated")
-    if cache is not None and commit_sha and lock_committed:
-        dep_graph = await get_or_compute(
-            cache, cache_key(repo_url, commit_sha, pm, "dependency_graph"), _build_graph
-        )
-    else:
-        dep_graph = await _build_graph()
+    dep_graph = await build_dependency_graph(
+        repo_path,
+        pm,
+        container=svc["container"],
+        docker_image=settings.trivy_image,
+        cache=cache if lock_committed else None,
+        repo_url=repo_url,
+        commit_sha=commit_sha,
+    )
 
     result = PrepResult(
         job_id=state["job_id"],
@@ -48,7 +47,7 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         project_metadata=dict(state.get("project_metadata") or {}),
         manifest_files=state.get("manifest_files") or [],
         detected_package_manager=pm,
-        docker_image=state.get("docker_image") or "node:lts-alpine",
+        docker_image=docker_image,
         repo_url=repo_url,
         commit_sha=commit_sha,
         dependency_graph=dep_graph,
