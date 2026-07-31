@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from src.main_graph.subgraphs.discovery.dependency_graph import (
+    build_dependency_graph,
     dependents_of,
     direct_dependents,
     is_direct,
@@ -104,3 +109,190 @@ def test_dependents_of_scoped_package_name():
         },
     }
     assert dependents_of(graph, "@scope/leaf") == ["@nestjs/core"]
+
+
+def _cyclonedx_doc(
+    *,
+    manifest_name: str,
+    direct: list[dict],
+    transitive_edges: dict[str, list[str]] | None = None,
+) -> dict:
+    """Build a minimal CycloneDX doc matching Trivy's verified shape: a root
+    metadata.component, an "application"-typed manifest component the root
+    depends on, and the manifest depending on the direct set.
+
+    `transitive_edges` maps a direct dep's bom-ref to the bom-refs of its own
+    children — the caller is responsible for also appending those child
+    components/dependency entries to the returned doc (see
+    test_build_dependency_graph_includes_transitive_edges for the pattern),
+    since this helper only knows about the direct-dependency layer.
+    """
+    root_ref = "root-ref"
+    manifest_ref = "manifest-ref"
+    components = [
+        {"bom-ref": manifest_ref, "type": "application", "name": manifest_name}
+    ]
+    dependencies = [
+        {"ref": root_ref, "dependsOn": [manifest_ref]},
+        {"ref": manifest_ref, "dependsOn": [d["bom-ref"] for d in direct]},
+    ]
+    for d in direct:
+        components.append(
+            {
+                "bom-ref": d["bom-ref"],
+                "type": "library",
+                "name": d["name"],
+                "version": d["version"],
+            }
+        )
+        dependencies.append(
+            {
+                "ref": d["bom-ref"],
+                "dependsOn": (transitive_edges or {}).get(d["bom-ref"], []),
+            }
+        )
+    return {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.7",
+        "metadata": {"component": {"name": "/workspace", "bom-ref": root_ref}},
+        "components": components,
+        "dependencies": dependencies,
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_dependency_graph_adapts_cyclonedx_direct_deps():
+    doc = _cyclonedx_doc(
+        manifest_name="package-lock.json",
+        direct=[
+            {
+                "bom-ref": "pkg:npm/express@4.22.2",
+                "name": "express",
+                "version": "4.22.2",
+            }
+        ],
+    )
+    container = AsyncMock()
+    container.run.return_value = (0, __import__("json").dumps(doc), "")
+
+    graph = await build_dependency_graph(
+        repo_path="/tmp/repo",
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+    )
+
+    assert graph["direct"] == {"express": "4.22.2"}
+    assert "express@4.22.2" in graph["packages"]
+
+
+@pytest.mark.asyncio
+async def test_build_dependency_graph_includes_transitive_edges():
+    doc = _cyclonedx_doc(
+        manifest_name="package-lock.json",
+        direct=[
+            {
+                "bom-ref": "pkg:npm/express@4.22.2",
+                "name": "express",
+                "version": "4.22.2",
+            }
+        ],
+        transitive_edges={"pkg:npm/express@4.22.2": ["pkg:npm/accepts@1.3.8"]},
+    )
+    doc["components"].append(
+        {
+            "bom-ref": "pkg:npm/accepts@1.3.8",
+            "type": "library",
+            "name": "accepts",
+            "version": "1.3.8",
+        }
+    )
+    doc["dependencies"].append({"ref": "pkg:npm/accepts@1.3.8", "dependsOn": []})
+    container = AsyncMock()
+    container.run.return_value = (0, __import__("json").dumps(doc), "")
+
+    graph = await build_dependency_graph(
+        repo_path="/tmp/repo",
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+    )
+
+    assert graph["packages"]["express@4.22.2"]["dependencies"] == ["accepts@1.3.8"]
+    assert "accepts@1.3.8" in graph["packages"]
+
+
+@pytest.mark.asyncio
+async def test_build_dependency_graph_falls_back_to_package_json_on_scan_error(
+    tmp_path,
+):
+    (tmp_path / "package.json").write_text('{"dependencies": {"express": "^4.18.0"}}')
+    container = AsyncMock()
+    container.run.return_value = (127, "", "sh: trivy: not found")
+
+    graph = await build_dependency_graph(
+        repo_path=str(tmp_path),
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+    )
+
+    assert graph == {"direct": {"express": "^4.18.0"}, "packages": {}}
+
+
+@pytest.mark.asyncio
+async def test_build_dependency_graph_falls_back_when_no_manifest_detected(tmp_path):
+    (tmp_path / "package.json").write_text("{}")
+    container = AsyncMock()
+    empty_doc = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.7",
+        "metadata": {},
+        "components": [],
+        "dependencies": [],
+    }
+    container.run.return_value = (0, __import__("json").dumps(empty_doc), "")
+
+    graph = await build_dependency_graph(
+        repo_path=str(tmp_path),
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+    )
+
+    assert graph == {"direct": {}, "packages": {}}
+
+
+@pytest.mark.asyncio
+async def test_build_dependency_graph_uses_cache_when_available():
+    from src.db.input_cache import cache_key
+
+    cached_graph_doc = _cyclonedx_doc(manifest_name="package-lock.json", direct=[])
+
+    class _FakeCache:
+        def __init__(self):
+            self.store = {
+                cache_key(
+                    "https://github.com/x/y", "sha1", "npm", "dependency_graph"
+                ): cached_graph_doc
+            }
+
+        async def get(self, key, max_age_seconds=None):
+            return self.store.get(key)
+
+        async def put(self, key, data):
+            self.store[key] = data
+
+    container = AsyncMock()
+    graph = await build_dependency_graph(
+        repo_path="/tmp/repo",
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+        cache=_FakeCache(),
+        repo_url="https://github.com/x/y",
+        commit_sha="sha1",
+    )
+
+    container.run.assert_not_awaited()
+    assert graph == {"direct": {}, "packages": {}}
