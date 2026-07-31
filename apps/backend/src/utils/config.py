@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     # CodeGraph (blast-radius analysis of the target repo)
     codegraph_docker_image: str
 
+    # Trivy (vulnerability/license scanning + SBOM/dependency-graph generation).
+    # trivy_cache_dir is a HOST directory, mounted into every trivy container
+    # invocation as a persistent cache_volume so the ~100MB vulnerability DB
+    # is downloaded once, not on every scan (see docs/superpowers/plans/
+    # 2026-07-31-trivy-adoption.md, Prior Art).
+    trivy_image: str
+    trivy_cache_dir: str
+
     # Tavily (web search for conductor)
     tavily_api_key: str
 

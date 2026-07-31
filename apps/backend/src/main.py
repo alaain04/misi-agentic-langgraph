@@ -37,6 +37,16 @@ async def lifespan(app: FastAPI):
         )
     logger.info("startup check: codegraph image runnable")
 
+    rc, _, stderr = await DockerContainerAdapter().run(
+        image=settings.trivy_image, command="trivy --version"
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"trivy image '{settings.trivy_image}' is not runnable "
+            f"(exit {rc}): {stderr}"
+        )
+    logger.info("startup check: trivy image runnable")
+
     yield
 
 
