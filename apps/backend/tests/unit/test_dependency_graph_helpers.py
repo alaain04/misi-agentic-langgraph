@@ -296,3 +296,86 @@ async def test_build_dependency_graph_uses_cache_when_available():
 
     container.run.assert_not_awaited()
     assert graph == {"direct": {}, "packages": {}}
+
+
+@pytest.mark.asyncio
+async def test_build_dependency_graph_does_not_pool_packages_across_manifests():
+    """A repo can contain more than one manifest (monorepo with two
+    lockfiles, or an unrelated manifest elsewhere in the tree that Trivy's
+    recursive scan picked up). Only the first-picked manifest's own
+    dependsOn subtree should end up in `packages` -- a second, disjoint
+    manifest's packages must not leak in even though they're present in the
+    same CycloneDX document.
+    """
+    root_ref = "root-ref"
+    manifest1_ref = "manifest1-ref"
+    manifest2_ref = "manifest2-ref"
+    alpha_ref = "pkg:npm/alpha@1.0.0"
+    alpha_dep_ref = "pkg:npm/alpha-dep@1.0.0"
+    beta_ref = "pkg:npm/beta@1.0.0"
+    beta_dep_ref = "pkg:npm/beta-dep@1.0.0"
+
+    doc = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.7",
+        "metadata": {"component": {"name": "/workspace", "bom-ref": root_ref}},
+        "components": [
+            {
+                "bom-ref": manifest1_ref,
+                "type": "application",
+                "name": "package-lock.json",
+            },
+            {
+                "bom-ref": manifest2_ref,
+                "type": "application",
+                "name": "services/other/package-lock.json",
+            },
+            {
+                "bom-ref": alpha_ref,
+                "type": "library",
+                "name": "alpha",
+                "version": "1.0.0",
+            },
+            {
+                "bom-ref": alpha_dep_ref,
+                "type": "library",
+                "name": "alpha-dep",
+                "version": "1.0.0",
+            },
+            {
+                "bom-ref": beta_ref,
+                "type": "library",
+                "name": "beta",
+                "version": "1.0.0",
+            },
+            {
+                "bom-ref": beta_dep_ref,
+                "type": "library",
+                "name": "beta-dep",
+                "version": "1.0.0",
+            },
+        ],
+        "dependencies": [
+            {"ref": root_ref, "dependsOn": [manifest1_ref, manifest2_ref]},
+            {"ref": manifest1_ref, "dependsOn": [alpha_ref]},
+            {"ref": manifest2_ref, "dependsOn": [beta_ref]},
+            {"ref": alpha_ref, "dependsOn": [alpha_dep_ref]},
+            {"ref": alpha_dep_ref, "dependsOn": []},
+            {"ref": beta_ref, "dependsOn": [beta_dep_ref]},
+            {"ref": beta_dep_ref, "dependsOn": []},
+        ],
+    }
+    container = AsyncMock()
+    container.run.return_value = (0, __import__("json").dumps(doc), "")
+
+    graph = await build_dependency_graph(
+        repo_path="/tmp/repo",
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+    )
+
+    assert graph["direct"] == {"alpha": "1.0.0"}
+    assert set(graph["packages"]) == {"alpha@1.0.0", "alpha-dep@1.0.0"}
+    assert "beta@1.0.0" not in graph["packages"]
+    assert "beta-dep@1.0.0" not in graph["packages"]

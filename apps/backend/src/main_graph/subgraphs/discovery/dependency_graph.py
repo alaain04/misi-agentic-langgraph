@@ -153,8 +153,22 @@ def _graph_from_cyclonedx(doc: dict) -> dict | None:
         if r in by_ref
     }
 
+    # Only include components reachable from this manifest -- a repo can have
+    # more than one manifest (monorepo, or an unrelated manifest elsewhere in
+    # the tree Trivy's recursive scan picked up), and packages under a
+    # different manifest must not pool into this one's graph.
+    reachable: set[str] = set()
+    stack = list(direct_refs)
+    while stack:
+        ref = stack.pop()
+        if ref in reachable or ref not in by_ref:
+            continue
+        reachable.add(ref)
+        stack.extend(depends_on.get(ref, []))
+
     packages: dict[str, dict] = {}
-    for ref, comp in by_ref.items():
+    for ref in reachable:
+        comp = by_ref[ref]
         if comp.get("type") == "application":
             continue
         name = comp.get("name")
