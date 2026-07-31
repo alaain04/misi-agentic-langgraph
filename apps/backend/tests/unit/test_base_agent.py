@@ -36,39 +36,44 @@ def _dispatch(agent_type: str = "vulnerability_agent") -> AgentDispatch:
 
 
 @pytest.mark.asyncio
-async def test_vulnerability_agent_run_extracts_all_audit_findings():
-    """run() audits the whole tree deterministically and takes every finding at
+async def test_vulnerability_agent_run_extracts_all_scan_findings():
+    """run() scans the whole tree deterministically via Trivy and takes every finding at
     or above the configured severity — no LLM, no package sampling."""
     from src.main_graph.subgraphs.analysis.agents import vulnerability_agent
 
-    audit_output = {
-        "advisories": {
-            "1": {
-                "module_name": "lodash",
-                "severity": "high",
-                "title": "Code injection",
-                "vulnerable_versions": "<=4.17.23",
-                "patched_versions": "<0.0.0",
-                "cves": ["CVE-1"],
-                "url": "https://x/1",
-                "findings": [{"version": "4.17.21"}],
-            },
-            "2": {
-                "module_name": "form-data",
-                "severity": "critical",
-                "title": "Unsafe random",
-                "vulnerable_versions": "<2.5.4",
-                "patched_versions": ">=2.5.4",
-                "cves": [],
-                "url": "https://x/2",
-                "findings": [{"version": "2.5.0"}],
-            },
-        }
+    trivy_output = {
+        "SchemaVersion": 2,
+        "Results": [
+            {
+                "Vulnerabilities": [
+                    {
+                        "VulnerabilityID": "CVE-1",
+                        "PkgName": "lodash",
+                        "InstalledVersion": "4.17.21",
+                        "FixedVersion": "4.17.22",
+                        "Severity": "HIGH",
+                        "Title": "Code injection",
+                        "Description": "lodash code injection vulnerability",
+                        "PrimaryURL": "https://x/1",
+                    },
+                    {
+                        "VulnerabilityID": "CVE-2",
+                        "PkgName": "form-data",
+                        "InstalledVersion": "2.5.0",
+                        "FixedVersion": "2.5.4",
+                        "Severity": "CRITICAL",
+                        "Title": "Unsafe random",
+                        "Description": "form-data unsafe random vulnerability",
+                        "PrimaryURL": "https://x/2",
+                    },
+                ]
+            }
+        ],
     }
-    audit = AsyncMock(return_value=audit_output)
+    scan = AsyncMock(return_value=trivy_output)
 
     with (
-        patch.object(vulnerability_agent, "npm_audit", audit),
+        patch.object(vulnerability_agent, "trivy_vuln_scan", scan),
         patch.object(vulnerability_agent.settings, "vuln_min_severity", "high"),
     ):
         (
@@ -78,7 +83,7 @@ async def test_vulnerability_agent_run_extracts_all_audit_findings():
         ) = await vulnerability_agent.VulnerabilityAgent().run(_dispatch(), _prep())
 
     assert isinstance(bundle, EvidenceBundle)
-    assert tools_used == ["npm_audit"]
+    assert tools_used == ["trivy_vuln_scan"]
     assert react_iterations == 1
     assert bundle.confidence == 1.0
     assert bundle.packages_to_focus == []  # not sampled — whole tree
@@ -88,22 +93,23 @@ async def test_vulnerability_agent_run_extracts_all_audit_findings():
 
 
 @pytest.mark.asyncio
-async def test_vulnerability_agent_run_passes_container_and_docker_image():
-    """run() forwards the injected container port and the prep's docker_image to
-    npm_audit."""
+async def test_vulnerability_agent_run_passes_container_and_repo_path():
+    """run() forwards the injected container port and repo_path to
+    trivy_vuln_scan."""
     from src.main_graph.subgraphs.analysis.agents import vulnerability_agent
 
-    audit = AsyncMock(return_value={"advisories": {}})
+    scan = AsyncMock(return_value={"SchemaVersion": 2, "Results": []})
     fake_container = AsyncMock()
+    prep = _prep()
 
-    with patch.object(vulnerability_agent, "npm_audit", audit):
+    with patch.object(vulnerability_agent, "trivy_vuln_scan", scan):
         await vulnerability_agent.VulnerabilityAgent().run(
-            _dispatch(), _prep(), fake_container
+            _dispatch(), prep, fake_container
         )
 
-    _, kwargs = audit.call_args
+    _, kwargs = scan.call_args
     assert kwargs["container"] is fake_container
-    assert kwargs["docker_image"] == _prep().docker_image
+    assert kwargs["repo_path"] == prep.repo_path
 
 
 @pytest.mark.asyncio
