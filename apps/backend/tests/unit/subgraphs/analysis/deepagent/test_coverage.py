@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.analysis.deepagent import coverage as coverage_module
 from src.main_graph.subgraphs.analysis.deepagent.coverage import (
     PACKAGE_SCOPED_AGENT_TYPES,
     WHOLE_TREE_AGENT_TYPES,
@@ -66,9 +64,6 @@ def test_missing_list_is_order_stable_by_direct_deps_order():
 
 @pytest.mark.asyncio
 async def test_whole_tree_scan_satisfies_concern_false_on_empty_concern():
-    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
-        whole_tree_scan_satisfies_concern,
-    )
 
     # No LLM call should happen for an empty concern -- if _llm were touched
     # without being patched, this would raise trying to reach the network.
@@ -78,11 +73,10 @@ async def test_whole_tree_scan_satisfies_concern_false_on_empty_concern():
 
 @pytest.mark.asyncio
 async def test_whole_tree_scan_satisfies_concern_false_when_nothing_ran():
-    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
-        whole_tree_scan_satisfies_concern,
-    )
 
-    result = await whole_tree_scan_satisfies_concern("analyze vulnerable dependencies", [])
+    result = await whole_tree_scan_satisfies_concern(
+        "analyze vulnerable dependencies", []
+    )
     assert result is False
 
 
@@ -90,7 +84,6 @@ async def test_whole_tree_scan_satisfies_concern_false_when_nothing_ran():
 async def test_whole_tree_scan_satisfies_concern_true_when_llm_says_covered():
     from src.main_graph.subgraphs.analysis.deepagent.coverage import (
         _CoverageJudgment,
-        whole_tree_scan_satisfies_concern,
     )
 
     mock_llm = MagicMock()
@@ -113,7 +106,6 @@ async def test_whole_tree_scan_satisfies_concern_true_when_llm_says_covered():
 async def test_whole_tree_scan_satisfies_concern_false_when_llm_says_not_covered():
     from src.main_graph.subgraphs.analysis.deepagent.coverage import (
         _CoverageJudgment,
-        whole_tree_scan_satisfies_concern,
     )
 
     mock_llm = MagicMock()
@@ -134,9 +126,6 @@ async def test_whole_tree_scan_satisfies_concern_false_when_llm_says_not_covered
 
 @pytest.mark.asyncio
 async def test_whole_tree_scan_satisfies_concern_false_on_llm_exception():
-    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
-        whole_tree_scan_satisfies_concern,
-    )
 
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
