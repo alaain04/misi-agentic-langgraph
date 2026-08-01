@@ -61,6 +61,7 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+from src.main_graph.subgraphs.analysis.concern import Concern
 from src.main_graph.subgraphs.analysis.deepagent import nodes as deepagent_nodes
 from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
 from src.models.conductor import EvidenceRef, FindingNote
@@ -249,6 +250,16 @@ async def _extract_as(description: str, agent_type: str) -> AgentDispatch:
     )
 
 
+def _fake_concern_llm(concern: Concern) -> MagicMock:
+    """Mock understand_concern's _llm: with_structured_output(...).ainvoke(...) ->
+    the given Concern, every call."""
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=concern
+    )
+    return mock_llm
+
+
 def _fake_base_llm(decision: DomainAgentDecision) -> MagicMock:
     """Mock base_agent._llm: _llm.with_structured_output(...).ainvoke(...) ->
     the given DomainAgentDecision, every call."""
@@ -331,6 +342,18 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
             "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
             _fake_base_llm(decision),
         ),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(
+                Concern(
+                    type=["maintenance"],
+                    scope="all_dependencies",
+                    packages=[],
+                    requires_per_dependency_analysis=True,
+                    preferred_agents=["maintenance_agent"],
+                )
+            ),
+        ),
     ):
         graph = build_analysis_subgraph()
         result = await graph.ainvoke(
@@ -404,6 +427,18 @@ async def test_backstop_fires_when_deep_agent_never_delegates(
         patch(
             "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
             _fake_base_llm(decision),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(
+                Concern(
+                    type=["vulnerability"],
+                    scope="all_dependencies",
+                    packages=[],
+                    requires_per_dependency_analysis=True,
+                    preferred_agents=["vulnerability_agent"],
+                )
+            ),
         ),
     ):
         graph = build_analysis_subgraph()
@@ -497,6 +532,18 @@ async def test_analysis_accumulates_bundles_across_two_correction_rounds(
         patch(
             "src.main_graph.subgraphs.analysis.deepagent.nodes.whole_tree_scan_satisfies_concern",
             AsyncMock(return_value=False),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(
+                Concern(
+                    type=["maintenance"],
+                    scope="all_dependencies",
+                    packages=[],
+                    requires_per_dependency_analysis=True,
+                    preferred_agents=["maintenance_agent"],
+                )
+            ),
         ),
     ):
         graph = build_analysis_subgraph()
@@ -619,6 +666,18 @@ async def test_parallel_task_calls_in_one_turn_do_not_crash_root_state(
                 }
             ),
         ),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(
+                Concern(
+                    type=["maintenance", "supply_chain"],
+                    scope="all_dependencies",
+                    packages=[],
+                    requires_per_dependency_analysis=True,
+                    preferred_agents=["maintenance_agent", "supply_chain_agent"],
+                )
+            ),
+        ),
     ):
         graph = build_analysis_subgraph()
         result = await graph.ainvoke(
@@ -691,6 +750,18 @@ async def test_coverage_gate_skips_per_package_coverage_when_whole_tree_scan_sat
         patch(
             "src.main_graph.subgraphs.analysis.deepagent.nodes.whole_tree_scan_satisfies_concern",
             AsyncMock(return_value=True),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(
+                Concern(
+                    type=["vulnerability"],
+                    scope="all_dependencies",
+                    packages=[],
+                    requires_per_dependency_analysis=True,
+                    preferred_agents=["vulnerability_agent"],
+                )
+            ),
         ),
     ):
         graph = build_analysis_subgraph()
