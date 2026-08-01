@@ -45,19 +45,22 @@ understand_concern -> route_concern
   bypassing the deep agent, `_extract_dispatch`, and `coverage_gate`
   entirely.
 - Complex concerns go through the existing deep agent pipeline, unchanged in
-  wiring but with a rewritten, more opinionated system prompt and an
-  enforced call budget (`DeepAgentLimits`).
+  graph wiring but with a rewritten, more opinionated system prompt, an
+  enforced call budget (`DeepAgentLimits`), and `coverage_gate`'s
+  per-direct-dependency enforcement now conditioned on
+  `structured_concern.requires_per_dependency_analysis` (section 8) instead
+  of applying unconditionally.
 
 ## Non-goals
 
 - Not changing `MainState.concern`'s type or the `/analyze` API contract — it
   stays a free-text string. `Concern` is purely internal to the analysis
   subgraph.
-- Not changing `coverage_gate` / `whole_tree_scan_satisfies_concern`'s
-  signature or behavior for the complex path — it still takes the raw
-  concern string and still only runs when the deep agent path is taken.
-  Passing it `structured_concern` instead is a plausible follow-up, not
-  required here.
+- Not changing `whole_tree_scan_satisfies_concern`'s signature — it still
+  takes the raw concern string, and only runs (via `coverage_gate`) when the
+  deep agent path is taken AND `requires_per_dependency_analysis=True` (see
+  section 8). `coverage_gate` itself does change: it now reads one field off
+  `structured_concern` to decide whether to enforce coverage at all.
 - Not changing `backstop.py`, `license_agent.py`, `vulnerability_agent.py`,
   or any other `BaseAgent` subclass.
 - Not fixing `docs/graphs.md` / `docs/backend/architecture.md` — both already
@@ -320,6 +323,49 @@ Project context: {context}
 `concern_type`/`concern_scope` are read from `state["structured_concern"]`
 and interpolated alongside the existing raw `concern` text.
 
+### 8. Complex path — conditional `coverage_gate` enforcement
+
+`coverage_gate` (`deepagent/nodes.py:174`) currently forces per-direct-dependency
+coverage unconditionally whenever the complex path is taken (the existing D5
+coverage guarantee). That guarantee has a real cost `backstop_dispatch`
+doesn't respect: `backstop.py`'s loop over `missing_deps` has **no** budget
+or concurrency cap — it forcibly runs a specialist for every remaining
+missing direct dependency regardless of `DeepAgentLimits`, which would
+silently defeat both the new call budget and the rewritten prompt's
+"prioritize highest-risk, report unanalyzed" instruction for any concern
+that isn't explicitly asking for exhaustive per-dependency treatment.
+
+`structured_concern.requires_per_dependency_analysis` already exists to
+answer exactly this question, so `coverage_gate` reads it before doing any
+other work:
+
+```python
+async def coverage_gate(state: AnalysisState, config: RunnableConfig) -> dict:
+    concern = Concern(**state["structured_concern"])
+    if not concern.requires_per_dependency_analysis:
+        # This complex concern wasn't asking for exhaustive per-package
+        # treatment -- trust the deep agent's own prioritization (see the
+        # rewritten prompt) instead of forcing full coverage.
+        return {
+            "missing_deps": [],
+            "correction_rounds": (state.get("correction_rounds") or 0) + 1,
+        }
+    # ... existing body: whole_tree_scan_satisfies_concern judge +
+    # compute_missing_direct_deps, unchanged.
+```
+
+`route_after_coverage_gate` needs no changes — it already routes straight to
+`save_analysis_result` whenever `missing_deps` is empty, which is exactly
+what this early return produces. No new graph edges, no new nodes: this is
+a change to `coverage_gate`'s body only, and it also saves a
+`whole_tree_scan_satisfies_concern` LLM call in this case.
+
+If `requires_per_dependency_analysis` is somehow missing from
+`state["structured_concern"]` (shouldn't happen — `understand_concern`
+always runs first — but defensively), default to `True`: the conservative
+direction, matching every other LLM-judge fallback in this codebase (a
+spurious forced-coverage costs extra calls, never a missed one).
+
 ## Error handling
 
 - `understand_concern`'s structured-output call fails (exception) ->
@@ -353,9 +399,18 @@ and interpolated alongside the existing raw `concern` text.
   `max_specialist_calls` is reached; semaphore caps concurrent
   `run_specialist` calls at `max_parallel_calls` (simulate with a slow fake
   agent and assert peak concurrency).
+- `tests/unit/subgraphs/analysis/deepagent/test_coverage.py` (existing,
+  extend): `coverage_gate` returns `missing_deps=[]` immediately — no bundle
+  fetch, no `whole_tree_scan_satisfies_concern` call — when
+  `requires_per_dependency_analysis=False`; existing behavior unchanged when
+  `True`; defaults to the `True` (enforce) path when the field is absent
+  from `structured_concern`.
 - Graph-level test (wherever the analysis subgraph is exercised end-to-end,
   e.g. `tests/subgraphs/test_analysis_subgraph.py`): a simple concern
   (`type=["vulnerability"]`) never reaches `analysis_deepagent_node` or
-  `coverage_gate`; a complex concern (`requires_per_dependency_analysis=True`
-  or `type=["maintenance"]`) still goes through the existing deep-agent path
-  unchanged.
+  `coverage_gate`; a complex concern with `requires_per_dependency_analysis=True`
+  (or `type=["maintenance"]`) still goes through the existing deep-agent path
+  unchanged; a complex concern with `requires_per_dependency_analysis=False`
+  reaches `save_analysis_result` straight from `coverage_gate` without
+  looping back to `analysis_deepagent_node` or reaching `backstop_dispatch`,
+  even with direct deps left uncovered.
