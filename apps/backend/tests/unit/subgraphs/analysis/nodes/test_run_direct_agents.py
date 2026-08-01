@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -104,6 +105,25 @@ async def test_run_direct_agents_both_agents_run_concurrently():
         }
     )
 
+    concurrent = 0
+    peak = 0
+
+    async def _slow_vuln_run(*args, **kwargs):
+        nonlocal concurrent, peak
+        concurrent += 1
+        peak = max(peak, concurrent)
+        await asyncio.sleep(0.02)
+        concurrent -= 1
+        return _bundle("vulnerability"), ["trivy"], 1
+
+    async def _slow_lic_run(*args, **kwargs):
+        nonlocal concurrent, peak
+        concurrent += 1
+        peak = max(peak, concurrent)
+        await asyncio.sleep(0.02)
+        concurrent -= 1
+        return _bundle("license"), ["license_collector"], 1
+
     with (
         patch(
             "src.main_graph.subgraphs.analysis.nodes.run_direct_agents.get_services",
@@ -112,22 +132,25 @@ async def test_run_direct_agents_both_agents_run_concurrently():
         patch(
             "src.main_graph.subgraphs.analysis.agents.vulnerability_agent"
             ".VulnerabilityAgent.run",
-            new=AsyncMock(return_value=(_bundle("vulnerability"), ["trivy"], 1)),
+            new=_slow_vuln_run,
         ),
         patch(
             "src.main_graph.subgraphs.analysis.agents.license_agent.LicenseAgent.run",
-            new=AsyncMock(
-                return_value=(_bundle("license"), ["license_collector"], 1)
-            ),
+            new=_slow_lic_run,
         ),
     ):
         result = await run_direct_agents(
             _state(["vulnerability_agent", "license_agent"]), {"configurable": {}}
         )
 
+    # Verify result shape (existing assertions)
     assert set(result["bundle_ids"]) == {"bundle-vuln", "bundle-lic"}
     assert len(result["agent_calls"]) == 2
     assert {c["agent_type"] for c in result["agent_calls"]} == {
         "vulnerability_agent",
         "license_agent",
     }
+
+    # Verify concurrent execution: peak should be 2 (both agents running together)
+    # If they ran sequentially, peak would never exceed 1
+    assert peak == 2
