@@ -18,8 +18,8 @@ is a real, structural cost of the deepagent swap, not an oversight):
 - subagent_wrapper._extract_dispatch (extracts a typed AgentDispatch from the
   root's free-text task() description)
 - base_agent._llm (returns a canned DomainAgentDecision, same as before)
-- vulnerability_agent.npm_audit (the vulnerability agent is deterministic: it
-  runs `npm audit`, not an LLM)
+- vulnerability_agent.trivy_vuln_scan (the vulnerability agent is deterministic: it
+  runs Trivy, not an LLM)
 
 Two behaviours the task-6 brief guessed wrong; corrected here to match what the
 real graph actually does (see task-6-report.md for the full write-up):
@@ -153,22 +153,27 @@ def _seed_prep(job_id: str) -> PrepResult:
     )
 
 
-# vulnerability_agent is deterministic: it runs `npm audit` (not the LLM) and
-# extracts every advisory. Feed it a canned audit result so the graph wiring
-# can be exercised without a real repo -- same fixture the old test used.
-_AUDIT_FIXTURE = {
-    "advisories": {
-        "1": {
-            "module_name": "lodash",
-            "severity": "high",
-            "title": "CVE-2021-23337: prototype pollution in lodash < 4.17.21",
-            "vulnerable_versions": "<4.17.21",
-            "patched_versions": ">=4.17.21",
-            "cves": ["CVE-2021-23337"],
-            "url": None,
-            "findings": [{"version": "4.17.20"}],
+# vulnerability_agent is deterministic: it runs Trivy, not an LLM, and
+# extracts every advisory. Feed it a canned Trivy scan result so the graph
+# wiring can be exercised without a real repo -- same fixture the old test used.
+_TRIVY_FIXTURE = {
+    "SchemaVersion": 2,
+    "Results": [
+        {
+            "Vulnerabilities": [
+                {
+                    "VulnerabilityID": "CVE-2021-23337",
+                    "PkgName": "lodash",
+                    "InstalledVersion": "4.17.20",
+                    "FixedVersion": "4.17.21",
+                    "Severity": "HIGH",
+                    "Title": "prototype pollution in lodash < 4.17.21",
+                    "Description": "Lodash prototype pollution vulnerability",
+                    "PrimaryURL": "https://nvd.nist.gov/vuln/detail/CVE-2021-23337",
+                }
+            ]
         }
-    }
+    ],
 }
 
 
@@ -439,7 +444,7 @@ async def test_analysis_accumulates_bundles_across_two_correction_rounds(
     first running end-to-end proof of analysis_deepagent_node's delta-slicing.
 
     Round 1: the root deep agent delegates only to vulnerability_agent (a
-    whole-tree agent that runs `npm audit`). It surfaces the lodash CVE, but
+    whole-tree agent that runs Trivy). It surfaces the lodash CVE, but
     whole-tree agents never count toward per-dep coverage, so coverage_gate
     finds lodash still uncovered and loops the deep agent.
     Round 2: with coverage_gate's "still need coverage" prompt in context, the
@@ -482,8 +487,8 @@ async def test_analysis_accumulates_bundles_across_two_correction_rounds(
             new=AsyncMock(side_effect=_extract_as),
         ),
         patch(
-            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent.npm_audit",
-            AsyncMock(return_value=_AUDIT_FIXTURE),
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent.trivy_vuln_scan",
+            AsyncMock(return_value=_TRIVY_FIXTURE),
         ),
         patch(
             "src.main_graph.subgraphs.analysis.agents.base_agent._llm",

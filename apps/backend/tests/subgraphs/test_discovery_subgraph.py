@@ -22,6 +22,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.main_graph.subgraphs.discovery.graph import build_discovery_subgraph
+from src.main_graph.subgraphs.discovery.nodes.save_prep_result import save_prep_result
+from src.utils.config import settings
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "simple-nodejs-project")
 _DISCOVERY_SUMMARY = (
@@ -177,3 +179,43 @@ async def test_discovery_error_skips_prep_save(subgraph_config, result_dao):
         "Expected no prep_result_id when clone fails"
     )
     assert result.get("discovery_error")
+
+
+@pytest.mark.asyncio
+async def test_save_prep_result_calls_build_dependency_graph_with_container():
+    """Test that save_prep_result passes container and trivy_image through."""
+    state = {
+        "job_id": "j1",
+        "repo_path": "/tmp/repo",
+        "repo_url": "https://github.com/x/y",
+        "commit_sha": "sha1",
+        "detected_package_manager": "npm",
+        "docker_image": "aquasec/trivy:0.71.2",
+    }
+    dao = AsyncMock()
+    dao.save_prep.return_value = "prep-id-1"
+    container = AsyncMock()
+    config = {"configurable": {"services": {"result_dao": dao, "container": container}}}
+
+    graph_mock = AsyncMock(return_value={"direct": {}, "packages": {}})
+    patch_graph = patch(
+        "src.main_graph.subgraphs.discovery.nodes.save_prep_result."
+        "build_dependency_graph",
+        graph_mock,
+    )
+    patch_services = patch(
+        "src.main_graph.subgraphs.discovery.nodes.save_prep_result.get_services",
+        return_value={
+            "result_dao": dao,
+            "container": container,
+            "input_cache": None,
+        },
+    )
+    with patch_graph, patch_services:
+        result = await save_prep_result(state, config)
+
+    graph_mock.assert_awaited_once()
+    _, kwargs = graph_mock.call_args
+    assert kwargs["container"] is container
+    assert kwargs["docker_image"] == settings.trivy_image
+    assert result == {"prep_result_id": "prep-id-1"}

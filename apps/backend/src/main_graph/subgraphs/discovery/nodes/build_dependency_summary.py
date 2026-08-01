@@ -6,12 +6,16 @@ import json
 import logging
 import textwrap
 
+from langchain_core.runnables import RunnableConfig
+
+from src.main_graph.config import get_services
 from src.main_graph.subgraphs.discovery.dependency_graph import (
     build_dependency_graph,
     count_dependencies,
     read_package_json,
 )
 from src.main_graph.subgraphs.discovery.state import DiscoveryState, ProjectMetadata
+from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -28,7 +32,7 @@ user's concern, write a concise summary (3-6 sentences, ≤ 150 words) that:
     """).strip()
 
 
-async def build_project_context(state: DiscoveryState) -> dict:
+async def build_project_context(state: DiscoveryState, config: RunnableConfig) -> dict:
     error = state.get("discovery_error")
     if error:
         return {
@@ -41,11 +45,30 @@ async def build_project_context(state: DiscoveryState) -> dict:
             "project_context": f"Discovery failed: {error}",
         }
 
+    svc = get_services(config)
     repo_path = state.get("repo_path", "")
     concern = state.get("concern", "")
     pkg = read_package_json(repo_path)
     pm = state.get("detected_package_manager", "npm")
-    direct, transitive = count_dependencies(build_dependency_graph(repo_path, pm, pkg))
+
+    # A freshly-generated lockfile was resolved against the live registry
+    # this run, so it is NOT a pure function of commit_sha alone and must not
+    # be cached indefinitely — mirrors save_prep_result's identical check.
+    # This node and save_prep_result share the same trivy-scan cache key, so
+    # whichever of the two runs first (this one, per discovery graph order)
+    # pays for the real scan and the other is a cache hit.
+    lock_committed = not state.get("lockfile_generated")
+    graph = await build_dependency_graph(
+        repo_path,
+        pm,
+        container=svc["container"],
+        docker_image=settings.trivy_image,
+        pkg=pkg,
+        cache=svc.get("input_cache") if lock_committed else None,
+        repo_url=state.get("repo_url", ""),
+        commit_sha=state.get("commit_sha") or "",
+    )
+    direct, transitive = count_dependencies(graph)
 
     metadata = ProjectMetadata(
         name=pkg.get("name", "unknown"),
