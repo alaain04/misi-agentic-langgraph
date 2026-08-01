@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.main_graph.subgraphs.analysis.nodes.run_direct_agents import (
+    run_direct_agents,
+)
+from src.models.conductor import EvidenceRef, FindingNote
+from src.models.results import EvidenceBundle, PrepResult
+
+
+def _make_prep() -> PrepResult:
+    return PrepResult(
+        job_id="job-1",
+        repo_path="/tmp/repo",
+        project_metadata={"name": "x"},
+        manifest_files=["package.json"],
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
+        discovery_summary="a test repo",
+        vector_store_id="",
+    )
+
+
+def _bundle(domain: str) -> EvidenceBundle:
+    return EvidenceBundle(
+        domain=domain,
+        hypothesis="check for known CVEs",
+        packages_to_focus=[],
+        findings=[
+            FindingNote(
+                dep_name="lodash",
+                severity="high",
+                description=f"{domain} finding",
+                evidence=[EvidenceRef(tool="trivy", url=None, log_snippet="")],
+            )
+        ],
+        summary="1 finding",
+        confidence=1.0,
+    )
+
+
+def _state(preferred_agents: list[str]) -> dict:
+    return {
+        "job_id": "job-1",
+        "concern": "check for known CVEs",
+        "prep_result_id": "prep-1",
+        "structured_concern": {
+            "type": ["vulnerability"],
+            "scope": "all_dependencies",
+            "packages": [],
+            "requires_per_dependency_analysis": False,
+            "preferred_agents": preferred_agents,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_direct_agents_single_agent():
+    fake_dao = MagicMock()
+    fake_dao.get_prep = AsyncMock(return_value=_make_prep())
+    fake_dao.save_bundle = AsyncMock(return_value="bundle-1")
+    mock_get_services = MagicMock(
+        return_value={
+            "result_dao": fake_dao,
+            "container": MagicMock(),
+            "input_cache": None,
+        }
+    )
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.run_direct_agents.get_services",
+            mock_get_services,
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent"
+            ".VulnerabilityAgent.run",
+            new=AsyncMock(return_value=(_bundle("vulnerability"), ["trivy"], 1)),
+        ),
+    ):
+        result = await run_direct_agents(
+            _state(["vulnerability_agent"]), {"configurable": {}}
+        )
+
+    assert result["bundle_ids"] == ["bundle-1"]
+    assert len(result["agent_calls"]) == 1
+    assert result["agent_calls"][0]["agent_type"] == "vulnerability_agent"
+    assert result["agent_calls"][0]["packages_to_focus"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_direct_agents_both_agents_run_concurrently():
+    fake_dao = MagicMock()
+    fake_dao.get_prep = AsyncMock(return_value=_make_prep())
+    fake_dao.save_bundle = AsyncMock(side_effect=["bundle-vuln", "bundle-lic"])
+    mock_get_services = MagicMock(
+        return_value={
+            "result_dao": fake_dao,
+            "container": MagicMock(),
+            "input_cache": None,
+        }
+    )
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.run_direct_agents.get_services",
+            mock_get_services,
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent"
+            ".VulnerabilityAgent.run",
+            new=AsyncMock(return_value=(_bundle("vulnerability"), ["trivy"], 1)),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.license_agent.LicenseAgent.run",
+            new=AsyncMock(
+                return_value=(_bundle("license"), ["license_collector"], 1)
+            ),
+        ),
+    ):
+        result = await run_direct_agents(
+            _state(["vulnerability_agent", "license_agent"]), {"configurable": {}}
+        )
+
+    assert set(result["bundle_ids"]) == {"bundle-vuln", "bundle-lic"}
+    assert len(result["agent_calls"]) == 2
+    assert {c["agent_type"] for c in result["agent_calls"]} == {
+        "vulnerability_agent",
+        "license_agent",
+    }
