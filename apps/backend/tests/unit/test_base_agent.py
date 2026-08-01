@@ -171,6 +171,30 @@ async def test_run_tool_injects_container_and_docker_image():
     assert received_kwargs["docker_image"] == _prep().docker_image
 
 
+@pytest.mark.asyncio
+async def test_run_tool_handles_langchain_tool_decorated_async_function():
+    """Regression test: LangChain's @tool decorator on an async function
+    stores the coroutine in .coroutine and leaves .func set to None (not
+    absent) -- inspect.signature(fn.func) then raises "None is not a
+    callable object" instead of "unknown tool". _run_tool must introspect
+    the actual coroutine, not the always-present-but-empty .func slot."""
+    from langchain_core.tools import tool
+
+    from src.main_graph.subgraphs.analysis.agents.base_agent import _run_tool
+    from src.models.conductor import ToolCall
+
+    @tool
+    async def search_code(query: str, top_k: int = 10) -> list[dict]:
+        """Search repository source files."""
+        return [{"file": "found.ts", "snippet": query}]
+
+    tc = ToolCall(tool="search_code", args={"query": "lodash"}, reason="test")
+    result = await _run_tool(tc, {"search_code": search_code}, _prep())
+
+    assert result.error is None
+    assert result.output == {"result": [{"file": "found.ts", "snippet": "lodash"}]}
+
+
 def test_format_params_excludes_injected_params():
     from src.main_graph.subgraphs.analysis.agents.base_agent import _format_params
 
