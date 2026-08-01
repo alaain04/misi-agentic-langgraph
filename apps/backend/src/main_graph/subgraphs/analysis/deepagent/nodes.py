@@ -45,6 +45,13 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
       packages or a different angle.
     - vulnerability_agent and license_agent each scan the ENTIRE dependency
       tree in a single run -- delegate to each at most once.
+    - If vulnerability_agent or license_agent already fully answers the
+      concern with high-confidence findings, do NOT also dispatch
+      web_research_agent (or any other specialist) just to re-confirm or
+      re-research those same findings -- that adds no new evidence and
+      wastes budget. Only delegate further work that covers something the
+      whole-tree scan genuinely does not: a different concern (e.g.
+      maintenance, supply chain), or gaps the scan left unanswered.
     - For every other specialist, make sure your delegated tasks collectively
       cover every direct dependency relevant to the concern -- you may be
       asked to cover specific missing ones if you stop early.
