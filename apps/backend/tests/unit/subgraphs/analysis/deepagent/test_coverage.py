@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.main_graph.subgraphs.analysis.deepagent import coverage as coverage_module
 from src.main_graph.subgraphs.analysis.deepagent.coverage import (
     PACKAGE_SCOPED_AGENT_TYPES,
     WHOLE_TREE_AGENT_TYPES,
     compute_missing_direct_deps,
+    whole_tree_scan_satisfies_concern,
 )
 
 
@@ -55,3 +62,167 @@ def test_missing_list_is_order_stable_by_direct_deps_order():
     ]
     missing = compute_missing_direct_deps(agent_calls, ["uuid", "chalk", "left-pad"])
     assert missing == ["uuid", "left-pad"]
+
+
+def _fake_llm(*, fully_addressed: bool | None = None, raises: bool = False):
+    structured = MagicMock()
+    if raises:
+        structured.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
+    else:
+        structured.ainvoke = AsyncMock(
+            return_value=SimpleNamespace(fully_addressed=fully_addressed, reason="r")
+        )
+    llm = MagicMock()
+    llm.with_structured_output = MagicMock(return_value=structured)
+    return llm
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_false_without_whole_tree_agents():
+    # No LLM call when nothing whole-tree ran.
+    result = await whole_tree_scan_satisfies_concern("vulnerabilities", [])
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_false_for_empty_concern():
+    result = await whole_tree_scan_satisfies_concern("  ", ["vulnerability_agent"])
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_delegates_true_to_llm():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        _CoverageJudgment,
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_CoverageJudgment(
+            fully_addressed=True, reason="Trivy already covers known CVEs"
+        )
+    )
+    with patch("src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm):
+        result = await whole_tree_scan_satisfies_concern(
+            "analyze vulnerable dependencies", ["vulnerability_agent"]
+        )
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_delegates_false_to_llm():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        _CoverageJudgment,
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_CoverageJudgment(
+            fully_addressed=False, reason="concern also asks about maintenance"
+        )
+    )
+    with patch("src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm):
+        result = await whole_tree_scan_satisfies_concern(
+            "vulnerabilities and outdated packages", ["vulnerability_agent"]
+        )
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_falls_back_to_false_on_llm_error():
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=RuntimeError("boom")
+    )
+    with patch("src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm):
+        result = await whole_tree_scan_satisfies_concern(
+            "analyze vulnerable dependencies", ["vulnerability_agent"]
+        )
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_false_on_empty_concern():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        whole_tree_scan_satisfies_concern,
+    )
+
+    # No LLM call should happen for an empty concern -- if _llm were touched
+    # without being patched, this would raise trying to reach the network.
+    result = await whole_tree_scan_satisfies_concern("", ["vulnerability_agent"])
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_false_when_nothing_ran():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        whole_tree_scan_satisfies_concern,
+    )
+
+    result = await whole_tree_scan_satisfies_concern("analyze vulnerable dependencies", [])
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_true_when_llm_says_covered():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        _CoverageJudgment,
+        whole_tree_scan_satisfies_concern,
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_CoverageJudgment(
+            fully_addressed=True, reason="Trivy already covers known CVEs"
+        )
+    )
+    with patch(
+        "src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm
+    ):
+        result = await whole_tree_scan_satisfies_concern(
+            "analyze vulnerable dependencies", ["vulnerability_agent"]
+        )
+    assert result is True
+    mock_llm.with_structured_output.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_false_when_llm_says_not_covered():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        _CoverageJudgment,
+        whole_tree_scan_satisfies_concern,
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=_CoverageJudgment(
+            fully_addressed=False, reason="concern also asks about maintenance"
+        )
+    )
+    with patch(
+        "src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm
+    ):
+        result = await whole_tree_scan_satisfies_concern(
+            "check for vulnerabilities and unmaintained packages",
+            ["vulnerability_agent"],
+        )
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_whole_tree_scan_satisfies_concern_false_on_llm_exception():
+    from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+        whole_tree_scan_satisfies_concern,
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=RuntimeError("boom")
+    )
+    with patch(
+        "src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm
+    ):
+        result = await whole_tree_scan_satisfies_concern(
+            "analyze vulnerable dependencies", ["vulnerability_agent"]
+        )
+    assert result is False
