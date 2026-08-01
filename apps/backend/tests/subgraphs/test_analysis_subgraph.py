@@ -494,6 +494,10 @@ async def test_analysis_accumulates_bundles_across_two_correction_rounds(
             "src.main_graph.subgraphs.analysis.agents.base_agent._llm",
             _fake_base_llm(maintenance_decision),
         ),
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.nodes.whole_tree_scan_satisfies_concern",
+            AsyncMock(return_value=False),
+        ),
     ):
         graph = build_analysis_subgraph()
         result = await graph.ainvoke(
@@ -646,3 +650,72 @@ async def test_parallel_task_calls_in_one_turn_do_not_crash_root_state(
         "maintenance_agent",
         "supply_chain_agent",
     }
+
+
+@pytest.mark.asyncio
+async def test_coverage_gate_skips_per_package_coverage_when_whole_tree_scan_satisfies_concern(  # noqa: E501
+    subgraph_config, result_dao
+):
+    """Regression test for the redundant web_research_agent dispatch found in
+    job 6a6db91f414c989f5ecd71a9: concern is purely about known
+    vulnerabilities, vulnerability_agent's Trivy scan succeeds, and the
+    coverage judge says that fully addresses the concern. coverage_gate must
+    then short-circuit missing_deps to [] -- no correction-round loop-back,
+    no backstop_dispatch, no web_research_agent/maintenance_agent/
+    supply_chain_agent ever dispatched."""
+    job_id = f"anal-{uuid.uuid4().hex[:8]}"
+    prep = _seed_prep(job_id)
+    await result_dao.save_prep(prep)
+
+    fake_deep_agent = _build_fake_deep_agent(
+        [
+            _task_call(
+                "Scan the whole dependency tree for known CVEs.",
+                "vulnerability_agent",
+                "call_vuln",
+            ),
+            AIMessage(content="Sufficient evidence collected, finalizing."),
+        ]
+    )
+
+    with (
+        patch.object(deepagent_nodes, "_deep_agent", fake_deep_agent),
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper._extract_dispatch",
+            new=AsyncMock(side_effect=_extract_as),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent.trivy_vuln_scan",
+            AsyncMock(return_value=_TRIVY_FIXTURE),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.nodes.whole_tree_scan_satisfies_concern",
+            AsyncMock(return_value=True),
+        ),
+    ):
+        graph = build_analysis_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "analyze vulnerable dependencies",
+                "prep_result_id": prep.id,
+                "bundle_ids": [],
+                "agent_calls": [],
+            },
+            config=subgraph_config,
+        )
+
+    assert result.get("analysis_result_id")
+    analysis = await result_dao.get_analysis(result["analysis_result_id"])
+    assert len(analysis.evidence_bundle_ids) == 1
+    assert len(analysis.findings) == 1
+    assert analysis.findings[0].dep_name == "lodash"
+
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    call = job_repo.update_artifact_data.await_args
+    agent_calls = call.args[2]["agent_calls"]
+    # Only vulnerability_agent ran -- the coverage judge prevented a forced
+    # dispatch of web_research_agent (or any other package-scoped agent) for
+    # a concern the Trivy scan already fully answered.
+    assert len(agent_calls) == 1
+    assert agent_calls[0]["agent_type"] == "vulnerability_agent"

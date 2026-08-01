@@ -18,7 +18,9 @@ from src.main_graph.subgraphs.analysis.deepagent.backstop import (
     deterministic_backstop_dispatch,
 )
 from src.main_graph.subgraphs.analysis.deepagent.coverage import (
+    WHOLE_TREE_AGENT_TYPES,
     compute_missing_direct_deps,
+    whole_tree_scan_satisfies_concern,
 )
 from src.main_graph.subgraphs.analysis.deepagent.state import AnalysisDeepAgentState
 from src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper import (
@@ -164,13 +166,46 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
 
 async def coverage_gate(state: AnalysisState, config: RunnableConfig) -> dict:
     svc = get_services(config)
-    prep = await svc["result_dao"].get_prep(state["prep_result_id"])
-    direct_deps = list(prep.dependency_graph.get("direct", {}).keys())
+    dao = svc["result_dao"]
+    prep = await dao.get_prep(state["prep_result_id"])
+    agent_calls = state.get("agent_calls") or []
 
-    missing = compute_missing_direct_deps(state.get("agent_calls") or [], direct_deps)
+    whole_tree_calls = [
+        c for c in agent_calls if c.get("agent_type") in WHOLE_TREE_AGENT_TYPES
+    ]
+    bundle_id_by_type = {c["agent_type"]: c["bundle_id"] for c in whole_tree_calls}
+    bundles = (
+        await dao.get_bundles(list(bundle_id_by_type.values()))
+        if bundle_id_by_type
+        else []
+    )
+    bundle_by_id = {b.id: b for b in bundles}
+    successful_roster = sorted(
+        agent_type
+        for agent_type, bundle_id in bundle_id_by_type.items()
+        if (bundle := bundle_by_id.get(bundle_id)) is not None
+        and bundle.confidence > 0.5
+    )
+
+    checked_roster = state.get("whole_tree_checked_roster")
+    if successful_roster and successful_roster != checked_roster:
+        satisfies = await whole_tree_scan_satisfies_concern(
+            state["concern"], successful_roster
+        )
+    else:
+        satisfies = state.get("whole_tree_satisfies_concern", False)
+
+    if satisfies:
+        missing: list[str] = []
+    else:
+        direct_deps = list(prep.dependency_graph.get("direct", {}).keys())
+        missing = compute_missing_direct_deps(agent_calls, direct_deps)
+
     return {
         "missing_deps": missing,
         "correction_rounds": (state.get("correction_rounds") or 0) + 1,
+        "whole_tree_checked_roster": successful_roster,
+        "whole_tree_satisfies_concern": satisfies,
     }
 
 

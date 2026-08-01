@@ -17,6 +17,8 @@ class AnalysisState(TypedDict):
     deepagent_state: NotRequired[dict]
     missing_deps: NotRequired[list[str]]
     correction_rounds: NotRequired[int]
+    whole_tree_checked_roster: NotRequired[list[str]]
+    whole_tree_satisfies_concern: NotRequired[bool]
     bundle_ids: Annotated[list[str], operator.add]
     agent_calls: Annotated[
         list[dict], operator.add
