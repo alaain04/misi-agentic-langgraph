@@ -14,6 +14,7 @@ import operator
 from typing import Annotated, cast
 
 from deepagents import CompiledSubAgent
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
@@ -21,6 +22,10 @@ from typing_extensions import TypedDict
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
 from src.main_graph.subgraphs.analysis.deepagent.coverage import WHOLE_TREE_AGENT_TYPES
+from src.main_graph.subgraphs.analysis.deepagent.limits import (
+    DEEPAGENT_LIMITS,
+    SPECIALIST_SEMAPHORE,
+)
 from src.main_graph.subgraphs.analysis.deepagent.specialist_runner import run_specialist
 from src.models.results import AgentDispatch
 from src.utils.llm import Model, get_llm
@@ -100,13 +105,32 @@ def build_agent_subagent(agent_type: str) -> CompiledSubAgent:
                 # D8: whole-tree agents run at most once per job.
                 return {"messages": [], "bundle_ids": [existing], "agent_calls": []}
 
+        if len(agent_calls) >= DEEPAGENT_LIMITS.max_specialist_calls:
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(
+                            "Specialist call budget exhausted "
+                            f"({DEEPAGENT_LIMITS.max_specialist_calls} calls "
+                            "used). Do not dispatch further specialists -- "
+                            "finalize with the evidence already collected, "
+                            "prioritizing the highest-risk dependencies, and "
+                            "report which packages remain unanalyzed."
+                        )
+                    )
+                ],
+                "bundle_ids": [],
+                "agent_calls": [],
+            }
+
         task_description = state["messages"][-1].content
-        dispatch = await _extract_dispatch(task_description, agent_type)
-
         svc = get_services(config)
-        prep = await svc["result_dao"].get_prep(state["prep_result_id"])
 
-        bundle_id, record = await run_specialist(agent_type, dispatch, prep, svc)
+        async with SPECIALIST_SEMAPHORE:
+            dispatch = await _extract_dispatch(task_description, agent_type)
+            prep = await svc["result_dao"].get_prep(state["prep_result_id"])
+            bundle_id, record = await run_specialist(agent_type, dispatch, prep, svc)
+
         return {
             "messages": [],
             "bundle_ids": [bundle_id],
