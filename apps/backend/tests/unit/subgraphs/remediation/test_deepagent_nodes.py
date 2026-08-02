@@ -352,6 +352,57 @@ async def test_group_and_verify_gate_settles_group_once_companion_dispatched():
 
 
 @pytest.mark.asyncio
+async def test_group_and_verify_gate_defers_whole_group_when_member_needs_migration():
+    """A group containing an r3 (replace) member -- whether pre-classified
+    by classify_targets_node or discovered mid-investigation -- must be
+    deferred wholesale: no verification attempted, every member (including
+    ones that would otherwise be green) settled as skipped."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"eslint": {}},
+        "remediations": {
+            "eslint": {
+                "id": "r1",
+                "addresses": ["eslint"],
+                "target_dep": "eslint",
+                "strategy": "bump_with_codemod",
+                "to_range": "^9.0.0",
+                "status": "skipped",
+            },
+            "eslint-plugin-react": {
+                "id": "r2",
+                "addresses": [],
+                "target_dep": "eslint-plugin-react",
+                "strategy": "replace",
+                "status": "skipped",
+                "skip_reason": "dependency migration - deferred, not yet supported",
+            },
+        },
+        "requires_edges": {"eslint": ["eslint-plugin-react"]},
+        "correction_rounds": 0,
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+    ) as mock_replay:
+        result = await group_and_verify_gate(state, config)
+
+    mock_replay.assert_not_called()
+    assert result["remediations"]["eslint"]["status"] == "skipped"
+    assert result["remediations"]["eslint"]["skip_reason"] == (
+        "coupled to a dependency migration (r3) target - deferred"
+    )
+    assert result["remediations"]["eslint-plugin-react"]["status"] == "skipped"
+    assert result["remediations"]["eslint-plugin-react"]["skip_reason"] == (
+        "coupled to a dependency migration (r3) target - deferred"
+    )
+    assert result.get("retry_targets") == []
+
+
+@pytest.mark.asyncio
 async def test_group_and_verify_gate_fails_group_when_still_undispatched_at_cap():
     """Terminal case: correction_rounds has genuinely reached
     _MAX_CORRECTION_ROUNDS and a group member is STILL missing its

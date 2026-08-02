@@ -190,6 +190,18 @@ async def group_and_verify_gate(
                 settled[member_dict["target_dep"]] = member_dict
             continue
 
+        if any(member["strategy"] == "replace" for member in members_dicts):
+            for member_dict in members_dicts:
+                member_dict["status"] = "skipped"
+                member_dict["skip_reason"] = (
+                    "coupled to a dependency migration (r3) target - deferred"
+                )
+                member_dict["required_by"] = sorted(
+                    required_by_map.get(member_dict["target_dep"], [])
+                )
+                settled[member_dict["target_dep"]] = member_dict
+            continue
+
         members = [Remediation(**m) for m in members_dicts]
         verification = await replay_and_verify_group(
             members,
