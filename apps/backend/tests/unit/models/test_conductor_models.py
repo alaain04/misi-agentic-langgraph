@@ -75,7 +75,9 @@ def test_finding_note_uses_evidence_not_evidence_refs():
 
 
 def test_finding_note_version_fields_default_none():
-    fn = FindingNote(dep_name="lodash", severity="high", description="desc", evidence=[])
+    fn = FindingNote(
+        dep_name="lodash", severity="high", description="desc", evidence=[]
+    )
     assert fn.installed_version is None
     assert fn.fixed_version is None
     assert fn.is_semver_major is None
