@@ -137,8 +137,7 @@ async def test_agent_run_accepts_bare_async_functions():
             _dispatch(),
             _prep(),
             [npm_audit],
-            "system {domain} {hypothesis} {packages} {tool_descriptions} "
-            "{max_iter}",
+            "system {domain} {hypothesis} {packages} {tool_descriptions} {max_iter}",
         )
 
     assert isinstance(bundle, EvidenceBundle)
@@ -273,8 +272,7 @@ async def test_react_loop_self_corrects_then_passes():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {tool_descriptions} "
-            "{max_iter}",
+            "system {domain} {hypothesis} {packages} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.confidence == 0.85
@@ -314,8 +312,7 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {tool_descriptions} "
-            "{max_iter}",
+            "system {domain} {hypothesis} {packages} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.findings == [finding]  # kept, not pruned
@@ -346,8 +343,7 @@ async def test_react_loop_critic_failure_degrades_to_pass():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {tool_descriptions} "
-            "{max_iter}",
+            "system {domain} {hypothesis} {packages} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.confidence == 0.9
@@ -385,8 +381,7 @@ async def test_react_loop_survives_malformed_decision_then_recovers():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {tool_descriptions} "
-            "{max_iter}",
+            "system {domain} {hypothesis} {packages} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.findings == [finding]
@@ -414,8 +409,7 @@ async def test_react_loop_skips_critic_when_no_findings():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {tool_descriptions} "
-            "{max_iter}",
+            "system {domain} {hypothesis} {packages} {tool_descriptions} {max_iter}",
         )
 
     assert bundle.confidence == 0.4

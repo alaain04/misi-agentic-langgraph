@@ -13,9 +13,7 @@ from src.main_graph.subgraphs.discovery.graph import (
 
 
 def test_clone_error_skips_to_save():
-    assert (
-        _route_after_clone({"discovery_error": "clone failed"}) == SAVE_PREP_RESULT
-    )
+    assert _route_after_clone({"discovery_error": "clone failed"}) == SAVE_PREP_RESULT
 
 
 def test_clone_success_goes_to_inspect():
