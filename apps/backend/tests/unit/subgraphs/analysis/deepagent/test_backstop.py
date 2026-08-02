@@ -22,7 +22,6 @@ def _make_prep() -> PrepResult:
             "direct": {"chalk": "5.0.0", "uuid": "9.0.0"},
             "packages": {},
         },
-        discovery_summary="a test repo",
         vector_store_id="",
     )
 

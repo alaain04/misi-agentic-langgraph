@@ -6,6 +6,7 @@ from src.main_graph.tools.external_api import github_advisory, osv_lookup, web_s
 
 class WebResearchAgent(BaseAgent):
     agent_type = "web_research_agent"
+    concern_types = frozenset({"web_research", "other"})
     description = (
         "Searches the web and advisory databases for recent disclosures, blog "
         "posts, and threat reports "
@@ -17,7 +18,6 @@ class WebResearchAgent(BaseAgent):
 risks.
         Your task: {hypothesis}
         Packages to focus on (name@installed_version): {packages}
-        Project context: {context}
 
         Available tools:
         {tool_descriptions}

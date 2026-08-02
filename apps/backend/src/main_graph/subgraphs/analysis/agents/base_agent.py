@@ -217,7 +217,6 @@ async def _react_loop(
                 packages=_format_packages(
                     dispatch.packages_to_focus, prep.dependency_graph
                 ),
-                context=prep.discovery_summary[:500],
                 tool_descriptions=_format_tools(tools),
                 max_iter=_MAX_ITERATIONS,
             )
@@ -288,6 +287,7 @@ class BaseAgent(ABC):
     agent_type: ClassVar[str]
     description: ClassVar[str]
     system_prompt: ClassVar[str]
+    concern_types: ClassVar[frozenset[str]]
 
     @abstractmethod
     def _agent_tools(self) -> list: ...

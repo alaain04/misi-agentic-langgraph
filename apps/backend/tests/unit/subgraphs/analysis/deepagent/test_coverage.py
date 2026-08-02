@@ -92,9 +92,7 @@ async def test_whole_tree_scan_satisfies_concern_true_when_llm_says_covered():
             fully_addressed=True, reason="Trivy already covers known CVEs"
         )
     )
-    with patch(
-        "src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm
-    ):
+    with patch("src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm):
         result = await whole_tree_scan_satisfies_concern(
             "analyze vulnerable dependencies", ["vulnerability_agent"]
         )
@@ -114,9 +112,7 @@ async def test_whole_tree_scan_satisfies_concern_false_when_llm_says_not_covered
             fully_addressed=False, reason="concern also asks about maintenance"
         )
     )
-    with patch(
-        "src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm
-    ):
+    with patch("src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm):
         result = await whole_tree_scan_satisfies_concern(
             "check for vulnerabilities and unmaintained packages",
             ["vulnerability_agent"],
@@ -131,9 +127,7 @@ async def test_whole_tree_scan_satisfies_concern_false_on_llm_exception():
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
         side_effect=RuntimeError("boom")
     )
-    with patch(
-        "src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm
-    ):
+    with patch("src.main_graph.subgraphs.analysis.deepagent.coverage._llm", mock_llm):
         result = await whole_tree_scan_satisfies_concern(
             "analyze vulnerable dependencies", ["vulnerability_agent"]
         )

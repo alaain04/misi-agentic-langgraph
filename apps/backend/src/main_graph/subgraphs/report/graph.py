@@ -27,9 +27,7 @@ def _dispatch_findings(state: ReportState):
     findings = state.get("findings_to_enrich") or []
     if not findings:
         return "save_report_result"
-    return [
-        Send("finding_enricher", {**state, "current_finding": f}) for f in findings
-    ]
+    return [Send("finding_enricher", {**state, "current_finding": f}) for f in findings]
 
 
 def build_report_subgraph():

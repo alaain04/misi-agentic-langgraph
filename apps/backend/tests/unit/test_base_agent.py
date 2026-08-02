@@ -21,7 +21,6 @@ def _prep() -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        discovery_summary="s",
         vector_store_id="vs1",
     )
 
@@ -138,7 +137,7 @@ async def test_agent_run_accepts_bare_async_functions():
             _dispatch(),
             _prep(),
             [npm_audit],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "system {domain} {hypothesis} {packages} {tool_descriptions} "
             "{max_iter}",
         )
 
@@ -274,7 +273,7 @@ async def test_react_loop_self_corrects_then_passes():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "system {domain} {hypothesis} {packages} {tool_descriptions} "
             "{max_iter}",
         )
 
@@ -315,7 +314,7 @@ async def test_react_loop_attaches_note_when_budget_exhausted():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "system {domain} {hypothesis} {packages} {tool_descriptions} "
             "{max_iter}",
         )
 
@@ -347,7 +346,7 @@ async def test_react_loop_critic_failure_degrades_to_pass():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "system {domain} {hypothesis} {packages} {tool_descriptions} "
             "{max_iter}",
         )
 
@@ -386,7 +385,7 @@ async def test_react_loop_survives_malformed_decision_then_recovers():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "system {domain} {hypothesis} {packages} {tool_descriptions} "
             "{max_iter}",
         )
 
@@ -415,7 +414,7 @@ async def test_react_loop_skips_critic_when_no_findings():
             _dispatch(),
             _prep(),
             [],
-            "system {domain} {hypothesis} {packages} {context} {tool_descriptions} "
+            "system {domain} {hypothesis} {packages} {tool_descriptions} "
             "{max_iter}",
         )
 

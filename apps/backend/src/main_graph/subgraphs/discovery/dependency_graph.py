@@ -193,7 +193,6 @@ async def build_dependency_graph(
     docker_image: str,
     # docker_image is currently unused: trivy_sbom_scan sources its scanner
     # image from settings.trivy_image internally, not from this parameter.
-    # Kept for call-site symmetry with build_dependency_summary/save_prep_result.
     pkg: dict | None = None,
     cache: InputCacheDAO | None = None,
     repo_url: str = "",
@@ -212,12 +211,10 @@ async def build_dependency_graph(
     scan fails or finds no manifest, e.g. an empty repo or a scan error.
 
     When `cache`/`repo_url`/`commit_sha` are all provided, the underlying
-    Trivy scan is cached by (repo_url, commit_sha, package_manager) —
-    callers (build_project_context, save_prep_result) both use this same
-    cache key and run in the same job, so whichever runs first pays for the
-    real scan and the second is a cache hit. Callers must only pass `cache`
-    when the lockfile is a pure function of commit_sha (i.e. it was
-    committed to the repo, not generated this run) — see save_prep_result's
+    Trivy scan is cached by (repo_url, commit_sha, package_manager). Callers
+    must only pass `cache` when the lockfile is a pure function of
+    commit_sha (i.e. it was committed to the repo, not generated this run)
+    — see save_prep_result's
     `lock_committed` check.
     """
 

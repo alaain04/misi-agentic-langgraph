@@ -68,7 +68,6 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
 
     Direct dependencies (name@installed_version): {direct_deps}
     Concern: {concern} (type={concern_type}, scope={concern_scope})
-    Project context: {context}
     """).strip()
 
 
@@ -87,7 +86,9 @@ def _build_deep_agent():
         state_schema=AnalysisDeepAgentState,
     )
 
+
 _deep_agent = _build_deep_agent()
+
 
 async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) -> dict:
     svc = get_services(config)
@@ -127,7 +128,6 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
             concern=state["concern"],
             concern_type=structured_concern["type"],
             concern_scope=structured_concern["scope"],
-            context=prep.discovery_summary[:1000],
             max_specialist_calls=DEEPAGENT_LIMITS.max_specialist_calls,
             max_parallel_calls=DEEPAGENT_LIMITS.max_parallel_calls,
         )

@@ -16,7 +16,6 @@ def _prep(**overrides) -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        discovery_summary="s",
         vector_store_id="",
         codegraph_ready=False,
     )
@@ -381,9 +380,7 @@ async def test_enrich_finding_transitive_prompt_names_direct_dependents():
         patch.object(finding_enricher_agent, "_llm", mock_llm),
         patch.object(finding_enricher_agent, "critique_report_finding", critic),
     ):
-        await finding_enricher_agent.enrich_finding(
-            _finding(), _transitive_prep(), []
-        )
+        await finding_enricher_agent.enrich_finding(_finding(), _transitive_prep(), [])
 
     content = seen_system["content"]
     assert "transitive" in content.lower()

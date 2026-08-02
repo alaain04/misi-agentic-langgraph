@@ -192,9 +192,11 @@ def main() -> None:
         name = fixture["name"]
         print(f"\n=== {name} ===")
         if args.dry_run:
-            print(f"  would create {args.owner}/{name} (private), "
-                  f"push package.json (deps={fixture['dependencies']}, "
-                  f"install={fixture['install']})")
+            print(
+                f"  would create {args.owner}/{name} (private), "
+                f"push package.json (deps={fixture['dependencies']}, "
+                f"install={fixture['install']})"
+            )
             continue
 
         with tempfile.TemporaryDirectory(prefix=f"fixture-{name}-") as tmp:

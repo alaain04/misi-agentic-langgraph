@@ -8,6 +8,7 @@ from src.main_graph.tools.package_files import package_json
 
 class SupplyChainAgent(BaseAgent):
     agent_type = "supply_chain_agent"
+    concern_types = frozenset({"supply_chain"})
     description = (
         "Detects supply-chain attacks: typosquatting, dependency confusion, malicious "
         "transitive dependencies, "
@@ -18,7 +19,6 @@ class SupplyChainAgent(BaseAgent):
         You are a supply-chain security specialist for Node.js dependencies.
         Your task: {hypothesis}
         Packages to focus on: {packages}
-        Project context: {context}
 
         Available tools:
         {tool_descriptions}

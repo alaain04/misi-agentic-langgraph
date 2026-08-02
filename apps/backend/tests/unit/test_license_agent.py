@@ -23,7 +23,6 @@ def _prep() -> PrepResult:
                 "no-license@4.0.0": {},
             },
         },
-        discovery_summary="s",
         vector_store_id="vs1",
     )
 

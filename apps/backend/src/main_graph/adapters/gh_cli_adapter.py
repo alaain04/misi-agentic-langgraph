@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 class GhCliAdapter(GitPullRequestPort):
     async def _run(self, *args: str, cwd: str) -> str:
         proc = await asyncio.create_subprocess_exec(
-            *args, cwd=cwd,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            *args,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         out, err = await proc.communicate()
         if proc.returncode != 0:
@@ -20,20 +22,31 @@ class GhCliAdapter(GitPullRequestPort):
             raise RuntimeError(msg)
         return out.decode(errors="replace")
 
-    async def open_pr(
-        self, work_dir: str, branch: str, title: str, body: str
-    ) -> str:
+    async def open_pr(self, work_dir: str, branch: str, title: str, body: str) -> str:
         await self._run("git", "checkout", "-b", branch, cwd=work_dir)
         await self._run("git", "add", "-A", cwd=work_dir)
         await self._run(
             "git",
-            "-c", "user.email=remediation@misi",
-            "-c", "user.name=misi-remediation",
-            "commit", "-m", title, cwd=work_dir,
+            "-c",
+            "user.email=remediation@misi",
+            "-c",
+            "user.name=misi-remediation",
+            "commit",
+            "-m",
+            title,
+            cwd=work_dir,
         )
         await self._run("git", "push", "-u", "origin", branch, cwd=work_dir)
         out = await self._run(
-            "gh", "pr", "create", "--title", title, "--body", body, "--head", branch,
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            title,
+            "--body",
+            body,
+            "--head",
+            branch,
             cwd=work_dir,
         )
         lines = [ln.strip() for ln in out.splitlines() if ln.strip()]

@@ -66,9 +66,7 @@ async def _scan(
     result = _safe_json(stdout)
     if success_key not in result:
         detail = stderr.strip() or stdout.strip() or f"exit code {rc}"
-        logger.warning(
-            "%s: no usable output (rc=%d): %s", scan_name, rc, detail[:300]
-        )
+        logger.warning("%s: no usable output (rc=%d): %s", scan_name, rc, detail[:300])
         return {"error": f"{scan_name} failed: {detail[:500]}"}
     return result
 

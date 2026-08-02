@@ -76,9 +76,7 @@ async def test_analyze_passes_none_when_no_token():
 @pytest.mark.asyncio
 async def test_analyze_threads_remediate_flag():
     dao = AsyncMock()
-    request = AnalysisRequest(
-        repo_url=_REPO_URL, concern="security", remediate=True
-    )
+    request = AnalysisRequest(repo_url=_REPO_URL, concern="security", remediate=True)
 
     with patch("src.api.routes.run_analysis", new=AsyncMock()) as mock_run:
         await analyze(request, dao=dao)

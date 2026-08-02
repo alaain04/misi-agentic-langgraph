@@ -90,9 +90,7 @@ def test_superset_fail_category_mismatch():
 
 def test_superset_direct_dependents_contains_pass():
     expectations = {
-        "superset": [
-            {"dep_name": "minimist", "direct_dependents_contains": ["mkdirp"]}
-        ]
+        "superset": [{"dep_name": "minimist", "direct_dependents_contains": ["mkdirp"]}]
     }
     report = _report(_f("minimist", direct_dependents=["mkdirp", "optimist"]))
     assert evaluate(expectations, report) == []
@@ -100,9 +98,7 @@ def test_superset_direct_dependents_contains_pass():
 
 def test_superset_direct_dependents_contains_fail():
     expectations = {
-        "superset": [
-            {"dep_name": "minimist", "direct_dependents_contains": ["mkdirp"]}
-        ]
+        "superset": [{"dep_name": "minimist", "direct_dependents_contains": ["mkdirp"]}]
     }
     report = _report(_f("minimist", direct_dependents=["optimist"]))
     failures = evaluate(expectations, report)

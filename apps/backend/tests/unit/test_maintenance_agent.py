@@ -25,7 +25,6 @@ def _prep(graph: dict) -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph=graph,
-        discovery_summary="s",
         vector_store_id="",
     )
 
@@ -56,12 +55,11 @@ async def test_maintenance_drops_transitive_findings():
         FindingNote(
             dep_name="express", severity="medium", description="stale", evidence=[]
         ),
-        FindingNote(
-            dep_name="qs", severity="medium", description="stale", evidence=[]
-        ),
+        FindingNote(dep_name="qs", severity="medium", description="stale", evidence=[]),
     ]
     with patch.object(
-        MaintenanceAgent.__bases__[0], "run",
+        MaintenanceAgent.__bases__[0],
+        "run",
         AsyncMock(return_value=(_bundle(findings), ["unmaintained_packages"], 1)),
     ):
         bundle, tools, iters = await MaintenanceAgent().run(_dispatch(), _prep(_GRAPH))
@@ -79,12 +77,11 @@ async def test_maintenance_keeps_all_when_no_transitive_data():
         FindingNote(
             dep_name="express", severity="medium", description="stale", evidence=[]
         ),
-        FindingNote(
-            dep_name="qs", severity="medium", description="stale", evidence=[]
-        ),
+        FindingNote(dep_name="qs", severity="medium", description="stale", evidence=[]),
     ]
     with patch.object(
-        MaintenanceAgent.__bases__[0], "run",
+        MaintenanceAgent.__bases__[0],
+        "run",
         AsyncMock(return_value=(_bundle(findings), [], 1)),
     ):
         bundle, _, _ = await MaintenanceAgent().run(_dispatch(), _prep(graph))

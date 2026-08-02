@@ -2,7 +2,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from src.main_graph.subgraphs.discovery.constants import (
-    BUILD_PROJECT_CONTEXT,
     CLONE_REPO,
     INDEX_CODEGRAPH,
     INDEX_REPO,
@@ -11,7 +10,6 @@ from src.main_graph.subgraphs.discovery.constants import (
     SAVE_PREP_RESULT,
 )
 from src.main_graph.subgraphs.discovery.nodes import (
-    build_project_context,
     clone_repo,
     index_codegraph,
     index_repository,
@@ -23,7 +21,7 @@ from src.main_graph.subgraphs.discovery.state import DiscoveryState
 
 
 def _route_after_clone(state: DiscoveryState) -> str:
-    return BUILD_PROJECT_CONTEXT if state.get("discovery_error") else INSPECT_REPO
+    return SAVE_PREP_RESULT if state.get("discovery_error") else INSPECT_REPO
 
 
 def _route_after_inspect(state: DiscoveryState) -> str:
@@ -38,7 +36,6 @@ def build_discovery_subgraph() -> CompiledStateGraph:
     builder.add_node(INSTALL_DEPS, install_deps)
     builder.add_node(INDEX_REPO, index_repository)
     builder.add_node(INDEX_CODEGRAPH, index_codegraph)
-    builder.add_node(BUILD_PROJECT_CONTEXT, build_project_context)
     builder.add_node(SAVE_PREP_RESULT, save_prep_result)
 
     builder.add_edge(START, CLONE_REPO)
@@ -46,8 +43,7 @@ def build_discovery_subgraph() -> CompiledStateGraph:
     builder.add_conditional_edges(INSPECT_REPO, _route_after_inspect)
     builder.add_edge(INSTALL_DEPS, INDEX_REPO)
     builder.add_edge(INDEX_REPO, INDEX_CODEGRAPH)
-    builder.add_edge(INDEX_CODEGRAPH, BUILD_PROJECT_CONTEXT)
-    builder.add_edge(BUILD_PROJECT_CONTEXT, SAVE_PREP_RESULT)
+    builder.add_edge(INDEX_CODEGRAPH, SAVE_PREP_RESULT)
     builder.add_edge(SAVE_PREP_RESULT, END)
 
     return builder.compile()

@@ -20,7 +20,6 @@ class PrepResult(BaseModel):
     detected_package_manager: str
     docker_image: str = "node:lts-alpine"
     dependency_graph: dict
-    discovery_summary: str
     vector_store_id: str
     codegraph_ready: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
