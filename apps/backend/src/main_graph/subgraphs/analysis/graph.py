@@ -30,12 +30,12 @@ def build_analysis_subgraph():
     builder.add_node("save_analysis_result", save_analysis_result)
 
     builder.add_edge(START, "understand_concern")
+    builder.add_edge("understand_concern", "run_direct_agents")
     builder.add_conditional_edges(
-        "understand_concern",
+        "run_direct_agents",
         route_concern,
-        {"simple": "run_direct_agents", "complex": "analysis_deepagent_node"},
+        {"simple": "save_analysis_result", "complex": "analysis_deepagent_node"},
     )
-    builder.add_edge("run_direct_agents", "save_analysis_result")
     builder.add_edge("analysis_deepagent_node", "coverage_gate")
     builder.add_conditional_edges("coverage_gate", route_after_coverage_gate)
     builder.add_edge("backstop_dispatch", "save_analysis_result")

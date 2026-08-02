@@ -5,7 +5,7 @@ import asyncio
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import PipelineConfigurable, get_services
-from src.main_graph.subgraphs.analysis.concern import Concern
+from src.main_graph.subgraphs.analysis.concern import Concern, whole_tree_agents
 from src.main_graph.subgraphs.analysis.deepagent.limits import SPECIALIST_SEMAPHORE
 from src.main_graph.subgraphs.analysis.deepagent.specialist_runner import run_specialist
 from src.main_graph.subgraphs.analysis.state import AnalysisState
@@ -37,7 +37,7 @@ async def run_direct_agents(state: AnalysisState, config: RunnableConfig) -> dic
     results = await asyncio.gather(
         *[
             _run_one(agent_type, concern, state["concern"], prep, svc)
-            for agent_type in concern.preferred_agents
+            for agent_type in whole_tree_agents(concern)
         ]
     )
 

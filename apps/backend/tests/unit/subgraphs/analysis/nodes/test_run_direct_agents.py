@@ -154,3 +154,56 @@ async def test_run_direct_agents_both_agents_run_concurrently():
     # Verify concurrent execution: peak should be 2 (both agents running together)
     # If they ran sequentially, peak would never exceed 1
     assert peak == 2
+
+
+@pytest.mark.asyncio
+async def test_run_direct_agents_excludes_non_whole_tree_agents_from_a_mixed_concern():
+    """A mixed concern (e.g. vulnerability + maintenance) only gets its
+    whole-tree portion dispatched here -- maintenance_agent is package-scoped
+    and belongs to the DeepAgent's investigation, not this deterministic
+    prefix step."""
+    fake_dao = MagicMock()
+    fake_dao.get_prep = AsyncMock(return_value=_make_prep())
+    fake_dao.save_bundle = AsyncMock(return_value="bundle-vuln")
+    mock_get_services = MagicMock(
+        return_value={
+            "result_dao": fake_dao,
+            "container": MagicMock(),
+            "input_cache": None,
+        }
+    )
+    state = {
+        "job_id": "job-1",
+        "concern": "vulnerabilities and unmaintained dependencies",
+        "prep_result_id": "prep-1",
+        "structured_concern": {
+            "type": ["vulnerability", "maintenance"],
+            "scope": "all_dependencies",
+            "packages": [],
+            "requires_per_dependency_analysis": False,
+            "preferred_agents": ["vulnerability_agent", "maintenance_agent"],
+        },
+    }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.run_direct_agents.get_services",
+            mock_get_services,
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent"
+            ".VulnerabilityAgent.run",
+            new=AsyncMock(return_value=(_bundle("vulnerability"), ["trivy"], 1)),
+        ) as mock_vuln_run,
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.maintenance_agent"
+            ".MaintenanceAgent.run",
+        ) as mock_maintenance_run,
+    ):
+        result = await run_direct_agents(state, {"configurable": {}})
+
+    mock_vuln_run.assert_awaited_once()
+    mock_maintenance_run.assert_not_called()
+    assert result["bundle_ids"] == ["bundle-vuln"]
+    assert len(result["agent_calls"]) == 1
+    assert result["agent_calls"][0]["agent_type"] == "vulnerability_agent"

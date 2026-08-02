@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from src.main_graph.subgraphs.analysis.concern import Concern, is_simple, route_concern
+from src.main_graph.subgraphs.analysis.concern import (
+    Concern,
+    is_simple,
+    route_concern,
+    whole_tree_agents,
+)
 
 
 def _concern(**overrides) -> Concern:
@@ -61,3 +66,34 @@ def test_route_concern_returns_complex():
     concern = _concern(type=["maintenance"], preferred_agents=["maintenance_agent"])
     state = {"structured_concern": concern.model_dump()}
     assert route_concern(state) == "complex"
+
+
+def test_whole_tree_agents_returns_preferred_whole_tree_agents():
+    concern = _concern(
+        type=["vulnerability", "license"],
+        preferred_agents=["vulnerability_agent", "license_agent"],
+    )
+    assert whole_tree_agents(concern) == ["vulnerability_agent", "license_agent"]
+
+
+def test_whole_tree_agents_excludes_non_whole_tree_agents():
+    concern = _concern(
+        type=["vulnerability", "maintenance"],
+        preferred_agents=["vulnerability_agent", "maintenance_agent"],
+    )
+    assert whole_tree_agents(concern) == ["vulnerability_agent"]
+
+
+def test_whole_tree_agents_empty_when_no_whole_tree_type_present():
+    concern = _concern(type=["maintenance"], preferred_agents=["maintenance_agent"])
+    assert whole_tree_agents(concern) == []
+
+
+def test_whole_tree_agents_empty_when_scope_is_specific_packages():
+    concern = _concern(
+        type=["vulnerability"],
+        scope="specific_packages",
+        packages=["lodash"],
+        preferred_agents=["vulnerability_agent"],
+    )
+    assert whole_tree_agents(concern) == []

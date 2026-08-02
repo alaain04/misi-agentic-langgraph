@@ -27,10 +27,14 @@ Split the analysis subgraph into two branches after a single
 concern-understanding step:
 
 ```
-understand_concern -> route_concern
-                         |-- simple  --> run_direct_agents --> save_analysis_result
-                         `-- complex --> analysis_deepagent_node --> coverage_gate --> ... (unchanged)
+understand_concern -> run_direct_agents -> route_concern
+                                              |-- simple  --> save_analysis_result
+                                              `-- complex --> analysis_deepagent_node --> coverage_gate --> ...
 ```
+
+(Superseded by the 2026-08-02 amendment below: `run_direct_agents` now runs
+unconditionally as a whole-tree prefix, and `route_concern` is evaluated
+*after* it rather than branching directly out of `understand_concern`.)
 
 - `understand_concern`: one LLM structured-output call that turns the raw
   concern string into a typed `Concern` and writes it to state. This is the
@@ -414,3 +418,103 @@ spurious forced-coverage costs extra calls, never a missed one).
   reaches `save_analysis_result` straight from `coverage_gate` without
   looping back to `analysis_deepagent_node` or reaching `backstop_dispatch`,
   even with direct deps left uncovered.
+
+## Amendment (2026-08-02): whole-tree agents always run as a prefix, never re-planned by the deep agent
+
+### Problem
+
+The original design only ran `vulnerability_agent`/`license_agent` directly
+for concerns classified fully "simple." A *mixed* concern — e.g.
+`type=["vulnerability", "maintenance"]` — was entirely "complex," so its
+vulnerability portion was left to the deep agent's own LLM planning to
+rediscover and dispatch, even though `vulnerability_agent` is deterministic,
+ignores `packages_to_focus`, and always returns complete per-dependency
+findings in one pass regardless of what else the concern asks for. The deep
+agent's prompt still listed it as an available specialist and had to spend a
+planning turn deciding whether to invoke it — exactly the "collect evidence
+you already have" waste the router was built to eliminate.
+
+### Goal
+
+Whole-tree agents relevant to a concern always run directly, regardless of
+whether the concern has other, non-whole-tree work too. The deep agent (if
+still needed for a genuine remainder) never re-plans work already done.
+
+```
+understand_concern -> run_direct_agents (always runs; dispatches whatever of
+                        vulnerability_agent/license_agent apply -- 0, 1, or 2
+                        agents, never more)
+                     -> route_concern (evaluated AFTER whole-tree execution)
+                          "simple"  -> save_analysis_result
+                          "complex" -> analysis_deepagent_node -> coverage_gate -> ...
+```
+
+`route_concern`/`is_simple` are unchanged — "simple" still means no
+remainder at all (today's exact semantics). What changes is *when*
+`run_direct_agents` runs: unconditionally, right after `understand_concern`,
+instead of only on the simple branch. On a pure simple concern this is
+behaviorally identical to before (`whole_tree_agents(concern)` equals
+`concern.preferred_agents` in that case). On a mixed concern, it peels off
+just the whole-tree subset before the deep agent ever starts.
+
+### Changes
+
+- New `concern.whole_tree_agents(concern) -> list[str]`: returns
+  `concern.preferred_agents` filtered to `WHOLE_TREE_AGENT_TYPES`, or `[]` if
+  `concern.scope != "all_dependencies"`.
+- `run_direct_agents` dispatches `whole_tree_agents(concern)` instead of
+  `concern.preferred_agents` — the only change to that node.
+- `graph.py`: `understand_concern -> run_direct_agents` becomes an
+  unconditional edge; the `route_concern` conditional edge moves from
+  `understand_concern`'s output to `run_direct_agents`'s output, mapping to
+  `{"simple": "save_analysis_result", "complex": "analysis_deepagent_node"}`.
+  `coverage_gate` needs no changes — it already reads whole-tree results off
+  `state["agent_calls"]` regardless of which node produced them.
+- `analysis_deepagent_node`'s first-round prompt construction:
+  - `_roster()` gains an `exclude` parameter; excludes whichever whole-tree
+    agents are already present in `state["agent_calls"]`.
+  - A new `{already_done}` template slot: `"Already completed for this
+    concern: [...] -- do not dispatch these again; focus on the remaining
+    investigation."` when non-empty, blank otherwise.
+  - **Correctness fix required by this change**: `deepagent_state`'s own
+    `bundle_ids`/`agent_calls` are now seeded from the outer
+    `state["bundle_ids"]`/`state["agent_calls"]` on the first round (were
+    previously always `[]`). Without this, the D8 whole-tree dedup in
+    `subagent_wrapper._run` — which only checks the deep agent's *own*
+    internal `agent_calls`, not the outer `AnalysisState` — would not
+    recognize a whole-tree agent that ran via the prefix, so if the deep
+    agent's LLM ignored the prompt's `{already_done}` note and dispatched it
+    anyway, it would actually re-run (a real second Trivy scan) instead of
+    hitting the existing no-op path. The existing delta-slicing logic
+    (`prev_bundle_ids`/`prev_call_bundle_ids`, already built to handle
+    cross-round re-emission) transparently handles the seeded entries the
+    same way — no changes needed there.
+
+### Testing
+
+- `concern.whole_tree_agents`: returns the whole-tree subset of
+  `preferred_agents`; empty when scope is `specific_packages`; empty when no
+  whole-tree type is present.
+- `run_direct_agents`: a mixed-concern case where `preferred_agents` includes
+  a non-whole-tree agent (e.g. `maintenance_agent`) asserts that agent is
+  never dispatched.
+- `analysis_deepagent_node`: given a state where `agent_calls` already
+  contains a whole-tree agent's record, asserts the constructed prompt
+  excludes it from the roster, includes the `{already_done}` note, and that
+  `deepagent_state`'s own `bundle_ids`/`agent_calls` are seeded from the
+  outer state (not empty).
+- Graph-level: a mixed concern (`type=["vulnerability", "maintenance"]`)
+  asserts `vulnerability_agent`'s scan runs exactly once (via the prefix),
+  the deep agent is invoked with `vulnerability_agent` excluded from its
+  roster and the already-done note present, and the final result correctly
+  combines both agents' findings without double-counting.
+- Existing test fixed as a side effect: one pre-existing graph-level test
+  (`test_backstop_fires_when_deep_agent_never_delegates`) used a
+  `type=["vulnerability"]` concern that, under this amendment, would now
+  trigger a real (unmocked) whole-tree prefix dispatch — its concern was
+  changed to `type=["maintenance"]` to preserve the test's actual intent
+  (proving the backstop mechanism) without now-irrelevant entanglement with
+  the whole-tree prefix. No other existing test needed changes; in
+  particular `test_coverage_gate_skips_per_package_coverage_when_whole_tree_scan_satisfies_concern`
+  passed unmodified, confirming the seeding fix works correctly for the
+  pre-existing (non-mixed) whole-tree-via-deep-agent scenario too.

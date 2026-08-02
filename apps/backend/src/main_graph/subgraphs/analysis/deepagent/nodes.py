@@ -31,6 +31,7 @@ from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.utils.llm import Model, get_llm
 
 _MAX_CORRECTION_ROUNDS = 2
+_RECURSION_LIMIT = 50
 
 _SYSTEM_TEMPLATE = textwrap.dedent("""\
     You are a dependency risk investigation agent for a Node.js project. You
@@ -46,6 +47,7 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
 
     Available specialists (call via the task tool):
     {roster}
+    {already_done}
 
     Before delegating any work:
     1. Identify the information required to answer the concern.
@@ -94,23 +96,14 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
     """).strip()
 
 
-def _roster() -> str:
-    return "\n".join(f"- {k}: {v}" for k, v in get_agent_descriptions().items())
-
-
-_RECURSION_LIMIT = 50
-"""Hard backstop per spec D6 -- the same role _MAX_ITERATIONS plays for the
-old conductor. CompiledSubAgents can't themselves spawn further subagents
-(flat one-node graphs, see subagent_wrapper.py), so this only bounds the
-root deep agent's own step count, not an unbounded recursive fan-out."""
+def _roster(exclude: set[str] | None = None) -> str:
+    exclude = exclude or set()
+    return "\n".join(
+        f"- {k}: {v}" for k, v in get_agent_descriptions().items() if k not in exclude
+    )
 
 
 def _build_deep_agent():
-    # Spec D3: deliberately no `tools=` / `middleware=[CodeInterpreterMiddleware(...)]`
-    # here. The root agent's only tools are task() dispatch to the five
-    # CompiledSubAgents plus deepagents' own built-in filesystem/todo tools --
-    # no execute_command-class tool is reachable from this agent or any
-    # subagent. Do not add one without re-opening the spec's D3 decision.
     subagents = [build_agent_subagent(agent_type) for agent_type in REGISTRY]
     return create_deep_agent(
         model=get_llm(Model.GPT_5_4_MINI),
@@ -118,9 +111,7 @@ def _build_deep_agent():
         state_schema=AnalysisDeepAgentState,
     )
 
-
 _deep_agent = _build_deep_agent()
-
 
 async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) -> dict:
     svc = get_services(config)
@@ -133,8 +124,29 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
             f"{n}@{v}" for n, v in prep.dependency_graph.get("direct", {}).items()
         ]
         structured_concern = state["structured_concern"]
+        # A whole-tree agent may already have run via run_direct_agents (the
+        # router's mandatory prefix step) before this concern was ever
+        # classified as complex -- e.g. a mixed concern like
+        # type=["vulnerability", "maintenance"] gets its vulnerability_agent
+        # portion peeled off before the deep agent starts. Exclude those
+        # agents from the roster so the deep agent doesn't spend a planning
+        # turn re-deciding whether to invoke them.
+        already_run = sorted(
+            {
+                c["agent_type"]
+                for c in (state.get("agent_calls") or [])
+                if c.get("agent_type") in WHOLE_TREE_AGENT_TYPES
+            }
+        )
+        already_done_note = (
+            f"Already completed for this concern: {already_run} -- do not "
+            "dispatch these again; focus on the remaining investigation."
+            if already_run
+            else ""
+        )
         system = _SYSTEM_TEMPLATE.format(
-            roster=_roster(),
+            roster=_roster(exclude=set(already_run)),
+            already_done=already_done_note,
             direct_deps=direct_deps,
             concern=state["concern"],
             concern_type=structured_concern["type"],
@@ -143,12 +155,21 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
             max_specialist_calls=DEEPAGENT_LIMITS.max_specialist_calls,
             max_parallel_calls=DEEPAGENT_LIMITS.max_parallel_calls,
         )
+        # Seed from the outer state's already-accumulated bundle_ids/agent_calls
+        # (e.g. from the run_direct_agents prefix) so the D8 whole-tree dedup
+        # in subagent_wrapper._run recognizes prior work even if the deep
+        # agent's LLM ignores the prompt's already_done note and tries to
+        # dispatch an already-run whole-tree agent anyway -- it becomes a
+        # no-op instead of a real re-run. The existing delta-slicing below
+        # (prev_bundle_ids/prev_call_bundle_ids) already handles excluding
+        # these seeded entries from what gets reported as new this round, the
+        # same mechanism that already handles cross-round re-emission.
         deepagent_state = {
             "messages": [HumanMessage(content=system)],
             "job_id": state["job_id"],
             "prep_result_id": state["prep_result_id"],
-            "bundle_ids": [],
-            "agent_calls": [],
+            "bundle_ids": list(state.get("bundle_ids") or []),
+            "agent_calls": list(state.get("agent_calls") or []),
         }
     else:
         missing = state.get("missing_deps") or []
@@ -162,22 +183,7 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
             ),
         ]
 
-    # deepagent_state carries the FULL accumulated bundle_ids/agent_calls
-    # forward across correction rounds -- required so subagent_wrapper's D8
-    # whole-tree dedup check (which reads state["agent_calls"] at the moment
-    # task() fires) still sees round 1's calls in round 2. But AnalysisState's
-    # own bundle_ids/agent_calls also use an operator.add reducer, so if we
-    # returned the FULL accumulated lists again this round, the outer state
-    # would double-count everything already reported after round 1. Return only
-    # the genuinely-new bundles/calls this round produced.
-    #
-    # We diff by bundle_id (a fresh uuid per saved bundle), NOT by list index:
-    # re-invoking the deep agent with the carried-forward messages re-emits the
-    # earlier rounds' task() Command(update=...) into the accumulator (verified
-    # against deepagents 0.6.12 -- the prior round's bundle_id/agent_call
-    # reappear in `result` even though no subagent re-ran), so a positional
-    # `[prev_count:]` slice would re-report an already-counted bundle. Set
-    # membership on bundle_id is immune to that reordering/re-emission.
+    # Preserve full state; return only new entries to prevent double-counting.
     prev_bundle_ids = set(deepagent_state.get("bundle_ids") or [])
     prev_call_bundle_ids = {
         c.get("bundle_id") for c in (deepagent_state.get("agent_calls") or [])

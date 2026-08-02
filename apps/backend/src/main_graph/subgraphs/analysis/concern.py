@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src.main_graph.subgraphs.analysis.deepagent.coverage import WHOLE_TREE_AGENT_TYPES
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 
 ConcernType = Literal[
@@ -34,3 +35,15 @@ def is_simple(concern: Concern) -> bool:
 def route_concern(state: AnalysisState) -> str:
     concern = Concern(**state["structured_concern"])
     return "simple" if is_simple(concern) else "complex"
+
+
+def whole_tree_agents(concern: Concern) -> list[str]:
+    """Whole-tree agents (vulnerability_agent/license_agent) relevant to this
+    concern that are safe to run deterministically regardless of whether the
+    concern also has non-whole-tree work. These agents ignore
+    packages_to_focus and always return complete, per-dependency findings in
+    a single deterministic pass, so there is nothing a DeepAgent
+    investigation could add for them specifically."""
+    if concern.scope != "all_dependencies":
+        return []
+    return [a for a in concern.preferred_agents if a in WHOLE_TREE_AGENT_TYPES]

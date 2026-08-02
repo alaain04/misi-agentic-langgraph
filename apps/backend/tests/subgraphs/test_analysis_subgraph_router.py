@@ -23,7 +23,8 @@ from langchain_core.messages import AIMessage
 from src.main_graph.subgraphs.analysis.concern import Concern
 from src.main_graph.subgraphs.analysis.deepagent import nodes as deepagent_nodes
 from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
-from src.models.results import PrepResult
+from src.models.conductor import EvidenceRef, FindingNote
+from src.models.results import EvidenceBundle, PrepResult
 
 
 def _seed_prep(job_id: str) -> PrepResult:
@@ -173,3 +174,119 @@ async def test_complex_concern_without_per_dependency_requirement_skips_forced_c
     analysis = await result_dao.get_analysis(result["analysis_result_id"])
     assert analysis.evidence_bundle_ids == []
     assert analysis.findings == []
+
+
+@pytest.mark.asyncio
+async def test_mixed_concern_peels_off_vulnerability_before_deep_agent_runs(
+    subgraph_config, result_dao
+):
+    """A mixed concern (vulnerability + maintenance) gets its
+    vulnerability_agent portion run directly via the router's whole-tree
+    prefix -- real Trivy call included -- BEFORE analysis_deepagent_node ever
+    starts. The deep agent (faked here to return a canned maintenance
+    finding, since only the routing/combination is under test) must be
+    invoked with vulnerability_agent already excluded from its roster and
+    told it's done, and the final result must combine both agents' findings
+    without double-counting."""
+    job_id = f"anal-{uuid.uuid4().hex[:8]}"
+    prep = _seed_prep(job_id)
+    await result_dao.save_prep(prep)
+
+    maintenance_bundle_id = "bundle-maint"
+    maintenance_call = {
+        "agent_type": "maintenance_agent",
+        "bundle_id": maintenance_bundle_id,
+        "conductor_iteration": 0,
+        "domain": "maintenance",
+        "packages_to_focus": ["lodash"],
+        "tools_used": ["npm_outdated"],
+        "react_iterations": 1,
+        "started_at": "2026-08-02T00:00:00Z",
+        "finished_at": "2026-08-02T00:00:01Z",
+    }
+    await result_dao.save_bundle(
+        EvidenceBundle(
+            id=maintenance_bundle_id,
+            domain="maintenance",
+            hypothesis="is lodash maintained?",
+            packages_to_focus=["lodash"],
+            findings=[
+                FindingNote(
+                    dep_name="lodash",
+                    severity="medium",
+                    description="lodash is behind on releases",
+                    evidence=[
+                        EvidenceRef(tool="npm_outdated", url=None, log_snippet="")
+                    ],
+                )
+            ],
+            summary="1 finding",
+            confidence=0.8,
+        )
+    )
+
+    fake_deep_agent = MagicMock()
+    fake_deep_agent.ainvoke = AsyncMock(
+        return_value={
+            "messages": [AIMessage(content="Sufficient evidence, finalizing.")],
+            "bundle_ids": [maintenance_bundle_id],
+            "agent_calls": [maintenance_call],
+        }
+    )
+    fake_concern = Concern(
+        type=["vulnerability", "maintenance"],
+        scope="all_dependencies",
+        packages=[],
+        requires_per_dependency_analysis=False,
+        preferred_agents=["vulnerability_agent", "maintenance_agent"],
+    )
+
+    with (
+        patch.object(deepagent_nodes, "_deep_agent", fake_deep_agent),
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(fake_concern),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.vulnerability_agent"
+            ".trivy_vuln_scan",
+            AsyncMock(return_value=_TRIVY_FIXTURE),
+        ) as mock_trivy_scan,
+    ):
+        graph = build_analysis_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "vulnerabilities and unmaintained dependencies",
+                "prep_result_id": prep.id,
+                "bundle_ids": [],
+                "agent_calls": [],
+            },
+            config=subgraph_config,
+        )
+
+    mock_trivy_scan.assert_awaited_once()
+    assert result.get("analysis_result_id")
+    analysis = await result_dao.get_analysis(result["analysis_result_id"])
+    assert len(analysis.evidence_bundle_ids) == 2
+    assert len(set(analysis.evidence_bundle_ids)) == 2
+    assert len(analysis.findings) == 2
+
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    call = job_repo.update_artifact_data.await_args
+    agent_calls = call.args[2]["agent_calls"]
+    assert {c["agent_type"] for c in agent_calls} == {
+        "vulnerability_agent",
+        "maintenance_agent",
+    }
+
+    # The deep agent must have been invoked with vulnerability_agent already
+    # excluded from its available-specialists roster.
+    deepagent_state_arg = fake_deep_agent.ainvoke.await_args.args[0]
+    system_content = deepagent_state_arg["messages"][0].content
+    assert "- vulnerability_agent:" not in system_content
+    assert "- maintenance_agent:" in system_content
+    assert (
+        "Already completed for this concern: ['vulnerability_agent']"
+        in system_content
+    )

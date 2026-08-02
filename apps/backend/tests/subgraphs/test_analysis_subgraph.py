@@ -432,11 +432,11 @@ async def test_backstop_fires_when_deep_agent_never_delegates(
             "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
             _fake_concern_llm(
                 Concern(
-                    type=["vulnerability"],
+                    type=["maintenance"],
                     scope="all_dependencies",
                     packages=[],
                     requires_per_dependency_analysis=True,
-                    preferred_agents=["vulnerability_agent"],
+                    preferred_agents=["maintenance_agent"],
                 )
             ),
         ),
@@ -445,7 +445,7 @@ async def test_backstop_fires_when_deep_agent_never_delegates(
         result = await graph.ainvoke(
             {
                 "job_id": job_id,
-                "concern": "security vulnerabilities",
+                "concern": "unmaintained dependencies",
                 "prep_result_id": prep.id,
                 "bundle_ids": [],
                 "agent_calls": [],
