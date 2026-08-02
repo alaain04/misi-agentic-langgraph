@@ -518,3 +518,30 @@ just the whole-tree subset before the deep agent ever starts.
   particular `test_coverage_gate_skips_per_package_coverage_when_whole_tree_scan_satisfies_concern`
   passed unmodified, confirming the seeding fix works correctly for the
   pre-existing (non-mixed) whole-tree-via-deep-agent scenario too.
+
+### Follow-up: simplify and fully dynamize the prompt (same day)
+
+The static "Whole-project specialists" paragraph in `_SYSTEM_TEMPLATE`
+unconditionally described `vulnerability_agent`/`license_agent` as available
+even when the roster right above it had just excluded them (already run via
+the prefix) — contradictory, and dead weight when both had run. Removed
+entirely: each agent's own roster description (`get_agent_descriptions()`)
+already states it's a whole-tree, single-pass scan, and `{already_done}`
+already covers what's done and why not to re-dispatch it — no separate
+paragraph needed, dynamic or otherwise.
+
+Reviewing the whole prompt for that fix surfaced two more now-stale/
+redundant pieces, folded away in the same pass:
+- The 5-step numbered "Before delegating any work" planning phase — step 3
+  ("prefer whole-project specialists over package-level specialists") no
+  longer makes sense now that whole-project specialists are peeled off
+  before the deep agent ever starts. The whole numbered list collapsed into
+  the single justification-before-dispatch rule ("what new information will
+  this provide that's necessary for the final report?").
+- The standalone "do not collect evidence simply because it may be
+  interesting" sentence folded into that same rule's answer list rather than
+  standing alone as a separate paragraph.
+
+No test changes were needed beyond the prompt text itself — all prior
+assertions (budget numbers, `type=`/`scope=` interpolation, roster exclusion,
+the `{already_done}` note) still hold against the shorter prompt.
