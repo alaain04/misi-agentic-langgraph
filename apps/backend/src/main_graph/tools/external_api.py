@@ -343,9 +343,7 @@ async def web_search(package_name: str, query: str) -> dict:
     if not settings.tavily_api_key:
         return {"error": "TAVILY_API_KEY not configured", "results": []}
     full_query = (
-        query
-        if package_name.lower() in query.lower()
-        else f"{package_name} {query}"
+        query if package_name.lower() in query.lower() else f"{package_name} {query}"
     )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

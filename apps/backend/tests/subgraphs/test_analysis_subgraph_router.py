@@ -38,7 +38,6 @@ def _seed_prep(job_id: str) -> PrepResult:
         manifest_files=["package.json", "package-lock.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
-        discovery_summary="test-project depends on lodash.",
         vector_store_id="",
     )
 
@@ -293,8 +292,7 @@ async def test_mixed_concern_peels_off_vulnerability_before_deep_agent_runs(
     assert "- vulnerability_agent:" not in system_content
     assert "- maintenance_agent:" in system_content
     assert (
-        "Already completed for this concern: ['vulnerability_agent']"
-        in system_content
+        "Already completed for this concern: ['vulnerability_agent']" in system_content
     )
 
 

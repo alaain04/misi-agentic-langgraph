@@ -22,6 +22,28 @@ class Concern(BaseModel):
     preferred_agents: list[str]
 
 
+class ConcernDraft(BaseModel):
+    is_valid: bool
+    type: list[ConcernType]
+    packages: list[str] = Field(default_factory=list)
+    requires_per_dependency_analysis: bool
+
+
+def packages_valid(packages: list[str], direct_deps: dict[str, str]) -> bool:
+    return all(p in direct_deps for p in packages)
+
+
+def invalid_concern() -> Concern:
+    return Concern(
+        is_valid=False,
+        type=["other"],
+        scope="all_dependencies",
+        packages=[],
+        requires_per_dependency_analysis=False,
+        preferred_agents=[],
+    )
+
+
 SIMPLE_CONCERN_TYPES = {"vulnerability", "license"}
 
 

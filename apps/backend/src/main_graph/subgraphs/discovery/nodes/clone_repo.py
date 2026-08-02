@@ -26,7 +26,7 @@ def _clone_command(
     if github_token:
         command = (
             'git -c http.extraHeader="AUTHORIZATION: basic '
-            "$(printf 'x-access-token:%s' \"$GIT_TOKEN\" | base64)\" "
+            '$(printf \'x-access-token:%s\' "$GIT_TOKEN" | base64)" '
             f"clone --depth=1 --single-branch {repo_url} /workspace"
         )
         return command, {"GIT_TOKEN": github_token}

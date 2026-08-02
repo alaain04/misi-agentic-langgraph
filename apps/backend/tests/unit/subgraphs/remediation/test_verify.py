@@ -7,6 +7,7 @@ from src.main_graph.subgraphs.remediation.verify import verify_working_copy
 
 class FakeContainer:
     """Returns queued (rc, stdout, stderr) per run() call, in order."""
+
     def __init__(self, results):
         self._results = list(results)
         self.commands = []
@@ -16,21 +17,29 @@ class FakeContainer:
         self, image, command, volume=None, run_as_root=False, secret_env=None
     ):
         self.commands.append(command)
-        self.calls.append({
-            "image": image,
-            "command": command,
-            "volume": volume,
-            "run_as_root": run_as_root,
-            "secret_env": secret_env,
-        })
+        self.calls.append(
+            {
+                "image": image,
+                "command": command,
+                "volume": volume,
+                "run_as_root": run_as_root,
+                "secret_env": secret_env,
+            }
+        )
         return self._results.pop(0)
 
 
 @pytest.fixture
 def work_dir(tmp_path):
-    (tmp_path / "package.json").write_text(json.dumps(
-        {"name": "x", "scripts": {"build": "tsc", "test": "jest"},
-         "dependencies": {"lodash": "^4.17.21"}}))
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "x",
+                "scripts": {"build": "tsc", "test": "jest"},
+                "dependencies": {"lodash": "^4.17.21"},
+            }
+        )
+    )
     return str(tmp_path)
 
 
@@ -69,11 +78,13 @@ async def test_no_build_no_test_scripts(tmp_path):
 @pytest.mark.asyncio
 async def test_placeholder_test_script_is_skipped(tmp_path):
     (tmp_path / "package.json").write_text(
-        json.dumps({
-            "name": "x",
-            "scripts": {"test": 'echo "Error: no test specified" && exit 1'},
-            "dependencies": {"lodash": "^4.17.21"},
-        })
+        json.dumps(
+            {
+                "name": "x",
+                "scripts": {"test": 'echo "Error: no test specified" && exit 1'},
+                "dependencies": {"lodash": "^4.17.21"},
+            }
+        )
     )
     audit = json.dumps({"vulnerabilities": {}})
     c = FakeContainer([(0, "", ""), (0, audit, "")])
@@ -116,9 +127,7 @@ async def test_container_call_args_volume_run_as_root_command_prefix(work_dir):
     for i, call in enumerate(c.calls):
         # Every call should have correct volume and run_as_root
         assert call["volume"] == expected_volume, f"Call {i}: volume mismatch"
-        assert call["run_as_root"] is True, (
-            f"Call {i}: run_as_root should be True"
-        )
+        assert call["run_as_root"] is True, f"Call {i}: run_as_root should be True"
         assert call["command"].startswith("cd /workspace && "), (
             f"Call {i}: command should start with 'cd /workspace && '"
         )

@@ -42,6 +42,4 @@ async def collect_licenses(
             if name and license_id:
                 by_name.setdefault(name, license_id)
 
-    return {
-        key: by_name.get(key.rsplit("@", 1)[0], "UNKNOWN") for key in packages
-    }
+    return {key: by_name.get(key.rsplit("@", 1)[0], "UNKNOWN") for key in packages}

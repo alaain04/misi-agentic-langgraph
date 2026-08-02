@@ -81,7 +81,7 @@ async def _run_discovery(args) -> None:
     print(f"  package_manager : {prep.detected_package_manager}")
     direct_deps = list(prep.dependency_graph.get("direct", {}).keys())[:10]
     print(f"  direct deps     : {direct_deps}")
-    print(f"  summary (first 200 chars): {prep.discovery_summary[:200]}")
+    print(f"  project_metadata: {prep.project_metadata}")
 
 
 async def _run_analysis(args) -> None:

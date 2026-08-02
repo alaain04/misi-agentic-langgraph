@@ -29,7 +29,6 @@ def _prep(**overrides):
         detected_package_manager="npm",
         docker_image="node:lts-alpine",
         dependency_graph={"direct": {"lodash": "^4.17.11"}, "packages": {}},
-        discovery_summary="",
         vector_store_id="",
     )
     defaults.update(overrides)

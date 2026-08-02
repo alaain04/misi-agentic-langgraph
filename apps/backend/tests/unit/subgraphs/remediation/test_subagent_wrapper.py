@@ -37,7 +37,6 @@ def _prep(**overrides):
         docker_image="node:lts-alpine",
         detected_package_manager="npm",
         dependency_graph={"direct": {"eslint": "8.0.0"}, "packages": {}},
-        discovery_summary="a test repo",
         vector_store_id="",
     )
     defaults.update(overrides)

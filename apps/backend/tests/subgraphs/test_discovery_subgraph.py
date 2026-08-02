@@ -9,7 +9,6 @@ What is real:
 What is mocked:
 - container.run (no Docker needed for git clone)
 - index_repository._embeddings (no OpenAI calls)
-- build_dependency_summary._llm (no OpenAI calls)
 """
 
 from __future__ import annotations
@@ -26,9 +25,6 @@ from src.main_graph.subgraphs.discovery.nodes.save_prep_result import save_prep_
 from src.utils.config import settings
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "simple-nodejs-project")
-_DISCOVERY_SUMMARY = (
-    "test-project uses Express 4.18, Lodash 4.17, and Axios 1.6 as main dependencies."
-)
 
 
 def _setup_repo(job_id: str) -> str:
@@ -49,15 +45,6 @@ def _make_embeddings_mock():
     return mock
 
 
-def _make_llm_mock(text: str):
-    """Return an LLM mock whose .ainvoke returns a response with .content = text."""
-    response = MagicMock()
-    response.content = text
-    mock = MagicMock()
-    mock.ainvoke = AsyncMock(return_value=response)
-    return mock
-
-
 @pytest.mark.asyncio
 async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     """Happy path: fixture repo with lock file → PrepResult in MongoDB."""
@@ -65,15 +52,9 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     repo_path = _setup_repo(job_id)
 
     try:
-        with (
-            patch(
-                "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
-                _make_embeddings_mock(),
-            ),
-            patch(
-                "src.main_graph.subgraphs.discovery.nodes.build_dependency_summary._llm",
-                _make_llm_mock(_DISCOVERY_SUMMARY),
-            ),
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
+            _make_embeddings_mock(),
         ):
             graph = build_discovery_subgraph()
             result = await graph.ainvoke(
@@ -93,7 +74,8 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     prep = await result_dao.get_prep(result["prep_result_id"])
     assert prep.job_id == job_id
     assert prep.detected_package_manager == "npm"
-    assert prep.discovery_summary == _DISCOVERY_SUMMARY
+    assert prep.project_metadata["name"] == "test-project"
+    assert prep.project_metadata["direct_dependencies_count"] == 4
     assert "lodash" in prep.dependency_graph.get("direct", {})
     assert "express" in prep.dependency_graph.get("direct", {})
 
@@ -111,15 +93,9 @@ async def test_discovery_sets_vector_store_id_when_sources_present(
         f.write("const lodash = require('lodash');\nconsole.log('hello');\n")
 
     try:
-        with (
-            patch(
-                "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
-                _make_embeddings_mock(),
-            ),
-            patch(
-                "src.main_graph.subgraphs.discovery.nodes.build_dependency_summary._llm",
-                _make_llm_mock(_DISCOVERY_SUMMARY),
-            ),
+        with patch(
+            "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
+            _make_embeddings_mock(),
         ):
             graph = build_discovery_subgraph()
             result = await graph.ainvoke(
@@ -153,15 +129,9 @@ async def test_discovery_error_skips_prep_save(subgraph_config, result_dao):
         return_value=(1, "", "fatal: repository not found")
     )
 
-    with (
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
-            _make_embeddings_mock(),
-        ),
-        patch(
-            "src.main_graph.subgraphs.discovery.nodes.build_dependency_summary._llm",
-            _make_llm_mock("Discovery failed: repository not found"),
-        ),
+    with patch(
+        "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
+        _make_embeddings_mock(),
     ):
         graph = build_discovery_subgraph()
         result = await graph.ainvoke(

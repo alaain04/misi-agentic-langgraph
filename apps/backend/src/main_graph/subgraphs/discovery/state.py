@@ -36,8 +36,6 @@ class DiscoveryState(TypedDict):
     codegraph_ready: NotRequired[bool]
 
     # Outputs
-    project_metadata: NotRequired[ProjectMetadata]
-    project_context: NotRequired[str]
     discovery_error: NotRequired[str | None]
 
     # New output: ID written back to MainState

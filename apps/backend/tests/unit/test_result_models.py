@@ -28,7 +28,6 @@ def test_prep_result_auto_id_and_timestamp():
         manifest_files=["package.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": {}},
-        discovery_summary="summary",
         vector_store_id="vs1",
     )
     assert r.id
@@ -137,7 +136,9 @@ def test_report_result_round_trip():
 
 def test_report_finding_trust_defaults_true_with_empty_observation():
     f = ReportFinding(
-        dep_name="lodash", severity="high", description="CVE",
+        dep_name="lodash",
+        severity="high",
+        description="CVE",
         recommendation="upgrade",
     )
     assert f.trust is True
@@ -146,8 +147,11 @@ def test_report_finding_trust_defaults_true_with_empty_observation():
 
 def test_report_finding_accepts_untrusted_flag():
     f = ReportFinding(
-        dep_name="lodash", severity="high", description="CVE",
-        recommendation="upgrade", trust=False,
+        dep_name="lodash",
+        severity="high",
+        description="CVE",
+        recommendation="upgrade",
+        trust=False,
         observation="business_impact not grounded in tool output",
     )
     assert f.trust is False
@@ -195,7 +199,9 @@ def test_impact_analysis_decision_round_trip():
 
 def test_report_finding_directness_defaults():
     f = ReportFinding(
-        dep_name="express", severity="high", description="CVE",
+        dep_name="express",
+        severity="high",
+        description="CVE",
         recommendation="upgrade",
     )
     assert f.is_direct is True
@@ -204,7 +210,9 @@ def test_report_finding_directness_defaults():
 
 def test_report_finding_accepts_transitive_attribution():
     f = ReportFinding(
-        dep_name="qs", severity="high", description="CVE",
+        dep_name="qs",
+        severity="high",
+        description="CVE",
         recommendation="update express",
         is_direct=False,
         direct_dependents=["express", "webpack"],
@@ -215,9 +223,13 @@ def test_report_finding_accepts_transitive_attribution():
 
 def test_prep_result_commit_sha_and_repo_url_default_empty():
     r = PrepResult(
-        job_id="j1", repo_path="/tmp/r", project_metadata={}, manifest_files=[],
-        detected_package_manager="npm", dependency_graph={"direct": {}},
-        discovery_summary="s", vector_store_id="vs1",
+        job_id="j1",
+        repo_path="/tmp/r",
+        project_metadata={},
+        manifest_files=[],
+        detected_package_manager="npm",
+        dependency_graph={"direct": {}},
+        vector_store_id="vs1",
     )
     assert r.commit_sha == ""
     assert r.repo_url == ""
@@ -225,10 +237,15 @@ def test_prep_result_commit_sha_and_repo_url_default_empty():
 
 def test_prep_result_accepts_commit_sha_and_repo_url():
     r = PrepResult(
-        job_id="j1", repo_path="/tmp/r", project_metadata={}, manifest_files=[],
-        detected_package_manager="npm", dependency_graph={"direct": {}},
-        discovery_summary="s", vector_store_id="vs1",
-        commit_sha="deadbeef", repo_url="https://github.com/x/y",
+        job_id="j1",
+        repo_path="/tmp/r",
+        project_metadata={},
+        manifest_files=[],
+        detected_package_manager="npm",
+        dependency_graph={"direct": {}},
+        vector_store_id="vs1",
+        commit_sha="deadbeef",
+        repo_url="https://github.com/x/y",
     )
     assert r.commit_sha == "deadbeef"
     assert r.repo_url == "https://github.com/x/y"

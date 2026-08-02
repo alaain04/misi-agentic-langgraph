@@ -103,11 +103,11 @@ def _directness_guidance(
         f"the user cannot upgrade, replace, pin, or override it directly. It is "
         f"pulled in by these direct dependencies: {parents}.\n"
         "Anchor everything actionable on the direct dependent(s) above:\n"
-        f"- recommendation MUST target the direct dependent(s), e.g. \"update "
+        f'- recommendation MUST target the direct dependent(s), e.g. "update '
         f"<direct-dependent> to a version whose dependency tree no longer includes "
-        f"{dep_name} (or resolves it to a fixed version)\". The finding description "
-        "may already carry the exact fix path from the audit (e.g. \"Fix requires "
-        "X@Y\"); prefer it when present.\n"
+        f'{dep_name} (or resolves it to a fixed version)". The finding description '
+        'may already carry the exact fix path from the audit (e.g. "Fix requires '
+        'X@Y"); prefer it when present.\n'
         "- If no direct-dependent update resolves it (description says no fix is "
         f"available), say so honestly, then suggest replacing the direct "
         f"dependent(s) or accepting the risk — never patching {dep_name}.\n"

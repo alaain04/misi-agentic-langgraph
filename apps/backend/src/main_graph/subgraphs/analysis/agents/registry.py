@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
 from src.main_graph.subgraphs.analysis.agents.license_agent import LicenseAgent
 from src.main_graph.subgraphs.analysis.agents.maintenance_agent import MaintenanceAgent
@@ -20,3 +22,10 @@ REGISTRY: dict[str, type[BaseAgent]] = {
 
 def get_agent_descriptions() -> dict[str, str]:
     return {k: v.description for k, v in REGISTRY.items()}
+
+
+def agents_for_types(types: Sequence[str]) -> list[str]:
+    wanted = set(types)
+    return [
+        agent_type for agent_type, cls in REGISTRY.items() if cls.concern_types & wanted
+    ]

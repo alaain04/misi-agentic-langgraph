@@ -14,6 +14,7 @@ from src.models.results import AgentDispatch, EvidenceBundle, PrepResult
 
 class MaintenanceAgent(BaseAgent):
     agent_type = "maintenance_agent"
+    concern_types = frozenset({"maintenance"})
     description = (
         "Assesses package health and abandonment risk by checking maintenance "
         "status, download trends, "
@@ -24,7 +25,6 @@ class MaintenanceAgent(BaseAgent):
         You are a package maintenance and health specialist for Node.js dependencies.
         Your task: {hypothesis}
         Packages to focus on: {packages}
-        Project context: {context}
 
         Available tools:
         {tool_descriptions}
@@ -85,8 +85,7 @@ FindingNote.
         if not has_direct or not has_packages:
             return bundle, tools_used, iterations
         direct_only = [
-            f for f in bundle.findings
-            if is_direct(prep.dependency_graph, f.dep_name)
+            f for f in bundle.findings if is_direct(prep.dependency_graph, f.dep_name)
         ]
         if len(direct_only) != len(bundle.findings):
             bundle = bundle.model_copy(update={"findings": direct_only})

@@ -22,7 +22,7 @@ install: ## Install production dependencies only
 # Code quality
 # ---------------------------------------------------------------------------
 lint: ## Run ruff linter
-	uv run ruff check .
+	uv run ruff check --fix . 
 
 format: ## Run ruff formatter
 	uv run ruff format .

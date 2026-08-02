@@ -32,6 +32,5 @@ def test_pipeline_includes_remediation_between_analysis_and_report():
     edges = {(e.source, e.target) for e in graph.get_graph().edges}
     assert (ANALYSIS, REMEDIATION) in edges
     assert any(
-        e.source == REMEDIATION and e.target == REPORT
-        for e in graph.get_graph().edges
+        e.source == REMEDIATION and e.target == REPORT for e in graph.get_graph().edges
     )

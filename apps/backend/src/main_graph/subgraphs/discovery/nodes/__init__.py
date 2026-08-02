@@ -1,4 +1,3 @@
-from .build_dependency_summary import build_project_context
 from .clone_repo import clone_repo
 from .index_codegraph import index_codegraph
 from .index_repository import index_repository
@@ -10,7 +9,6 @@ __all__ = [
     "clone_repo",
     "inspect_repo",
     "install_deps",
-    "build_project_context",
     "index_repository",
     "index_codegraph",
     "save_prep_result",

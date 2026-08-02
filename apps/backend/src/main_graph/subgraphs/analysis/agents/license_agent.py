@@ -31,6 +31,7 @@ class LicenseAgent(BaseAgent):
     """
 
     agent_type = "license_agent"
+    concern_types = frozenset({"license"})
     description = (
         "Analyzes license compatibility across the ENTIRE dependency tree against "
         "the project's own license: rights conflicts, obligation gaps, and copyleft "

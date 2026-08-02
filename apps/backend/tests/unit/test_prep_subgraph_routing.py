@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from src.main_graph.subgraphs.discovery.constants import (
-    BUILD_PROJECT_CONTEXT,
     INDEX_REPO,
     INSPECT_REPO,
     INSTALL_DEPS,
+    SAVE_PREP_RESULT,
 )
 from src.main_graph.subgraphs.discovery.graph import (
     _route_after_clone,
@@ -12,9 +12,9 @@ from src.main_graph.subgraphs.discovery.graph import (
 )
 
 
-def test_clone_error_skips_to_summary():
+def test_clone_error_skips_to_save():
     assert (
-        _route_after_clone({"discovery_error": "clone failed"}) == BUILD_PROJECT_CONTEXT
+        _route_after_clone({"discovery_error": "clone failed"}) == SAVE_PREP_RESULT
     )
 
 
