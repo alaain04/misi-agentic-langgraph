@@ -32,6 +32,9 @@ models -- same structural shape as the analysis-subgraph swap):
   tool calls, content-routed off the target dep name parsed out of the
   worker's own system prompt).
 - `subagent_wrapper._extract_target_dep` (trivial echo -- see below).
+- `classify.classify_target` (stubbed to always return tier="r1" -- none of
+  these scenarios exercise tier classification itself; that's covered by
+  test_classify.py).
 Also patched, per the task-10 brief, purely as network/subprocess
 containment (not because any test exercises their content):
 - `asyncio.create_subprocess_exec` at the `deepagent.tools` module path,
@@ -139,8 +142,23 @@ def _no_network_release_notes():
     fake_proc.communicate = AsyncMock(return_value=(b"[]", b""))
     fake_proc.returncode = 0
     with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.tools.asyncio.create_subprocess_exec",
+        "src.main_graph.subgraphs.remediation.changelog.asyncio.create_subprocess_exec",
         AsyncMock(return_value=fake_proc),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _classify_everything_as_r1():
+    from src.main_graph.subgraphs.remediation.classify import TargetClassification
+
+    with patch(
+        "src.main_graph.subgraphs.remediation.classify.classify_target",
+        AsyncMock(
+            return_value=TargetClassification(
+                tier="r1", rationale="test fixture - always dispatchable"
+            )
+        ),
     ):
         yield
 
@@ -716,9 +734,9 @@ async def test_correction_round_retries_then_gives_up_at_cap(
     )
     await result_dao.save_analysis(analysis)
 
-    # Every container.run call (npm_audit/npm_outdated during the initial
-    # round, and verify_working_copy's install step during every group
-    # verification) fails, so replay_and_verify_group can never go green.
+    # Every container.run call (verify_working_copy's install step during
+    # every group verification) fails, so replay_and_verify_group can never
+    # go green.
     subgraph_config["configurable"]["container"].run = AsyncMock(
         return_value=(1, "", "npm install failed")
     )
