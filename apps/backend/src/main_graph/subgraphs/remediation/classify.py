@@ -6,15 +6,21 @@ docs/superpowers/specs/2026-08-02-remediation-tier-classification.md."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Literal, cast
 
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 
 from src.domain.ports.container_run_port import ContainerRunPort
+from src.main_graph.config import get_services
 from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes
-from src.models.remediation import RemediationTarget
+from src.main_graph.subgraphs.remediation.selection import select_remediation_targets
+from src.main_graph.subgraphs.remediation.state import RemediationState
+from src.models.remediation import Remediation, RemediationTarget
+from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -86,3 +92,44 @@ async def classify_target(
             tier="r2",
             rationale=f"classification failed, defaulting conservatively: {exc}",
         )
+
+
+async def classify_targets_node(
+    state: RemediationState, config: RunnableConfig
+) -> dict:
+    svc = get_services(config)
+    dao = svc["result_dao"]
+    container = svc["container"]
+    prep = await dao.get_prep(state["prep_result_id"])
+    analysis = await dao.get_analysis(state["analysis_result_id"])
+
+    initial = select_remediation_targets(
+        analysis.findings, prep.dependency_graph, settings.risk_min_severity
+    )
+    if not initial:
+        return {"targets": {}, "remediations": {}}
+
+    classifications = await asyncio.gather(
+        *[
+            classify_target(t, prep.repo_path, container, prep.docker_image)
+            for t in initial
+        ]
+    )
+
+    targets: dict[str, dict] = {}
+    remediations: dict[str, dict] = {}
+    for target, classification in zip(initial, classifications, strict=True):
+        if classification.tier == "r3":
+            remediation = Remediation(
+                target_dep=target.target_dep,
+                addresses=target.addresses,
+                from_range=target.current_range,
+                strategy="replace",
+                status="skipped",
+                skip_reason="dependency migration - deferred, not yet supported",
+            )
+            remediations[target.target_dep] = remediation.model_dump()
+        else:
+            targets[target.target_dep] = target.model_dump()
+
+    return {"targets": targets, "remediations": remediations}
