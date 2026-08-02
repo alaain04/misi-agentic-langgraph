@@ -22,6 +22,7 @@ from src.main_graph.subgraphs.analysis.deepagent.coverage import (
     compute_missing_direct_deps,
     whole_tree_scan_satisfies_concern,
 )
+from src.main_graph.subgraphs.analysis.deepagent.limits import DEEPAGENT_LIMITS
 from src.main_graph.subgraphs.analysis.deepagent.state import AnalysisDeepAgentState
 from src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper import (
     build_agent_subagent,
@@ -32,32 +33,63 @@ from src.utils.llm import Model, get_llm
 _MAX_CORRECTION_ROUNDS = 2
 
 _SYSTEM_TEMPLATE = textwrap.dedent("""\
-    You are a dependency risk investigation agent for a Node.js project.
-    Your job: given a user concern and project context, delegate to the right
-    specialist subagents to collect evidence, then stop once you have enough
-    evidence to support a complete risk report.
+    You are a dependency risk investigation agent for a Node.js project. You
+    are invoked only for concerns a deterministic router already classified
+    as complex -- something a single whole-tree scan cannot fully answer
+    alone.
+
+    Your primary goal is to produce a complete answer while minimizing
+    specialist invocations. Every specialist call has a cost (latency,
+    tokens, rate limits). Prefer the smallest plan that completely answers the concern.
+    You have a hard budget of {max_specialist_calls} specialist calls, with at most
+    {max_parallel_calls} running concurrently.
 
     Available specialists (call via the task tool):
     {roster}
 
-    - Delegate to a subagent as many or as few times as the concern needs.
-    - You may delegate to the same specialist multiple times with different
-      packages or a different angle.
-    - vulnerability_agent and license_agent each scan the ENTIRE dependency
-      tree in a single run -- delegate to each at most once.
-    - If vulnerability_agent or license_agent already fully answers the
-      concern with high-confidence findings, do NOT also dispatch
-      web_research_agent (or any other specialist) just to re-confirm or
-      re-research those same findings -- that adds no new evidence and
-      wastes budget. Only delegate further work that covers something the
-      whole-tree scan genuinely does not: a different concern (e.g.
-      maintenance, supply chain), or gaps the scan left unanswered.
-    - For every other specialist, make sure your delegated tasks collectively
-      cover every direct dependency relevant to the concern -- you may be
-      asked to cover specific missing ones if you stop early.
+    Before delegating any work:
+    1. Identify the information required to answer the concern.
+    2. Determine the minimum set of specialists needed.
+    3. Prefer whole-project specialists over package-level specialists.
+    4. Assume the concern is solved after each specialist completes.
+    5. Only continue if there is a concrete information gap.
+
+    Whole-project specialists:
+    - vulnerability_agent covers vulnerabilities for every dependency.
+    - license_agent covers licensing for every dependency.
+    Each scans the ENTIRE dependency tree in a single run -- delegate to
+    each at most once. If either fully answers the concern, do not invoke
+    additional specialists to validate or expand those findings.
+
+    Before dispatching another specialist, ask: "What new information will
+    this specialist provide that is necessary for the final report?" If the
+    answer is "none" or "only confirmation", stop instead.
+
+    Do not collect evidence simply because it may be interesting. Only
+    collect evidence required to answer the user's concern.
+
+    Never use multiple specialists to answer the same question unless the
+    previous specialist explicitly left an information gap. For example:
+    vulnerability_agent finds known CVEs, then web_research_agent finds the
+    same CVEs from GitHub advisories -- this should never happen.
+
+    For every package-scoped specialist you do use, make sure your
+    delegated tasks collectively cover every direct dependency relevant to
+    the concern -- you may be asked to cover specific missing ones if you
+    stop early.
+
+    The investigation is complete when:
+    - every required question has evidence;
+    - no remaining evidence gap exists;
+    - additional specialists would only increase confidence rather than
+      change conclusions.
+    At that point, stop.
+
+    If answering the concern would exceed your execution budget, prioritize the
+    highest-risk dependencies first and report which packages remain unanalyzed.
 
     Direct dependencies (name@installed_version): {direct_deps}
-    Concern: {concern}
+    Concern: {concern} (type={concern_type}, scope={concern_scope})
     Project context: {context}
     """).strip()
 
@@ -100,11 +132,16 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
         direct_deps = [
             f"{n}@{v}" for n, v in prep.dependency_graph.get("direct", {}).items()
         ]
+        structured_concern = state["structured_concern"]
         system = _SYSTEM_TEMPLATE.format(
             roster=_roster(),
             direct_deps=direct_deps,
             concern=state["concern"],
+            concern_type=structured_concern["type"],
+            concern_scope=structured_concern["scope"],
             context=prep.discovery_summary[:1000],
+            max_specialist_calls=DEEPAGENT_LIMITS.max_specialist_calls,
+            max_parallel_calls=DEEPAGENT_LIMITS.max_parallel_calls,
         )
         deepagent_state = {
             "messages": [HumanMessage(content=system)],
