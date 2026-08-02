@@ -27,18 +27,39 @@ tier-labeled, per-group PR as today.
 
 - **D1 — A new `classify_targets_node` runs once, before dispatch, and
   replaces `root_deepagent_node`'s current inline initial-selection branch.**
-  Today's `select_remediation_targets` + `npm_audit` + `npm_outdated` call
-  sequence, currently inlined in `root_deepagent_node`'s `else` branch (the
-  non-retry path), moves into its own node. It additionally fetches each
-  target's GitHub release notes and makes one structured-output LLM call per
-  target classifying `tier: r1 | r2 | r3` with a short `rationale`, given
-  current range, candidate/outdated range, and the release notes body. This
-  runs only on the initial pass — retries re-enter `root_deepagent_node`
-  directly (unchanged), never re-classify. Reason for a *separate, cheap*
-  classification step rather than letting the existing full subagent decide
-  everything as it does today: it lets r3 targets be filtered out before
-  paying for the expensive investigate-and-edit subagent run at all, since
-  they're deferred regardless of what that investigation would find.
+  Today's `select_remediation_targets` call, currently inlined in
+  `root_deepagent_node`'s `else` branch (the non-retry path), moves into its
+  own node, unchanged. It additionally fetches each target's GitHub release
+  notes and makes one structured-output LLM call per target classifying
+  `tier: r1 | r2 | r3` with a short `rationale`, from the release notes text
+  and the target's known current range alone. This runs only on the initial
+  pass — retries re-enter `root_deepagent_node` directly (unchanged), never
+  re-classify. Reason for a *separate, cheap* classification step rather than
+  letting the existing full subagent decide everything as it does today: it
+  lets r3 targets be filtered out before paying for the expensive
+  investigate-and-edit subagent run at all, since they're deferred regardless
+  of what that investigation would find.
+- **D1b — `npm_audit`/`npm_outdated` are dropped from remediation entirely,
+  not relocated.** They are not called by `classify_targets_node`, and
+  `state["evidence"]` and the `else`-branch calls that built it are removed
+  from `root_deepagent_node` outright. `subagent_wrapper.py`'s per-target
+  prompt drops its "Evidence (npm audit fix paths, outdated versions)"
+  section accordingly — the subagent still gets everything else unchanged
+  (its own `read_release_notes` call, `blast_radius`, `search_code`).
+  Rationale (from review discussion): this data is largely redundant with
+  what the analysis subgraph's Trivy scan already computed for each finding
+  (installed/fixed version), just not yet in structured form on `FindingNote`
+  — re-deriving it via a second tool (npm CLI) inside remediation duplicates
+  work that belongs in analysis. The one real signal this gives up for now —
+  npm audit's `isSemVerMajor` breaking-change flag, and npm-outdated's
+  non-vulnerable-but-stale coverage — has no replacement in *this* spec; it's
+  the explicit subject of the companion spec
+  `docs/superpowers/specs/2026-08-02-analysis-finding-version-enrichment.md`
+  (drafted, not yet built). Until that lands, tier classification here relies
+  on the LLM's own reading of the release notes prose (which commonly states
+  breaking changes explicitly) rather than a structured flag. A small
+  follow-up to this spec will wire the enriched fields into
+  `classify_targets_node`'s prompt once the companion spec ships.
 - **D2 — r3-classified targets never reach `root_deepagent_node`; they get an
   upfront settled `Remediation` record instead.** For each target classified
   r3, `classify_targets_node` writes
@@ -101,9 +122,9 @@ tier-labeled, per-group PR as today.
 START
   -> classify_targets_node
        - select_remediation_targets (unchanged, deterministic) -> initial targets
-       - npm_audit / npm_outdated (moved here, unchanged) -> evidence
+       - no npm_audit/npm_outdated call (D1b - dropped from remediation)
        - per target, concurrently: fetch release notes + one structured LLM
-         call -> tier (r1/r2/r3) + rationale
+         call -> tier (r1/r2/r3) + rationale, from release notes text alone
        - r3 targets: write a settled Remediation(strategy="replace",
          status="skipped", skip_reason=...) straight into `remediations`;
          excluded from the `targets` dict returned
@@ -132,6 +153,10 @@ START
 - Surfacing deferred r3 findings more prominently in the API/report response
   than today's existing `status`/`skip_reason` fields already do — the data
   is present; a dedicated UI/API affordance is a separate, smaller follow-up.
+- Enriching `FindingNote` with structured `installed_version`/`fixed_version`/
+  `is_semver_major` fields — that's the companion spec
+  `2026-08-02-analysis-finding-version-enrichment.md` (drafted, to be built
+  later). This spec's classify step ships without that signal for now (D1b).
 
 ## Success criteria
 
