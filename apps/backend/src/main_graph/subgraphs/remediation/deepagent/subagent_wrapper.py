@@ -10,7 +10,6 @@ a richer type.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -47,9 +46,6 @@ You are remediating ONE dependency risk in a Node.js project: {target_dep}
 
 Findings this addresses: {addresses}
 
-Evidence (npm audit fix paths, outdated versions):
-{evidence}
-
 Steps:
 1. Call read_release_notes to review what changed between the installed
    version and reasonable upgrade candidates.
@@ -57,9 +53,9 @@ Steps:
    used in this codebase.
 3. Decide: if nothing relevant broke, bump only. If something broke but you
    can fix the call sites yourself, bump AND edit the affected files. If
-   the dependency itself should be replaced (abandoned, superseded, or the
-   evidence above already says so), propose a replacement and migrate all
-   usage yourself.
+   the dependency itself should be replaced (abandoned, superseded, or your
+   own investigation already points that way), propose a replacement and
+   migrate all usage yourself.
 4. If your investigation shows another dependency must also move for this
    fix to be coherent (e.g. a peer/plugin no longer compatible), call
    dependents_of to confirm it is really in this tree, then list it in
@@ -104,7 +100,6 @@ class _TargetSubagentState(TypedDict):
     messages: list
     job_id: str
     prep_result_id: str
-    evidence: dict
     targets: dict[str, dict]
     remediations: Annotated[dict[str, dict], _merge_replace]
     requires_edges: Annotated[dict[str, list], _merge_replace]
@@ -169,7 +164,6 @@ async def _run(state: _TargetSubagentState, config: RunnableConfig) -> dict:
                     "none (this dependency was pulled in because remediating "
                     "another target requires it)"
                 ),
-                evidence=json.dumps(state.get("evidence") or {})[:4000],
             ),
             # virtual_mode=True: blocks '..'/'~' traversal and verifies every
             # resolved path stays under work_dir (the isolated copy_repo clone),

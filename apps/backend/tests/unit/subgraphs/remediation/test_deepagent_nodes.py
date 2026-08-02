@@ -14,7 +14,6 @@ from src.main_graph.subgraphs.remediation.deepagent.nodes import (
     root_deepagent_node,
     route_after_group_verify,
 )
-from src.models.conductor import FindingNote
 from src.models.remediation import VerificationResult
 from src.models.results import PrepResult
 
@@ -35,21 +34,11 @@ def _prep(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_root_deepagent_node_seeds_targets_from_selection_and_invokes_agent():
+async def test_root_deepagent_node_dispatches_agent_for_seeded_targets():
     prep = _prep()
-    analysis = MagicMock(
-        findings=[
-            FindingNote(
-                dep_name="lodash", severity="high", description="d", evidence=[]
-            )
-        ]
-    )
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=prep)
-    dao.get_analysis = AsyncMock(return_value=analysis)
-    container = MagicMock()
-    container.run = AsyncMock(return_value=(0, "{}", ""))
-    config = {"configurable": {"result_dao": dao, "container": container}}
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes._root_deep_agent"
@@ -72,6 +61,13 @@ async def test_root_deepagent_node_seeds_targets_from_selection_and_invokes_agen
                 "prep_result_id": "prep-1",
                 "analysis_result_id": "a-1",
                 "concern": "c",
+                "targets": {
+                    "lodash": {
+                        "target_dep": "lodash",
+                        "addresses": ["lodash"],
+                        "current_range": "^4.17.11",
+                    }
+                },
             },
             config,
         )
@@ -83,10 +79,8 @@ async def test_root_deepagent_node_seeds_targets_from_selection_and_invokes_agen
 @pytest.mark.asyncio
 async def test_root_deepagent_node_no_targets_short_circuits():
     prep = _prep()
-    analysis = MagicMock(findings=[])
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=prep)
-    dao.get_analysis = AsyncMock(return_value=analysis)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
     result = await root_deepagent_node(
@@ -95,6 +89,7 @@ async def test_root_deepagent_node_no_targets_short_circuits():
             "prep_result_id": "prep-1",
             "analysis_result_id": "a-1",
             "concern": "c",
+            "targets": {},
         },
         config,
     )
@@ -132,7 +127,6 @@ async def test_root_deepagent_node_retry_synthesizes_unknown_companion_target():
                 "current_range": "^4.17.11",
             }
         },
-        "evidence": {},
     }
 
     with patch(
@@ -164,19 +158,9 @@ async def test_root_deepagent_node_recursion_limit_returns_graceful_fallback():
     already returns on other paths, with remediations/requires_edges wiped
     since nothing from the aborted run is trustworthy."""
     prep = _prep()
-    analysis = MagicMock(
-        findings=[
-            FindingNote(
-                dep_name="lodash", severity="high", description="d", evidence=[]
-            )
-        ]
-    )
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=prep)
-    dao.get_analysis = AsyncMock(return_value=analysis)
-    container = MagicMock()
-    container.run = AsyncMock(return_value=(0, "{}", ""))
-    config = {"configurable": {"result_dao": dao, "container": container}}
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes._root_deep_agent"
@@ -190,6 +174,13 @@ async def test_root_deepagent_node_recursion_limit_returns_graceful_fallback():
                 "prep_result_id": "prep-1",
                 "analysis_result_id": "a-1",
                 "concern": "c",
+                "targets": {
+                    "lodash": {
+                        "target_dep": "lodash",
+                        "addresses": ["lodash"],
+                        "current_range": "^4.17.11",
+                    }
+                },
             },
             config,
         )

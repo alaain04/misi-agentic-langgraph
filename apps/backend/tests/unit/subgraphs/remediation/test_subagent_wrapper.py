@@ -90,7 +90,6 @@ async def test_run_resolves_known_target_and_reports_outcome(tmp_path):
                 "messages": [{"role": "user", "content": "Remediate eslint."}],
                 "job_id": "job-1",
                 "prep_result_id": "prep-1",
-                "evidence": {},
                 "targets": {
                     "eslint": {
                         "target_dep": "eslint",
@@ -155,7 +154,6 @@ async def test_run_records_requires_edge():
                 "messages": [{"role": "user", "content": "Remediate eslint."}],
                 "job_id": "job-1",
                 "prep_result_id": "prep-1",
-                "evidence": {},
                 "targets": {
                     "eslint": {
                         "target_dep": "eslint",
@@ -217,7 +215,6 @@ async def test_run_synthesizes_target_for_unknown_dep_name():
                 ],
                 "job_id": "job-1",
                 "prep_result_id": "prep-1",
-                "evidence": {},
                 "targets": {},
                 "remediations": {},
                 "requires_edges": {},
@@ -263,7 +260,6 @@ async def test_run_reports_failed_when_agent_produces_no_structured_response():
                 "messages": [{"role": "user", "content": "Remediate eslint."}],
                 "job_id": "job-1",
                 "prep_result_id": "prep-1",
-                "evidence": {},
                 "targets": {
                     "eslint": {
                         "target_dep": "eslint",
@@ -331,7 +327,6 @@ async def test_run_reports_failed_when_structured_response_fails_validation():
                 "messages": [{"role": "user", "content": "Remediate eslint."}],
                 "job_id": "job-1",
                 "prep_result_id": "prep-1",
-                "evidence": {},
                 "targets": {
                     "eslint": {
                         "target_dep": "eslint",

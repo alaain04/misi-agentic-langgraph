@@ -25,7 +25,6 @@ def _merge_replace(current: dict, incoming: dict) -> dict:
 class RemediationDeepAgentState(DeepAgentState):
     job_id: Annotated[str, _keep_first_str]
     prep_result_id: Annotated[str, _keep_first_str]
-    evidence: Annotated[dict, _keep_first_dict]
     targets: Annotated[dict[str, dict], _keep_first_dict]
     remediations: Annotated[dict[str, dict], _merge_replace]
     requires_edges: Annotated[dict[str, list], _merge_replace]

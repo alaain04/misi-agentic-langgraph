@@ -39,7 +39,6 @@ def test_state_schema_declares_expected_fields():
     expected_fields = (
         "job_id",
         "prep_result_id",
-        "evidence",
         "targets",
         "remediations",
         "requires_edges",

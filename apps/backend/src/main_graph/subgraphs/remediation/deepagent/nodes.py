@@ -20,12 +20,9 @@ from src.main_graph.subgraphs.remediation.deepagent.state import (
 from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
     build_target_subagent,
 )
-from src.main_graph.subgraphs.remediation.selection import select_remediation_targets
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.main_graph.subgraphs.remediation.workspace import copy_repo
-from src.main_graph.tools.npm_cli import npm_audit, npm_outdated
 from src.models.remediation import Remediation, RemediationResult, RemediationTarget
-from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -59,7 +56,6 @@ _root_deep_agent = _build_root_deep_agent()
 async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -> dict:
     svc = get_services(config)
     dao = svc["result_dao"]
-    container = svc["container"]
     prep = await dao.get_prep(state["prep_result_id"])
 
     retry_targets = state.get("retry_targets")
@@ -82,20 +78,8 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
                 targets[dep] = RemediationTarget(
                     target_dep=dep, addresses=[], current_range=direct.get(dep)
                 ).model_dump()
-        evidence = state.get("evidence") or {}
     else:
-        analysis = await dao.get_analysis(state["analysis_result_id"])
-        initial = select_remediation_targets(
-            analysis.findings, prep.dependency_graph, settings.risk_min_severity
-        )
-        targets = {t.target_dep: t.model_dump() for t in initial}
-        if not targets:
-            return {"targets": {}, "remediations": {}, "requires_edges": {}}
-        audit = await npm_audit(
-            prep.repo_path, container, prep.docker_image, prep.detected_package_manager
-        )
-        outdated = await npm_outdated(prep.repo_path, container, prep.docker_image)
-        evidence = {"audit": audit, "outdated": outdated}
+        targets = state.get("targets") or {}
 
     if not targets:
         return {"targets": {}, "remediations": {}, "requires_edges": {}}
@@ -108,7 +92,6 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
         "messages": [{"role": "user", "content": f"Open targets:\n{open_list}"}],
         "job_id": state["job_id"],
         "prep_result_id": state["prep_result_id"],
-        "evidence": evidence,
         "targets": targets,
         "remediations": {},
         "requires_edges": {},
@@ -132,14 +115,12 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
         )
         return {
             "targets": targets,
-            "evidence": evidence,
             "remediations": {},
             "requires_edges": {},
         }
 
     return {
         "targets": targets,
-        "evidence": evidence,
         "remediations": result.get("remediations") or {},
         "requires_edges": result.get("requires_edges") or {},
     }

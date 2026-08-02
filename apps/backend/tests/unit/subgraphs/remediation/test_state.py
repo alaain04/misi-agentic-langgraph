@@ -7,7 +7,6 @@ def test_remediation_state_accepts_new_deepagent_fields():
         "prep_result_id": "p1",
         "analysis_result_id": "a1",
         "targets": {},
-        "evidence": {},
         "remediations": {},
         "requires_edges": {},
         "retry_targets": [],
