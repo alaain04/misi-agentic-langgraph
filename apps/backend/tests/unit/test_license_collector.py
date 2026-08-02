@@ -17,7 +17,6 @@ def _prep(**kw) -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={"direct": {}, "packages": {}},
-        vector_store_id="",
     )
     return PrepResult(**{**defaults, **kw})
 

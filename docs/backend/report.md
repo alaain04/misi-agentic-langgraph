@@ -69,7 +69,7 @@ interface BlastRadiusSummary {
   depth_searched: number;             // 0 when source is not "codegraph"
   use_cases_impacted: string[];       // business capabilities the affected code implements
   narrative: string;                  // 1-3 sentence real-world impact summary
-  source: "codegraph" | "semantic_search" | "unavailable";
+  source: "codegraph" | "local_scan" | "unavailable";
 }
 ```
 

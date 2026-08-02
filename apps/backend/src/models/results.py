@@ -20,7 +20,6 @@ class PrepResult(BaseModel):
     detected_package_manager: str
     docker_image: str = "node:lts-alpine"
     dependency_graph: dict
-    vector_store_id: str
     codegraph_ready: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
@@ -90,7 +89,7 @@ class BlastRadiusSummary(BaseModel):
     depth_searched: int = 0
     use_cases_impacted: list[str] = Field(default_factory=list)
     narrative: str = ""
-    source: Literal["codegraph", "semantic_search", "unavailable"] = "unavailable"
+    source: Literal["codegraph", "local_scan", "unavailable"] = "unavailable"
 
 
 class ReportFinding(BaseModel):

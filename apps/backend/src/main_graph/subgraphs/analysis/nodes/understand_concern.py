@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.analysis.agents.registry import (
     agents_for_types,
-    get_agent_descriptions,
+    get_agents,
 )
 from src.main_graph.subgraphs.analysis.concern import (
     Concern,
@@ -27,7 +27,7 @@ _UNDERSTAND_CONCERN_SYSTEM = textwrap.dedent("""\
 
     Available specialist agents (context for what each concern type means --
     you are not selecting agents here, only classifying the concern):
-    {agent_roster}
+    {agent_descriptions_roster}
 
     Direct dependencies (name@installed_version): {direct_deps}
 
@@ -38,8 +38,7 @@ _UNDERSTAND_CONCERN_SYSTEM = textwrap.dedent("""\
       false, still fill in the other fields with these exact placeholders
       (they are ignored): type=["other"], packages=[],
       requires_per_dependency_analysis=false.
-    - type: one or more of "vulnerability", "license", "maintenance",
-      "supply_chain", "web_research", "other" -- every concept explicitly
+    - type: one or more of {agent_types_roster}, "other" -- every concept explicitly
       present in the concern. Do not add types the concern doesn't mention.
     - packages: the specific package name(s) the concern names, extracted
       exactly as they appear in the direct dependencies list above (no
@@ -52,8 +51,12 @@ _UNDERSTAND_CONCERN_SYSTEM = textwrap.dedent("""\
     """).strip()
 
 
-def _roster() -> str:
-    return "\n".join(f"- {k}: {v}" for k, v in get_agent_descriptions().items())
+def _get_descriptions_roster() -> str:
+    return "- \n".join(f"- {k}: {v.description}" for k, v in get_agents().items())
+
+
+def _get_types_roster() -> str:
+    return ", ".join(f"- {k}: {v.agent_type}" for k, v in get_agents().items())
 
 
 async def understand_concern(state: AnalysisState, config: RunnableConfig) -> dict:
@@ -62,21 +65,18 @@ async def understand_concern(state: AnalysisState, config: RunnableConfig) -> di
     direct_deps = prep.dependency_graph.get("direct", {})
 
     structured = _llm.with_structured_output(ConcernDraft, method="function_calling")
-    draft = cast(
-        ConcernDraft,
-        await structured.ainvoke(
-            [
-                {
-                    "role": "system",
-                    "content": _UNDERSTAND_CONCERN_SYSTEM.format(
-                        agent_roster=_roster(),
-                        direct_deps=[f"{n}@{v}" for n, v in direct_deps.items()],
-                    ),
-                },
-                {"role": "user", "content": state["concern"]},
-            ]
-        ),
+    system_prompt = _UNDERSTAND_CONCERN_SYSTEM.format(
+        agent_descriptions_roster=_get_descriptions_roster(),
+        agent_types_roster=_get_types_roster(),
+        direct_deps=[f"{n}@{v}" for n, v in direct_deps.items()],
     )
+    raw_concern = await structured.ainvoke(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": state["concern"]},
+        ]
+    )
+    draft = cast(ConcernDraft, raw_concern)
 
     if draft.is_valid and packages_valid(draft.packages, direct_deps):
         concern = Concern(

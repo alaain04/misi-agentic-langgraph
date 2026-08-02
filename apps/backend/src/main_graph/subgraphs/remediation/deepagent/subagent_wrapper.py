@@ -156,8 +156,7 @@ async def _run(state: _TargetSubagentState, config: RunnableConfig) -> dict:
                 default_targeted,
             ),
         ]
-        if prep.vector_store_id:
-            tools.append(make_search_code_tool(prep.vector_store_id))
+        tools.append(make_search_code_tool(work_dir, container, prep.docker_image))
 
         nested = create_deep_agent(
             model=get_llm(Model.GPT_5_4_MINI),

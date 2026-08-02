@@ -64,7 +64,6 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         repo_url=repo_url,
         commit_sha=commit_sha,
         dependency_graph=dep_graph,
-        vector_store_id=state.get("vector_store_id") or "",
         codegraph_ready=state.get("codegraph_ready") or False,
     )
     prep_result_id = await dao.save_prep(result)

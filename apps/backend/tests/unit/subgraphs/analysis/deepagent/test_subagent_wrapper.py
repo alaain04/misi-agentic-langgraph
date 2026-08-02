@@ -21,7 +21,6 @@ def _make_prep() -> PrepResult:
         manifest_files=["package.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": {"chalk": "5.0.0"}, "packages": {}},
-        vector_store_id="",
     )
 
 

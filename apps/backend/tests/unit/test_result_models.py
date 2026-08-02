@@ -28,7 +28,6 @@ def test_prep_result_auto_id_and_timestamp():
         manifest_files=["package.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": {}},
-        vector_store_id="vs1",
     )
     assert r.id
     assert r.created_at
@@ -229,7 +228,6 @@ def test_prep_result_commit_sha_and_repo_url_default_empty():
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={"direct": {}},
-        vector_store_id="vs1",
     )
     assert r.commit_sha == ""
     assert r.repo_url == ""
@@ -243,7 +241,6 @@ def test_prep_result_accepts_commit_sha_and_repo_url():
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={"direct": {}},
-        vector_store_id="vs1",
         commit_sha="deadbeef",
         repo_url="https://github.com/x/y",
     )

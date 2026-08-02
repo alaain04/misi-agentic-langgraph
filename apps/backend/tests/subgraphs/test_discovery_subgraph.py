@@ -2,13 +2,11 @@
 Blackbox integration test for the discovery subgraph.
 
 What is real:
-- InMemoryVectorStore + text splitting (full pipeline)
 - inspect_repo (reads fixture filesystem)
 - save_prep_result (writes to real MongoDB via testcontainer)
 
 What is mocked:
-- container.run (no Docker needed for git clone)
-- index_repository._embeddings (no OpenAI calls)
+- container.run (no Docker needed for git clone / codegraph init)
 """
 
 from __future__ import annotations
@@ -16,7 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -35,16 +33,6 @@ def _setup_repo(job_id: str) -> str:
     return repo_path
 
 
-def _make_embeddings_mock():
-    """Return an embeddings mock that returns unit zero-vectors."""
-    mock = MagicMock()
-    mock.aembed_documents = AsyncMock(
-        side_effect=lambda texts: [[0.0] * 1536 for _ in texts]
-    )
-    mock.aembed_query = AsyncMock(return_value=[0.0] * 1536)
-    return mock
-
-
 @pytest.mark.asyncio
 async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     """Happy path: fixture repo with lock file → PrepResult in MongoDB."""
@@ -52,20 +40,16 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     repo_path = _setup_repo(job_id)
 
     try:
-        with patch(
-            "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
-            _make_embeddings_mock(),
-        ):
-            graph = build_discovery_subgraph()
-            result = await graph.ainvoke(
-                {
-                    "job_id": job_id,
-                    "repo_url": "https://github.com/test/simple-nodejs-project",
-                    "concern": "security vulnerabilities in dependencies",
-                    "autopilot": True,
-                },
-                config=subgraph_config,
-            )
+        graph = build_discovery_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "repo_url": "https://github.com/test/simple-nodejs-project",
+                "concern": "security vulnerabilities in dependencies",
+                "autopilot": True,
+            },
+            config=subgraph_config,
+        )
     finally:
         shutil.rmtree(repo_path, ignore_errors=True)
 
@@ -78,45 +62,7 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     assert prep.project_metadata["direct_dependencies_count"] == 4
     assert "lodash" in prep.dependency_graph.get("direct", {})
     assert "express" in prep.dependency_graph.get("direct", {})
-
-
-@pytest.mark.asyncio
-async def test_discovery_sets_vector_store_id_when_sources_present(
-    subgraph_config, result_dao
-):
-    """When the repo has source files, a vector_store_id is set in state."""
-    job_id = f"disc-{uuid.uuid4().hex[:8]}"
-    repo_path = _setup_repo(job_id)
-
-    # Add a minimal JS source file so index_repository has something to embed
-    with open(os.path.join(repo_path, "index.js"), "w") as f:
-        f.write("const lodash = require('lodash');\nconsole.log('hello');\n")
-
-    try:
-        with patch(
-            "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
-            _make_embeddings_mock(),
-        ):
-            graph = build_discovery_subgraph()
-            result = await graph.ainvoke(
-                {
-                    "job_id": job_id,
-                    "repo_url": "https://github.com/test/simple-nodejs-project",
-                    "concern": "supply chain",
-                    "autopilot": True,
-                },
-                config=subgraph_config,
-            )
-    finally:
-        shutil.rmtree(repo_path, ignore_errors=True)
-
-    assert result.get("prep_result_id")
-    assert result.get("vector_store_id"), (
-        "Expected non-empty vector_store_id when source files exist"
-    )
-
-    prep = await result_dao.get_prep(result["prep_result_id"])
-    assert prep.vector_store_id == result["vector_store_id"]
+    assert prep.codegraph_ready is True
 
 
 @pytest.mark.asyncio
@@ -129,20 +75,16 @@ async def test_discovery_error_skips_prep_save(subgraph_config, result_dao):
         return_value=(1, "", "fatal: repository not found")
     )
 
-    with patch(
-        "src.main_graph.subgraphs.discovery.nodes.index_repository._embeddings",
-        _make_embeddings_mock(),
-    ):
-        graph = build_discovery_subgraph()
-        result = await graph.ainvoke(
-            {
-                "job_id": job_id,
-                "repo_url": "https://github.com/test/nonexistent",
-                "concern": "security",
-                "autopilot": True,
-            },
-            config=subgraph_config,
-        )
+    graph = build_discovery_subgraph()
+    result = await graph.ainvoke(
+        {
+            "job_id": job_id,
+            "repo_url": "https://github.com/test/nonexistent",
+            "concern": "security",
+            "autopilot": True,
+        },
+        config=subgraph_config,
+    )
 
     # discovery_error is set, so save_prep_result skips
     assert not result.get("prep_result_id"), (

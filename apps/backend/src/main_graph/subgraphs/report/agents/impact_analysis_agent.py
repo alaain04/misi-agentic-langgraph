@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import os
 import textwrap
 import time
 import uuid
@@ -15,7 +14,7 @@ from pydantic import ValidationError
 from src.main_graph.subgraphs.report.agents.critique import _format_tool_results
 from src.main_graph.tools.blast_radius import make_blast_radius_tool
 from src.main_graph.tools.package_files import read_file as _read_file_impl
-from src.main_graph.tools.search_code import _store_cache, is_indexable_source_file
+from src.main_graph.tools.search_code import find_local_usage_sites
 from src.models.conductor import FindingNote, ToolCall, ToolResult
 from src.models.results import BlastRadiusSummary, ImpactAnalysisDecision, PrepResult
 from src.utils.config import settings
@@ -24,7 +23,6 @@ from src.utils.llm import Model, get_llm
 logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 4
-_SNIPPET_RADIUS = 150
 _llm = get_llm(Model.GPT_5_4_MINI)
 _BLAST_RADIUS_FIELDS = {
     "affected_file_count",
@@ -39,7 +37,7 @@ _TOOL_DESCRIPTIONS = {
     "blast_radius": "blast_radius(depth: int = 3): real import/usage graph blast "
     "radius for this package via codegraph — affected file count/paths, whether "
     "usage is isolated to tests/scripts. Try this first.",
-    "find_usage_sites": "find_usage_sites(): fuzzy semantic-search fallback; source "
+    "find_usage_sites": "find_usage_sites(): local text-scan fallback; source "
     "files that actually import/use this package, with a code snippet around the "
     "match. Use only if blast_radius returned available=false.",
     "read_file": "read_file(relative_path: str): read a specific affected file's "
@@ -78,36 +76,12 @@ _SYSTEM = textwrap.dedent("""\
     """).strip()
 
 
-def _snippet_around_match(content: str, needle: str) -> str:
-    idx = content.find(needle)
-    if idx == -1:
-        return content[:300]
-    start = max(0, idx - _SNIPPET_RADIUS)
-    end = min(len(content), idx + len(needle) + _SNIPPET_RADIUS)
-    prefix = "..." if start > 0 else ""
-    suffix = "..." if end < len(content) else ""
-    return f"{prefix}{content[start:end]}{suffix}"
-
-
-def _make_find_usage_sites_tool(vector_store_id: str):
+def _make_find_usage_sites_tool(repo_path: str):
     @tool
     async def find_usage_sites(package_name: str) -> list[dict]:
         """Find source files that import or use a specific npm package, with
         enough surrounding code to tell what business logic depends on it."""
-        store = _store_cache.get(vector_store_id)
-        if store is None:
-            return [{"error": f"Vector store {vector_store_id} not loaded"}]
-        query = f"import {package_name} require {package_name}"
-        results = await store.asimilarity_search(query, k=20)
-        return [
-            {
-                "file": doc.metadata.get("file", ""),
-                "snippet": _snippet_around_match(doc.page_content, package_name),
-            }
-            for doc in results
-            if package_name in doc.page_content
-            and is_indexable_source_file(os.path.basename(doc.metadata.get("file", "")))
-        ]
+        return find_local_usage_sites(repo_path, package_name)
 
     return find_usage_sites
 
@@ -122,15 +96,13 @@ def _make_read_file_tool(repo_path: str):
 
 
 def _build_internal_tool_map(finding: FindingNote, prep: PrepResult, container) -> dict:
-    tools: dict = {
+    return {
         "blast_radius": make_blast_radius_tool(
             prep.repo_path, container, settings.codegraph_docker_image
         ),
+        "find_usage_sites": _make_find_usage_sites_tool(prep.repo_path),
         "read_file": _make_read_file_tool(prep.repo_path),
     }
-    if prep.vector_store_id:
-        tools["find_usage_sites"] = _make_find_usage_sites_tool(prep.vector_store_id)
-    return tools
 
 
 def _format_internal_tools(tool_map: dict) -> str:
@@ -225,7 +197,7 @@ def _ground_from_tool_results(tool_results: list[ToolResult]) -> dict:
                     "available": True,
                     "affected_file_count": len(files),
                     "affected_files": files,
-                    "source": "semantic_search",
+                    "source": "local_scan",
                 }
     return {"available": False, "source": "unavailable"}
 

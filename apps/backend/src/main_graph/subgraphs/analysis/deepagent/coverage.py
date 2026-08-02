@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.main_graph.subgraphs.analysis.agents.registry import (
     REGISTRY,
-    get_agent_descriptions,
+    get_agents,
 )
 from src.utils.llm import Model, get_llm
 
@@ -91,7 +91,7 @@ async def whole_tree_scan_satisfies_concern(
     """
     if not concern.strip() or not ran_whole_tree_agents:
         return False
-    descriptions = get_agent_descriptions()
+    descriptions = {k: v.description for k, v in get_agents().items()}
     roster = "\n".join(
         f"- {a}: {descriptions.get(a, '')}" for a in sorted(ran_whole_tree_agents)
     )

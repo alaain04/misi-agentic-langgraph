@@ -21,7 +21,6 @@ def _prep() -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        vector_store_id="vs1",
     )
 
 
@@ -230,6 +229,20 @@ def test_agent_get_tools_returns_list():
     tools = VulnerabilityAgent().get_tools(_prep())
     assert isinstance(tools, list)
     assert len(tools) > 0
+
+
+def test_agent_get_tools_adds_search_code_when_container_provided():
+    from src.main_graph.subgraphs.analysis.agents.vulnerability_agent import (
+        VulnerabilityAgent,
+    )
+
+    without_container = VulnerabilityAgent().get_tools(_prep())
+    with_container = VulnerabilityAgent().get_tools(_prep(), container=AsyncMock())
+    without_names = {t.name for t in without_container if hasattr(t, "name")}
+    with_names = {t.name for t in with_container if hasattr(t, "name")}
+
+    assert "search_code" not in without_names
+    assert "search_code" in with_names
 
 
 def _finalize_decision(findings, confidence=0.9):

@@ -114,7 +114,6 @@ async def test_report_produces_report_result_with_trusted_findings(
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        vector_store_id="",
         codegraph_ready=False,
     )
     prep_result_id = await result_dao.save_prep(prep)
@@ -232,7 +231,6 @@ async def test_report_drops_low_severity_findings_before_enrichment(
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        vector_store_id="",
         codegraph_ready=False,
     )
     prep_result_id = await result_dao.save_prep(prep)
@@ -307,7 +305,6 @@ async def test_report_keeps_untrusted_finding_instead_of_dropping(
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        vector_store_id="",
         codegraph_ready=False,
     )
     prep_result_id = await result_dao.save_prep(prep)
@@ -390,7 +387,6 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        vector_store_id="",
         codegraph_ready=True,
     )
     prep_result_id = await result_dao.save_prep(prep)

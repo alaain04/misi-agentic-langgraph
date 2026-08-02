@@ -25,7 +25,6 @@ def _prep(graph: dict) -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph=graph,
-        vector_store_id="",
     )
 
 

@@ -386,7 +386,6 @@ def _seed_prep(job_id: str, repo_path: str, direct_deps: dict[str, str]) -> Prep
         manifest_files=["package.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": direct_deps, "packages": {}},
-        vector_store_id="",
     )
 
 

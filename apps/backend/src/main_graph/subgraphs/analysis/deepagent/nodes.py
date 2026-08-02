@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.analysis.agents.registry import (
     REGISTRY,
-    get_agent_descriptions,
+    get_agents,
 )
 from src.main_graph.subgraphs.analysis.deepagent.backstop import (
     deterministic_backstop_dispatch,
@@ -74,7 +74,7 @@ _SYSTEM_TEMPLATE = textwrap.dedent("""\
 def _roster(exclude: set[str] | None = None) -> str:
     exclude = exclude or set()
     return "\n".join(
-        f"- {k}: {v}" for k, v in get_agent_descriptions().items() if k not in exclude
+        f"- {k}: {v.description}" for k, v in get_agents().items() if k not in exclude
     )
 
 

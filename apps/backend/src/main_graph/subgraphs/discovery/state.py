@@ -29,9 +29,6 @@ class DiscoveryState(TypedDict):
     lockfile_generated: NotRequired[bool]
     docker_image: NotRequired[str]
 
-    # New: set by index_repository
-    vector_store_id: NotRequired[str]
-
     # New: set by index_codegraph
     codegraph_ready: NotRequired[bool]
 

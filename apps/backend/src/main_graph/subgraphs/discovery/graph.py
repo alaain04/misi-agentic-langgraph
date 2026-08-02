@@ -4,7 +4,6 @@ from langgraph.graph.state import CompiledStateGraph
 from src.main_graph.subgraphs.discovery.constants import (
     CLONE_REPO,
     INDEX_CODEGRAPH,
-    INDEX_REPO,
     INSPECT_REPO,
     INSTALL_DEPS,
     SAVE_PREP_RESULT,
@@ -12,7 +11,6 @@ from src.main_graph.subgraphs.discovery.constants import (
 from src.main_graph.subgraphs.discovery.nodes import (
     clone_repo,
     index_codegraph,
-    index_repository,
     inspect_repo,
     install_deps,
     save_prep_result,
@@ -25,7 +23,7 @@ def _route_after_clone(state: DiscoveryState) -> str:
 
 
 def _route_after_inspect(state: DiscoveryState) -> str:
-    return INSTALL_DEPS if not state.get("has_lock_file") else INDEX_REPO
+    return INSTALL_DEPS if not state.get("has_lock_file") else INDEX_CODEGRAPH
 
 
 def build_discovery_subgraph() -> CompiledStateGraph:
@@ -34,15 +32,13 @@ def build_discovery_subgraph() -> CompiledStateGraph:
     builder.add_node(CLONE_REPO, clone_repo)
     builder.add_node(INSPECT_REPO, inspect_repo)
     builder.add_node(INSTALL_DEPS, install_deps)
-    builder.add_node(INDEX_REPO, index_repository)
     builder.add_node(INDEX_CODEGRAPH, index_codegraph)
     builder.add_node(SAVE_PREP_RESULT, save_prep_result)
 
     builder.add_edge(START, CLONE_REPO)
     builder.add_conditional_edges(CLONE_REPO, _route_after_clone)
     builder.add_conditional_edges(INSPECT_REPO, _route_after_inspect)
-    builder.add_edge(INSTALL_DEPS, INDEX_REPO)
-    builder.add_edge(INDEX_REPO, INDEX_CODEGRAPH)
+    builder.add_edge(INSTALL_DEPS, INDEX_CODEGRAPH)
     builder.add_edge(INDEX_CODEGRAPH, SAVE_PREP_RESULT)
     builder.add_edge(SAVE_PREP_RESULT, END)
 

@@ -25,6 +25,7 @@ from src.models.results import (
     EvidenceBundle,
     PrepResult,
 )
+from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -292,10 +293,16 @@ class BaseAgent(ABC):
     @abstractmethod
     def _agent_tools(self) -> list: ...
 
-    def get_tools(self, prep: PrepResult) -> list:
+    def get_tools(
+        self, prep: PrepResult, container: ContainerRunPort | None = None
+    ) -> list:
         tools = list(self._agent_tools())
-        if prep.vector_store_id:
-            tools.append(make_search_code_tool(prep.vector_store_id))
+        if container is not None:
+            tools.append(
+                make_search_code_tool(
+                    prep.repo_path, container, settings.codegraph_docker_image
+                )
+            )
         return tools
 
     async def run(
@@ -307,5 +314,9 @@ class BaseAgent(ABC):
     ) -> tuple[EvidenceBundle, list[str], int]:
         # cache is accepted for a uniform call site; only VulnerabilityAgent uses it.
         return await _react_loop(
-            dispatch, prep, self.get_tools(prep), self.system_prompt, container
+            dispatch,
+            prep,
+            self.get_tools(prep, container),
+            self.system_prompt,
+            container,
         )

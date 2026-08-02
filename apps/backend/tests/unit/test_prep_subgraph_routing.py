@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.main_graph.subgraphs.discovery.constants import (
-    INDEX_REPO,
+    INDEX_CODEGRAPH,
     INSPECT_REPO,
     INSTALL_DEPS,
     SAVE_PREP_RESULT,
@@ -25,4 +25,4 @@ def test_inspect_no_lock_goes_to_install():
 
 
 def test_inspect_lock_present_goes_to_index():
-    assert _route_after_inspect({"has_lock_file": True}) == INDEX_REPO
+    assert _route_after_inspect({"has_lock_file": True}) == INDEX_CODEGRAPH

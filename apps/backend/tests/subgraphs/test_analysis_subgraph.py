@@ -149,7 +149,6 @@ def _seed_prep(job_id: str) -> PrepResult:
         manifest_files=["package.json", "package-lock.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
-        vector_store_id="",
     )
 
 

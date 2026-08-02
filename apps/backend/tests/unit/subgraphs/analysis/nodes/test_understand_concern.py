@@ -19,7 +19,6 @@ def _make_prep(direct: dict[str, str] | None = None) -> PrepResult:
         manifest_files=["package.json"],
         detected_package_manager="npm",
         dependency_graph={"direct": direct or {"lodash": "4.17.20"}, "packages": {}},
-        vector_store_id="",
     )
 
 

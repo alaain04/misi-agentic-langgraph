@@ -74,7 +74,7 @@ async def _run_discovery(args) -> None:
     prep_id = result.get("prep_result_id")
     assert prep_id is not None
     print(f"[discovery] prep_result_id = {prep_id}")
-    print(f"[discovery] vector_store_id = {result.get('vector_store_id', '')}")
+    print(f"[discovery] codegraph_ready = {result.get('codegraph_ready', False)}")
 
     prep = await dao.get_prep(prep_id)
     print("\n--- PrepResult ---")

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.documents import Document
 from langchain_core.tools import tool
 
 from src.models.conductor import FindingNote, ToolCall
@@ -18,7 +19,6 @@ def _prep(**overrides) -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        vector_store_id="vs-1",
         codegraph_ready=True,
     )
     return PrepResult(**{**defaults, **overrides})
@@ -152,7 +152,7 @@ async def test_analyze_impact_falls_back_to_find_usage_sites_when_unavailable():
         patch.object(
             impact_analysis_agent,
             "_make_find_usage_sites_tool",
-            lambda vector_store_id: fake_find_usage_sites,
+            lambda repo_path: fake_find_usage_sites,
         ),
     ):
         summary = await impact_analysis_agent.analyze_impact(
@@ -160,7 +160,7 @@ async def test_analyze_impact_falls_back_to_find_usage_sites_when_unavailable():
         )
 
     assert summary.available is True
-    assert summary.source == "semantic_search"
+    assert summary.source == "local_scan"
     assert summary.affected_files == ["src/auth.ts"]
     assert summary.affected_file_count == 1
     assert summary.narrative == "Used in auth."
@@ -177,7 +177,7 @@ async def test_analyze_impact_returns_unavailable_when_no_tool_data():
 
     with patch.object(impact_analysis_agent, "_llm", mock_llm):
         summary = await impact_analysis_agent.analyze_impact(
-            _finding(), _prep(vector_store_id=""), container=None
+            _finding(), _prep(), container=None
         )
 
     assert summary.available is False
@@ -308,7 +308,7 @@ async def test_analyze_impact_degrades_gracefully_on_llm_outage():
         patch.object(impact_analysis_agent, "_MAX_ITERATIONS", 2),
     ):
         summary = await impact_analysis_agent.analyze_impact(
-            _finding(), _prep(vector_store_id=""), container=None
+            _finding(), _prep(), container=None
         )
 
     assert summary.available is False
@@ -338,25 +338,17 @@ async def test_find_usage_sites_excludes_non_source_and_unmatched_files():
     from src.main_graph.subgraphs.report.agents.impact_analysis_agent import (
         _make_find_usage_sites_tool,
     )
-    from src.main_graph.tools.search_code import _store_cache
 
-    store = MagicMock()
-    store.asimilarity_search = AsyncMock(
-        return_value=[
-            Document(page_content='import "left-pad"', metadata={"file": "src/a.ts"}),
-            Document(
-                page_content='{"dependencies": {"left-pad": "1.0.0"}}',
-                metadata={"file": "package.json"},
-            ),
-            Document(page_content="unrelated code", metadata={"file": "src/b.ts"}),
-        ]
-    )
-    _store_cache["vs-test"] = store
-    try:
-        tool_fn = _make_find_usage_sites_tool("vs-test")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "a.ts"), "w") as f:
+            f.write('import "left-pad"')
+        with open(os.path.join(tmpdir, "package.json"), "w") as f:
+            f.write('{"dependencies": {"left-pad": "1.0.0"}}')
+        with open(os.path.join(tmpdir, "b.ts"), "w") as f:
+            f.write("unrelated code")
+
+        tool_fn = _make_find_usage_sites_tool(tmpdir)
         results = await tool_fn.ainvoke({"package_name": "left-pad"})
-    finally:
-        del _store_cache["vs-test"]
 
     assert len(results) == 1
-    assert results[0]["file"] == "src/a.ts"
+    assert results[0]["file"] == "a.ts"

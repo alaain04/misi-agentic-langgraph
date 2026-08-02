@@ -20,8 +20,8 @@ REGISTRY: dict[str, type[BaseAgent]] = {
 }
 
 
-def get_agent_descriptions() -> dict[str, str]:
-    return {k: v.description for k, v in REGISTRY.items()}
+def get_agents() -> dict[str, str]:
+    return {k: v for k, v in REGISTRY.items()}
 
 
 def agents_for_types(types: Sequence[str]) -> list[str]:
