@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper import (
     build_agent_subagent,
@@ -147,3 +148,110 @@ async def test_whole_tree_agent_is_a_noop_if_already_run_this_job():
     # What matters for the no-op behavior is that it's unchanged (not
     # doubled) and that agent_class().run() was never invoked.
     assert result["agent_calls"] == [existing_call]
+
+
+@pytest.mark.asyncio
+async def test_budget_exhausted_skips_dispatch_and_returns_a_message():
+    subagent = build_agent_subagent("maintenance_agent")
+    already_used_calls = [
+        {"agent_type": "maintenance_agent", "bundle_id": f"b{i}"} for i in range(8)
+    ]
+
+    with patch(
+        "src.main_graph.subgraphs.analysis.agents.maintenance_agent"
+        ".MaintenanceAgent.run"
+    ) as mock_run:
+        result = await subagent["runnable"].ainvoke(
+            {
+                "messages": [HumanMessage(content="check chalk")],
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "agent_calls": already_used_calls,
+            },
+            {"configurable": {}},
+        )
+        mock_run.assert_not_called()
+
+    assert result["bundle_ids"] == []
+    # The node returns an empty agent_calls delta (no new record), but --
+    # same reducer mechanism documented on
+    # test_whole_tree_agent_is_a_noop_if_already_run_this_job above --
+    # Annotated[list, operator.add] seeds the channel from the input
+    # state, so the 8 pre-existing calls that triggered the budget check are
+    # still present in the merged result. What matters is that no 9th call
+    # was appended.
+    assert result["agent_calls"] == already_used_calls
+    assert len(result["messages"]) == 1
+    assert isinstance(result["messages"][0], AIMessage)
+    assert "budget" in result["messages"][0].content.lower()
+
+
+@pytest.mark.asyncio
+async def test_semaphore_caps_concurrent_specialist_calls():
+    subagent = build_agent_subagent("maintenance_agent")
+    fake_dao = MagicMock()
+    fake_dao.get_prep = AsyncMock(return_value=_make_prep())
+    fake_dao.save_bundle = AsyncMock(return_value="bundle-1")
+    mock_get_services = MagicMock(
+        return_value={
+            "result_dao": fake_dao,
+            "container": MagicMock(),
+            "input_cache": None,
+        }
+    )
+
+    concurrent = 0
+    peak = 0
+
+    async def _slow_run(*args, **kwargs):
+        nonlocal concurrent, peak
+        concurrent += 1
+        peak = max(peak, concurrent)
+        await asyncio.sleep(0.02)
+        concurrent -= 1
+        return _make_bundle(), ["npm_outdated"], 1
+
+    test_semaphore = asyncio.Semaphore(2)
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper._extract_dispatch",
+            new=AsyncMock(
+                return_value=AgentDispatch(
+                    domain="maintenance",
+                    hypothesis="check chalk",
+                    packages_to_focus=["chalk"],
+                    agent_type="maintenance_agent",
+                )
+            ),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper.get_services",
+            new=mock_get_services,
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper.SPECIALIST_SEMAPHORE",
+            test_semaphore,
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.agents.maintenance_agent"
+            ".MaintenanceAgent.run",
+            new=_slow_run,
+        ),
+    ):
+        await asyncio.gather(
+            *[
+                subagent["runnable"].ainvoke(
+                    {
+                        "messages": [HumanMessage(content="check chalk")],
+                        "job_id": "job-1",
+                        "prep_result_id": "prep-1",
+                        "agent_calls": [],
+                    },
+                    {"configurable": {}},
+                )
+                for _ in range(5)
+            ]
+        )
+
+    assert peak <= 2

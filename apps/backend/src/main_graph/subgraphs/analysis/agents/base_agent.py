@@ -107,14 +107,25 @@ def _format_results(results: list[ToolResult]) -> str:
     return "\n\n".join(parts)
 
 
+def _tool_callable(fn):
+    """LangChain's @tool decorator stores a sync function's body in .func
+    and an async function's body in .coroutine (leaving .func None) — pick
+    whichever is actually callable for signature introspection."""
+    func = getattr(fn, "func", None)
+    if func is not None:
+        return func
+    coroutine = getattr(fn, "coroutine", None)
+    if coroutine is not None:
+        return coroutine
+    return fn
+
+
 async def _run_tool(
     tc: ToolCall,
     tool_map: dict,
     prep: PrepResult,
     container: ContainerRunPort | None = None,
 ) -> ToolResult:
-    import inspect
-
     start = time.monotonic()
     fn = tool_map.get(tc.tool)
     if fn is None:
@@ -127,7 +138,7 @@ async def _run_tool(
             duration_ms=0,
         )
     try:
-        sig = inspect.signature(fn.func if hasattr(fn, "func") else fn)
+        sig = inspect.signature(_tool_callable(fn))
         kwargs = dict(tc.args)
         if "repo_path" in sig.parameters:
             kwargs["repo_path"] = prep.repo_path

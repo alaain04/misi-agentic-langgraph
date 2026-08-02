@@ -11,10 +11,10 @@ domain_agent.py today.
 from __future__ import annotations
 
 import operator
-from datetime import UTC, datetime
 from typing import Annotated, cast
 
 from deepagents import CompiledSubAgent
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
@@ -22,7 +22,12 @@ from typing_extensions import TypedDict
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.analysis.agents.registry import REGISTRY
 from src.main_graph.subgraphs.analysis.deepagent.coverage import WHOLE_TREE_AGENT_TYPES
-from src.models.results import AgentCallRecord, AgentDispatch
+from src.main_graph.subgraphs.analysis.deepagent.limits import (
+    DEEPAGENT_LIMITS,
+    SPECIALIST_SEMAPHORE,
+)
+from src.main_graph.subgraphs.analysis.deepagent.specialist_runner import run_specialist
+from src.models.results import AgentDispatch
 from src.utils.llm import Model, get_llm
 
 _llm = get_llm(Model.GPT_5_4_MINI)
@@ -100,37 +105,36 @@ def build_agent_subagent(agent_type: str) -> CompiledSubAgent:
                 # D8: whole-tree agents run at most once per job.
                 return {"messages": [], "bundle_ids": [existing], "agent_calls": []}
 
+        if len(agent_calls) >= DEEPAGENT_LIMITS.max_specialist_calls:
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(
+                            "Specialist call budget exhausted "
+                            f"({DEEPAGENT_LIMITS.max_specialist_calls} calls "
+                            "used). Do not dispatch further specialists -- "
+                            "finalize with the evidence already collected, "
+                            "prioritizing the highest-risk dependencies, and "
+                            "report which packages remain unanalyzed."
+                        )
+                    )
+                ],
+                "bundle_ids": [],
+                "agent_calls": [],
+            }
+
         task_description = state["messages"][-1].content
-        dispatch = await _extract_dispatch(task_description, agent_type)
-
         svc = get_services(config)
-        prep = await svc["result_dao"].get_prep(state["prep_result_id"])
 
-        started_at = datetime.now(UTC).isoformat()
-        bundle, tools_used, react_iterations = await agent_class().run(
-            dispatch, prep, svc["container"], cache=svc.get("input_cache")
-        )
-        finished_at = datetime.now(UTC).isoformat()
+        async with SPECIALIST_SEMAPHORE:
+            dispatch = await _extract_dispatch(task_description, agent_type)
+            prep = await svc["result_dao"].get_prep(state["prep_result_id"])
+            bundle_id, record = await run_specialist(agent_type, dispatch, prep, svc)
 
-        bundle_id = await svc["result_dao"].save_bundle(bundle)
-
-        record = AgentCallRecord(
-            conductor_iteration=0,  # no conductor-iteration concept anymore;
-            # frontend rendering of this field is explicitly out of scope
-            # (see spec "Out of scope").
-            agent_type=agent_type,
-            domain=dispatch.domain,
-            packages_to_focus=dispatch.packages_to_focus,
-            tools_used=tools_used,
-            react_iterations=react_iterations,
-            started_at=started_at,
-            finished_at=finished_at,
-            bundle_id=bundle_id,
-        )
         return {
             "messages": [],
             "bundle_ids": [bundle_id],
-            "agent_calls": [record.model_dump()],
+            "agent_calls": [record],
         }
 
     graph = StateGraph(_SubagentState)

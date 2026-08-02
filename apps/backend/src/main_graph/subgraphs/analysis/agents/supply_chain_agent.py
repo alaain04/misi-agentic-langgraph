@@ -24,8 +24,9 @@ class SupplyChainAgent(BaseAgent):
         {tool_descriptions}
 
         Investigation strategy:
-        1. Call typosquat_detection on the package names most similar to popular \
-packages (e.g. "lodash" vs "1odash").
+        1. Call typosquat_detection once with no arguments -- it scans every \
+dependency in the project against known popular packages (edit distance <= 2, \
+e.g. "lodash" vs "1odash") and returns all flagged matches in one call.
         2. Call package_json to inspect package metadata for suspicious fields: \
 postinstall scripts, unusual authors, mismatched repository URLs.
         3. Call resolve_transitive_parent for any package flagged as suspicious to \
