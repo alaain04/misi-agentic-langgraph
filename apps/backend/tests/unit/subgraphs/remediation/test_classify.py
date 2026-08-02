@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -128,6 +129,65 @@ async def test_classify_targets_node_splits_r3_from_dispatchable_targets():
     assert r3["status"] == "skipped"
     assert r3["skip_reason"] == "dependency migration - deferred, not yet supported"
     assert r3["addresses"] == ["left-pad"]
+
+
+@pytest.mark.asyncio
+async def test_classify_targets_node_bounds_concurrency():
+    """classify_target fans out a docker exec, a `gh api` subprocess, and an
+    LLM call per target. Without a concurrency cap, a repo with many
+    findings sends that many simultaneous calls to each -- real risk of
+    provider rate-limiting (429s), a documented recurring problem in this
+    project. This proves classify_targets_node bounds the number of
+    concurrent in-flight classify_target calls to a small fixed cap."""
+    n_targets = 20
+    deps = [f"dep-{i}" for i in range(n_targets)]
+    prep = _prep(
+        dependency_graph={
+            "direct": {dep: "1.0.0" for dep in deps},
+            "packages": {},
+        }
+    )
+    analysis = MagicMock(
+        findings=[
+            FindingNote(dep_name=dep, severity="high", description="d", evidence=[])
+            for dep in deps
+        ]
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    dao.get_analysis = AsyncMock(return_value=analysis)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    current = 0
+    peak = 0
+    lock = asyncio.Lock()
+
+    async def _fake_classify(target, repo_path, container, docker_image):
+        nonlocal current, peak
+        async with lock:
+            current += 1
+            peak = max(peak, current)
+        await asyncio.sleep(0.01)
+        async with lock:
+            current -= 1
+        return TargetClassification(tier="r1", rationale="patch bump")
+
+    with patch(
+        "src.main_graph.subgraphs.remediation.classify.classify_target",
+        AsyncMock(side_effect=_fake_classify),
+    ):
+        await classify_targets_node(
+            {
+                "job_id": "job-1",
+                "prep_result_id": "prep-1",
+                "analysis_result_id": "a-1",
+                "concern": "c",
+            },
+            config,
+        )
+
+    assert peak <= 6, f"expected concurrency to be capped at 6, observed {peak}"
+    assert peak > 1, "sanity check: some concurrency should still occur"
 
 
 @pytest.mark.asyncio

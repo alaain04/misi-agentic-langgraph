@@ -94,6 +94,20 @@ async def classify_target(
         )
 
 
+_MAX_CONCURRENT_CLASSIFICATIONS = 6
+
+
+async def _classify_bounded(
+    semaphore: asyncio.Semaphore,
+    target: RemediationTarget,
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str,
+) -> TargetClassification:
+    async with semaphore:
+        return await classify_target(target, repo_path, container, docker_image)
+
+
 async def classify_targets_node(
     state: RemediationState, config: RunnableConfig
 ) -> dict:
@@ -109,9 +123,12 @@ async def classify_targets_node(
     if not initial:
         return {"targets": {}, "remediations": {}}
 
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_CLASSIFICATIONS)
     classifications = await asyncio.gather(
         *[
-            classify_target(t, prep.repo_path, container, prep.docker_image)
+            _classify_bounded(
+                semaphore, t, prep.repo_path, container, prep.docker_image
+            )
             for t in initial
         ]
     )

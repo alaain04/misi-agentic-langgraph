@@ -37,7 +37,7 @@ models -- same structural shape as the analysis-subgraph swap):
   test_classify.py).
 Also patched, per the task-10 brief, purely as network/subprocess
 containment (not because any test exercises their content):
-- `asyncio.create_subprocess_exec` at the `deepagent.tools` module path,
+- `asyncio.create_subprocess_exec` at the `changelog` module path,
   so `read_release_notes` can never reach the real `gh` CLI/network.
 - `subgraph_config`'s `container` mock (real MongoDB, fake container.run).
 
