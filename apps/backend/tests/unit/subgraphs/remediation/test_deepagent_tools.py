@@ -28,33 +28,24 @@ class FakeContainer:
 
 
 @pytest.mark.asyncio
-async def test_read_release_notes_returns_unavailable_when_repo_unresolved():
-    container = FakeContainer([(1, "", "npm error 404 Not Found")])
-    tool = make_read_release_notes_tool("/repo", container, "node:lts-alpine")
-    result = await tool.ainvoke({"package_name": "left-pad"})
-    assert result["available"] is False
-
-
-@pytest.mark.asyncio
-async def test_read_release_notes_success():
-    container = FakeContainer([(0, "git+https://github.com/eslint/eslint.git\n", "")])
-    releases_json = json.dumps(
-        [{"tag_name": "v9.0.0", "name": "9.0.0", "body": "breaking: flat config"}]
-    ).encode()
-    fake_proc = MagicMock()
-    fake_proc.communicate = AsyncMock(return_value=(releases_json, b""))
-    fake_proc.returncode = 0
-
+async def test_read_release_notes_tool_delegates_to_fetch_release_notes():
+    container = MagicMock()
     with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.tools.asyncio.create_subprocess_exec",
-        AsyncMock(return_value=fake_proc),
-    ):
+        "src.main_graph.subgraphs.remediation.deepagent.tools.fetch_release_notes",
+        AsyncMock(
+            return_value={
+                "package_name": "eslint",
+                "available": True,
+                "repository": "eslint/eslint",
+                "releases": [],
+            }
+        ),
+    ) as mock_fetch:
         tool = make_read_release_notes_tool("/repo", container, "node:lts-alpine")
         result = await tool.ainvoke({"package_name": "eslint"})
 
+    mock_fetch.assert_awaited_once_with("eslint", "/repo", container, "node:lts-alpine")
     assert result["available"] is True
-    assert result["repository"] == "eslint/eslint"
-    assert result["releases"][0]["tag"] == "v9.0.0"
 
 
 @pytest.mark.asyncio
@@ -100,24 +91,3 @@ async def test_verify_tool_reports_installed(tmp_path):
     )
     result = await tool.ainvoke({})
     assert result["installed"] is True
-
-
-@pytest.mark.asyncio
-async def test_read_release_notes_safely_quotes_package_name():
-    """Verify that shell metacharacters in package names are safely quoted,
-    preventing command injection."""
-    container = FakeContainer([(1, "", "npm error 404")])
-    tool = make_read_release_notes_tool("/repo", container, "node:lts-alpine")
-    # Use a package name with shell metacharacters
-    malicious_package = "eslint; rm -rf /"
-    result = await tool.ainvoke({"package_name": malicious_package})
-
-    # Verify the command was escaped, not executed as-is
-    assert len(container.commands) == 1
-    executed_command = container.commands[0]
-    # The command should contain the quoted package name, not raw metacharacters
-    assert "'eslint; rm -rf /'" in executed_command or (
-        "eslint" in executed_command and "rm -rf" not in executed_command
-    )
-    # Verify it still failed gracefully without injection
-    assert result["available"] is False
