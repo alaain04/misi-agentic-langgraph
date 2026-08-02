@@ -209,6 +209,15 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
 
 
 async def coverage_gate(state: AnalysisState, config: RunnableConfig) -> dict:
+    requires_per_dependency_analysis = (state.get("structured_concern") or {}).get(
+        "requires_per_dependency_analysis", True
+    )
+    if not requires_per_dependency_analysis:
+        return {
+            "missing_deps": [],
+            "correction_rounds": (state.get("correction_rounds") or 0) + 1,
+        }
+
     svc = get_services(config)
     dao = svc["result_dao"]
     prep = await dao.get_prep(state["prep_result_id"])
