@@ -545,3 +545,95 @@ redundant pieces, folded away in the same pass:
 No test changes were needed beyond the prompt text itself — all prior
 assertions (budget numbers, `type=`/`scope=` interpolation, roster exclusion,
 the `{already_done}` note) still hold against the shorter prompt.
+
+## Amendment (2026-08-02, second): reject non-dependency concerns; end the whole job cleanly
+
+### Problem
+
+Two gaps identified by inspecting the graph wiring: (1) `run_direct_agents`
+runs unconditionally and did an unconditional DAO fetch (`get_prep`) even
+when `whole_tree_agents(concern)` is empty — any pure maintenance/
+supply_chain/web_research concern paid for a DB round-trip whose result was
+never used; (2) nothing validated that `understand_concern`'s LLM output
+reflected an actual dependency-risk request. For invalid input (a greeting,
+small talk, unrelated question), the classifier was still forced to emit a
+syntactically valid `Concern` — depending on what it guessed, the job would
+silently produce an empty "successful" analysis, or worse, run a real
+whole-tree scan for input that was never a concern at all. Nothing rejected
+or explained this to the caller.
+
+### Goal
+
+1. `run_direct_agents` returns before touching the DAO when there is nothing
+   to dispatch.
+2. An unrecognizable concern is rejected before any specialist or the deep
+   agent ever runs, the job is marked **done** (not failed) with an
+   explanation, and remediation/report are skipped entirely for that job —
+   not just the analysis subgraph.
+
+### Changes
+
+- `run_direct_agents`: computes `whole_tree_agents(concern)` first and
+  returns `{"bundle_ids": [], "agent_calls": []}` immediately if empty,
+  before calling `get_services`/`get_prep`.
+- `Concern` gains `is_valid: bool` as a **required field with no default**.
+  A default was deliberately rejected: with `with_structured_output(...,
+  method="function_calling")`, a field with a Python-level default is
+  typically marked non-required in the JSON schema sent to the model, so an
+  uncertain model could simply omit it and silently get `True` — exactly
+  the failure mode this field exists to prevent. `understand_concern`'s
+  classifier prompt gained a rule: set `is_valid=false` for anything that
+  isn't a dependency-risk concern, with fixed placeholder values for the
+  other required fields in that case (`type=["other"]`,
+  `scope="all_dependencies"`, `packages=[]`,
+  `requires_per_dependency_analysis=false`, `preferred_agents=[]`) since
+  they're never read downstream when invalid.
+- New router `concern.route_after_understand_concern(state) -> "valid" |
+  "invalid"`, reading `state["structured_concern"].get("is_valid", True)`
+  (defaults to the conservative/enforcing direction, matching every other
+  defensive default already in this subgraph). Wired as the **first**
+  conditional edge out of `understand_concern` — before `run_direct_agents`,
+  so nothing runs for a rejected concern.
+- New terminal node
+  `nodes/handle_invalid_concern.handle_invalid_concern`: writes
+  `INVALID_CONCERN_MESSAGE` via `job_repo.update_artifact_data(job_id,
+  ANALYSIS, {"message": ...})` — the same per-node artifact-data channel
+  `save_analysis_result` already uses for `agent_calls`, so no new
+  frontend-facing contract was introduced — and returns `{}` (no
+  `analysis_result_id`). Edges straight to the subgraph's own `END`.
+
+  New graph shape:
+  ```
+  understand_concern -> route_after_understand_concern
+                           "invalid" -> handle_invalid_concern -> END
+                           "valid"   -> run_direct_agents -> route_concern -> ...
+  ```
+
+- **No changes to `main_graph.py` or `job_runner.py`.** This is the load-
+  bearing design decision: `main_graph.py`'s `_after_analysis` already
+  contains `if not state.get("analysis_result_id"): return END`, which
+  today handles the case where `AnalysisState` never produces a result at
+  all — ending `main_graph` immediately, skipping `REMEDIATION` and
+  `REPORT`. `job_runner.py`'s `_finalize` already treats that early `END`
+  as a normal completion (`report_result_id`/`remediation_result_id` empty
+  strings, then `JobStatus.done`) rather than `mark_failed` — that branch
+  only fires for `discovery_error` / missing `prep_result_id`, both PREP-
+  stage conditions unrelated to this. By simply never setting
+  `analysis_result_id`, `handle_invalid_concern` reuses both mechanisms
+  exactly as-is: the job ends as `done`, with the whole rest of the
+  pipeline skipped, with zero new state fields or routing logic anywhere
+  outside the analysis subgraph.
+
+### Testing
+
+- `run_direct_agents`: asserts `get_services` is never called when
+  `whole_tree_agents(concern)` is empty.
+- `concern.route_after_understand_concern`: valid, invalid, and
+  missing-field-defaults-to-valid cases.
+- `handle_invalid_concern`: asserts the artifact-data call and that no
+  `analysis_result_id` key is returned.
+- Graph-level: an `is_valid=False` concern reaches the subgraph's `END`
+  without `analysis_result_id` set and without `run_direct_agents` or
+  `analysis_deepagent_node` ever running (proven via
+  `AssertionError`-raising mocks on both, the same technique already used
+  for the simple/complex router tests).
