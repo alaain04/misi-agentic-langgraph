@@ -52,7 +52,8 @@ the front half (selection → plan → dispatch).
 4. Keep the deepagent where it earns its place — planning + delegation, and
    the code-editing agents — and drop it where the work is deterministic or a
    single structured call.
-5. Keep clean r1 bumps fully deterministic (no agent spin-up).
+5. Keep bump *execution* deterministic (the LLM plans; `apply_bump` runs the
+   bump), and keep one uniform planning path across all tiers.
 
 ## Non-goals (Spec A)
 
@@ -110,9 +111,10 @@ window sharpens automatically. No hard ordering between the two.
   is a mandatory structured artifact.** Per target the deepagent:
   1. reads the target's `TargetInvestigation` + tier hint,
   2. **emits a structured `MigrationPlan` before dispatching anything** —
-     enforced via a mandatory `commit_plan` tool (or `response_format`) it
-     must call first, so the plan is a durable record, not loose internal
-     todos,
+     enforced via a mandatory `commit_plan(plan)` tool it must call first
+     (chosen over `response_format`, which would terminate the agent before
+     it can dispatch; the tool records the plan into state and lets the agent
+     keep acting), so the plan is a durable record, not loose internal todos,
   3. dispatches typed scoped implementation sub-agents via `task()`,
   4. may re-emit the plan if it discovers something mid-run (a new
      `requires` edge, an unlisted breaking change).
@@ -120,8 +122,8 @@ window sharpens automatically. No hard ordering between the two.
 
 - **D4 — Implementation is a fixed set of typed agents, one job each.**
   - **bump-executor (deterministic, no LLM):** applies `apply_bump` for a
-    `bump` task. Not a deepagent; not even dispatched through the
-    orchestrator in the r1 short-circuit path (D6).
+    `bump` task. Not a deepagent — it is the deterministic *execution* of a
+    `bump` task, invoked by the orchestrator, never an LLM edit.
   - **codemod-adapter (deepagent, sandboxed `FilesystemBackend`,
     `virtual_mode=True`):** given `migration_guide` + scoped `files`, adapts
     call sites, runs `verify` to self-correct, returns `code_diff`.
@@ -130,17 +132,21 @@ window sharpens automatically. No hard ordering between the two.
     exist, but `replace` work settles as deferred/skipped (behavior moved
     out of `classify` into the orchestrator). Full implementation is Spec B.
 
-- **D5 — `MigrationPlan` is persisted and reviewable.** It is stored on the
-  remediation record (per target) and surfaced through the existing artifact
-  mechanism (the same path `PlannerPanel` / node-detail panels already
+- **D5 — `MigrationPlan` is persisted and reviewable, embedded on the
+  remediation record.** It is stored per target on the `Remediation` /
+  `RemediationResult` record (not a parallel store) and surfaced through the
+  existing artifact mechanism (the same path node-detail panels already
   consume), so a run's plans can be reviewed afterward. `pr_and_persist_node`
   persists the plans alongside the `RemediationResult`.
 
-- **D6 — r1 clean-bump short-circuit.** When the tier hint is r1 **and** the
-  `ReleaseDigest` reports `migration_needed == False`, skip the deepagent
-  entirely: synthesize a trivial single-`bump` `MigrationPlan` (still
-  persisted, for review parity) and apply the bump deterministically. The
-  planning deepagent only spins up for r2/r3 or ambiguous cases.
+- **D6 — Uniform planning path (no r1 short-circuit).** Every selected
+  target — including a clean r1 bump — goes through the planning deepagent,
+  which emits a `MigrationPlan`; `bump` tasks then *execute* deterministically
+  via bump-executor (D4). This keeps one code path and uniform plan
+  provenance. Skipping the deepagent for the `r1 && !migration_needed` case
+  is a deliberately deferred optimization: it is pure, non-breaking, and can
+  be added later if planning-call cost matters at corpus scale — not built
+  now (YAGNI).
 
 - **D7 — Companion-dep (`requires`) discovery moves into planning.** The
   planner emits `MigrationPlan.requires` from investigation evidence rather
@@ -213,13 +219,12 @@ investigate_node             per target, fan-out (asyncio.gather):        [D2]
         │                      Release (version-scoped fetch + 1 LLM digest)
         │                      => TargetInvestigation per target
         │
-plan_and_orchestrate         ROOT DEEPAGENT, per target:                  [D3]
-        │                      r1 + !migration_needed => deterministic bump [D6]
-        │                      else: emit MigrationPlan (persisted) ──────► [D5]
-        │                            dispatch typed scoped agents via task():
-        │                              codemod-adapter (deepagent, sandboxed)
-        │                              replacement-migrator (Spec A: stub)  [D4]
-        │                            bump tasks applied deterministically
+plan_and_orchestrate         ROOT DEEPAGENT, per target (uniform path):    [D3][D6]
+        │                      1. commit_plan -> MigrationPlan (persisted) ─► [D5]
+        │                      2. dispatch typed scoped agents via task():
+        │                           codemod-adapter (deepagent, sandboxed)
+        │                           replacement-migrator (Spec A: stub)      [D4]
+        │                         bump tasks executed deterministically
         │
 group_and_verify_gate        deterministic clean-clone replay + verify    [D8]
         │   ▲ retry loop (unchanged bounds)                                [D9]
@@ -251,14 +256,16 @@ pr_and_persist_node          PR/consent (unchanged) + persist plans        [D5][
   → group_and_verify_gate → pr_and_persist` path; the monolithic per-target
   agent is gone.
 - A `MigrationPlan` is produced and persisted for every selected target
-  (including the r1 short-circuit's synthesized single-bump plan), and is
+  (including a clean r1 bump, whose plan is a single `bump` task), and is
   retrievable for review after a run.
 - The Release investigator fetches only changelog entries in the
   `(current, target]` window and produces a `ReleaseDigest` with
   `migration_needed` set correctly for: a clean patch/minor bump
   (`False`), a breaking major with a migration guide (`True`), and a package
   with no resolvable changelog (degrades honestly).
-- An r1 clean bump completes with **no deepagent invocation** (D6).
+- Every selected target (including a clean r1 bump) produces a persisted
+  `MigrationPlan` via the uniform planning path (D6); `bump` tasks execute
+  deterministically through bump-executor.
 - A `replace` target settles as deferred/skipped through the new orchestrator
   path (no crash), preserving today's r3 behavior until Spec B.
 - The deterministic backstop, PR/consent flow, and honest failure bounds
@@ -278,12 +285,10 @@ pr_and_persist_node          PR/consent (unchanged) + persist plans        [D5][
 
 ## Open questions
 
-None blocking. Two to confirm during planning:
-- Exact persistence surface for `MigrationPlan` (embedded on the
-  `Remediation`/`RemediationResult` record vs. a parallel artifact store) —
-  chosen to match how the frontend artifact panels already read per-node
-  data (D5).
-- Whether `commit_plan`-as-tool or `response_format` is the cleaner
-  mechanism to force the structured plan emission (D3.2) given the
-  orchestrator also needs to keep dispatching afterward — a plan-first tool
-  is likely, since `response_format` typically terminates the agent.
+None blocking; all prior open items resolved:
+- Persistence surface — **resolved:** `MigrationPlan` is embedded on the
+  `Remediation`/`RemediationResult` record (D5).
+- Plan-emission mechanism — **resolved:** a mandatory `commit_plan(plan)`
+  tool, not `response_format` (D3.2).
+- r1 short-circuit — **resolved:** not built; uniform planning path, the
+  short-circuit deferred as a future non-breaking optimization (D6).
