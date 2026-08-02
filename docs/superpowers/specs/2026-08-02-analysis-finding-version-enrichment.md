@@ -42,6 +42,17 @@ structurally there instead of re-derived later via a second tool.
   is intentionally not a port of npm audit's own `isSemVerMajor` flag (that
   would still require calling `npm audit`) — it's an independent,
   self-contained computation from data Trivy already returns.
+  **Scope note:** `InstalledVersion`/`FixedVersion` are always reported by
+  Trivy for the same `PkgName`, so `is_semver_major` is structurally a
+  same-dependency-upgrade comparison only — it never applies to a package
+  replacement/migration (there is no such thing as a "major version" across
+  two different packages). This is automatically true within this spec's
+  scope (Trivy never suggests a different package as a fix), but matters for
+  the future follow-up that wires these fields into `classify_targets_node`
+  (`2026-08-02-remediation-tier-classification.md` D1b): once a target's
+  resolution is `strategy="replace"`, `is_semver_major` must not be read as a
+  breaking-change signal for that target — it describes a same-dep bump that
+  isn't the path being taken.
 - **D3 — Non-vulnerable-but-outdated packages remain out of scope for
   `FindingNote`.** `npm outdated`'s coverage of packages with no CVE (just
   stale) doesn't fit `FindingNote`'s purpose (a finding is a risk, not mere

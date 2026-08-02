@@ -55,7 +55,10 @@ tier-labeled, per-group PR as today.
   non-vulnerable-but-stale coverage — has no replacement in *this* spec; it's
   the explicit subject of the companion spec
   `docs/superpowers/specs/2026-08-02-analysis-finding-version-enrichment.md`
-  (drafted, not yet built). Until that lands, tier classification here relies
+  (drafted, not yet built) — including that spec's scope note that
+  `is_semver_major` only ever describes a same-dependency upgrade and must
+  not be read as a breaking-change signal once a target's resolution is
+  `strategy="replace"`. Until that lands, tier classification here relies
   on the LLM's own reading of the release notes prose (which commonly states
   breaking changes explicitly) rather than a structured flag. A small
   follow-up to this spec will wire the enriched fields into
