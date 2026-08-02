@@ -75,3 +75,79 @@ def test_empty_results_returns_no_findings():
 
 def test_missing_results_key_returns_no_findings():
     assert parse_trivy_vuln_findings({"SchemaVersion": 2}) == []
+
+
+def test_major_bump_sets_is_semver_major_true():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-MAJOR",
+            "PkgName": "lodash",
+            "InstalledVersion": "3.10.1",
+            "FixedVersion": "4.17.19",
+            "Severity": "HIGH",
+            "Title": "t",
+            "Description": "d",
+            "PrimaryURL": "",
+        }
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="high")
+    assert findings[0].installed_version == "3.10.1"
+    assert findings[0].fixed_version == "4.17.19"
+    assert findings[0].is_semver_major is True
+
+
+def test_minor_patch_bump_sets_is_semver_major_false():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-MINOR",
+            "PkgName": "lodash",
+            "InstalledVersion": "4.17.15",
+            "FixedVersion": "4.17.19",
+            "Severity": "HIGH",
+            "Title": "t",
+            "Description": "d",
+            "PrimaryURL": "",
+        }
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="high")
+    assert findings[0].installed_version == "4.17.15"
+    assert findings[0].fixed_version == "4.17.19"
+    assert findings[0].is_semver_major is False
+
+
+def test_no_fix_available_leaves_semver_fields_none():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-NOFIX",
+            "PkgName": "left-pad",
+            "InstalledVersion": "1.3.0",
+            "FixedVersion": None,
+            "Severity": "HIGH",
+            "Title": "t",
+            "Description": "d",
+            "PrimaryURL": "",
+        }
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="high")
+    assert findings[0].installed_version == "1.3.0"
+    assert findings[0].fixed_version is None
+    assert findings[0].is_semver_major is None
+
+
+def test_unparseable_version_leaves_is_semver_major_none():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-WEIRD",
+            "PkgName": "oddpkg",
+            "InstalledVersion": "unstable",
+            "FixedVersion": "2.0.0",
+            "Severity": "HIGH",
+            "Title": "t",
+            "Description": "d",
+            "PrimaryURL": "",
+        }
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="high")
+    assert findings[0].installed_version == "unstable"
+    assert findings[0].fixed_version == "2.0.0"
+    assert findings[0].is_semver_major is None

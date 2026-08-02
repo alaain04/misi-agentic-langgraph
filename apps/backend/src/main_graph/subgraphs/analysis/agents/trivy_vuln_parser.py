@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import re
+
 from src.models.conductor import EvidenceRef, FindingNote
 
 _SEVERITY_MAP = {
@@ -13,10 +15,30 @@ _SEVERITY_MAP = {
     "UNKNOWN": "info",
 }
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+_SEMVER_RE = re.compile(r"^(\d+)\.\d+\.\d+")
 
 
 def _rank(severity: str) -> int:
     return _SEVERITY_RANK.get(severity, 0)
+
+
+def _major_version(version: str) -> int | None:
+    match = _SEMVER_RE.match(version.strip())
+    return int(match.group(1)) if match else None
+
+
+def _is_semver_major(installed: str | None, fixed: str | None) -> bool | None:
+    """Same-dependency-upgrade comparison only - Trivy's InstalledVersion/
+    FixedVersion are always for the same PkgName, so this has no meaning for
+    a package replacement/migration. None means not computable: no fix
+    available, or either version string isn't parseable as semver."""
+    if not installed or not fixed:
+        return None
+    installed_major = _major_version(installed)
+    fixed_major = _major_version(fixed)
+    if installed_major is None or fixed_major is None:
+        return None
+    return installed_major != fixed_major
 
 
 def parse_trivy_vuln_findings(
@@ -31,8 +53,10 @@ def parse_trivy_vuln_findings(
             severity = _SEVERITY_MAP.get(vuln.get("Severity", "UNKNOWN"), "info")
             if _rank(severity) < threshold:
                 continue
-            installed = vuln.get("InstalledVersion", "unknown")
-            fixed = vuln.get("FixedVersion") or "no fix available"
+            installed_raw = vuln.get("InstalledVersion") or None
+            fixed_raw = vuln.get("FixedVersion") or None
+            installed = installed_raw or "unknown"
+            fixed = fixed_raw or "no fix available"
             vuln_id = vuln.get("VulnerabilityID", "unknown")
             findings.append(
                 FindingNote(
@@ -53,6 +77,9 @@ def parse_trivy_vuln_findings(
                             ),
                         )
                     ],
+                    installed_version=installed_raw,
+                    fixed_version=fixed_raw,
+                    is_semver_major=_is_semver_major(installed_raw, fixed_raw),
                 )
             )
     findings.sort(key=lambda f: _rank(f.severity), reverse=True)
