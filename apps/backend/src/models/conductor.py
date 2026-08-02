@@ -18,6 +18,13 @@ class FindingNote(BaseModel):
     severity: str  # "critical" | "high" | "medium" | "low" | "info"
     description: str
     evidence: list[EvidenceRef]
+    installed_version: str | None = None
+    fixed_version: str | None = None
+    # Same-dependency-upgrade comparison only (Trivy always reports Installed/
+    # FixedVersion for the same PkgName) - never a signal for a package
+    # replacement/migration. None means "not computable": no fix available,
+    # or either version string isn't parseable as semver.
+    is_semver_major: bool | None = None
 
 
 class ToolResult(BaseModel):

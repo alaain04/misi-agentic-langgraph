@@ -72,3 +72,25 @@ def test_finding_note_uses_evidence_not_evidence_refs():
     )
     assert len(finding.evidence) == 1
     assert finding.evidence[0].tool == "npm_audit"
+
+
+def test_finding_note_version_fields_default_none():
+    fn = FindingNote(dep_name="lodash", severity="high", description="desc", evidence=[])
+    assert fn.installed_version is None
+    assert fn.fixed_version is None
+    assert fn.is_semver_major is None
+
+
+def test_finding_note_version_fields_round_trip():
+    fn = FindingNote(
+        dep_name="lodash",
+        severity="high",
+        description="desc",
+        evidence=[],
+        installed_version="4.17.15",
+        fixed_version="4.17.19",
+        is_semver_major=False,
+    )
+    assert fn.installed_version == "4.17.15"
+    assert fn.fixed_version == "4.17.19"
+    assert fn.is_semver_major is False
