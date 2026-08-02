@@ -15,7 +15,7 @@ _SEVERITY_MAP = {
     "UNKNOWN": "info",
 }
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
-_SEMVER_RE = re.compile(r"^(\d+)\.\d+\.\d+")
+_SEMVER_RE = re.compile(r"^(\d+)\.\d+\.\d+(?:[-+].*)?$")
 
 
 def _rank(severity: str) -> int:

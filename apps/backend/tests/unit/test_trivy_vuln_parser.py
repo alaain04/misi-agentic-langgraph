@@ -151,3 +151,21 @@ def test_unparseable_version_leaves_is_semver_major_none():
     assert findings[0].installed_version == "unstable"
     assert findings[0].fixed_version == "2.0.0"
     assert findings[0].is_semver_major is None
+
+
+def test_comma_separated_fixed_version_leaves_is_semver_major_none():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-MULTI",
+            "PkgName": "multipkg",
+            "InstalledVersion": "4.5.0",
+            "FixedVersion": "3.2.19, 4.1.9",
+            "Severity": "HIGH",
+            "Title": "t",
+            "Description": "d",
+            "PrimaryURL": "",
+        }
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="high")
+    assert findings[0].fixed_version == "3.2.19, 4.1.9"
+    assert findings[0].is_semver_major is None
