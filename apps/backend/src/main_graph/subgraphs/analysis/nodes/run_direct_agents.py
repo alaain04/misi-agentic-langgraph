@@ -30,14 +30,18 @@ async def _run_one(
 
 
 async def run_direct_agents(state: AnalysisState, config: RunnableConfig) -> dict:
+    concern = Concern(**state["structured_concern"])
+    agent_types = whole_tree_agents(concern)
+    if not agent_types:
+        return {"bundle_ids": [], "agent_calls": []}
+
     svc = get_services(config)
     prep = await svc["result_dao"].get_prep(state["prep_result_id"])
-    concern = Concern(**state["structured_concern"])
 
     results = await asyncio.gather(
         *[
             _run_one(agent_type, concern, state["concern"], prep, svc)
-            for agent_type in whole_tree_agents(concern)
+            for agent_type in agent_types
         ]
     )
 

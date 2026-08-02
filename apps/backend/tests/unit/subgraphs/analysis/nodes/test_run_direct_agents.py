@@ -207,3 +207,31 @@ async def test_run_direct_agents_excludes_non_whole_tree_agents_from_a_mixed_con
     assert result["bundle_ids"] == ["bundle-vuln"]
     assert len(result["agent_calls"]) == 1
     assert result["agent_calls"][0]["agent_type"] == "vulnerability_agent"
+
+
+@pytest.mark.asyncio
+async def test_run_direct_agents_skips_dao_fetch_when_no_whole_tree_agents_apply():
+    """A concern with no whole-tree agents (e.g. a pure maintenance concern)
+    must not touch the DAO at all -- there is nothing for run_direct_agents
+    to do, and get_prep is only useful if a specialist actually runs."""
+    mock_get_services = MagicMock(side_effect=AssertionError("must not be called"))
+    state = {
+        "job_id": "job-1",
+        "concern": "how healthy is this project's dependency set?",
+        "prep_result_id": "prep-1",
+        "structured_concern": {
+            "type": ["maintenance"],
+            "scope": "all_dependencies",
+            "packages": [],
+            "requires_per_dependency_analysis": False,
+            "preferred_agents": ["maintenance_agent"],
+        },
+    }
+
+    with patch(
+        "src.main_graph.subgraphs.analysis.nodes.run_direct_agents.get_services",
+        mock_get_services,
+    ):
+        result = await run_direct_agents(state, {"configurable": {}})
+
+    assert result == {"bundle_ids": [], "agent_calls": []}
