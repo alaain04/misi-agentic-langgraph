@@ -23,6 +23,13 @@ _UNDERSTAND_CONCERN_SYSTEM = textwrap.dedent("""\
     Direct dependencies (name@installed_version): {direct_deps}
 
     Rules:
+    - is_valid: false if the input is not a dependency-risk concern at all --
+      a greeting, small talk, an unrelated question, or anything that isn't
+      asking to analyze this project's dependencies. True otherwise. When
+      false, still fill in the other fields with these exact placeholders
+      (they are ignored): type=["other"], scope="all_dependencies",
+      packages=[], requires_per_dependency_analysis=false,
+      preferred_agents=[].
     - type: one or more of "vulnerability", "license", "maintenance",
       "supply_chain", "web_research", "other" -- every concept explicitly
       present in the concern. Do not add types the concern doesn't mention.

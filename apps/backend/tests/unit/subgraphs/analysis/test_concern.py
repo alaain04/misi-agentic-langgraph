@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.main_graph.subgraphs.analysis.concern import (
     Concern,
     is_simple,
+    route_after_understand_concern,
     route_concern,
     whole_tree_agents,
 )
@@ -10,6 +11,7 @@ from src.main_graph.subgraphs.analysis.concern import (
 
 def _concern(**overrides) -> Concern:
     defaults = dict(
+        is_valid=True,
         type=["vulnerability"],
         scope="all_dependencies",
         packages=[],
@@ -97,3 +99,18 @@ def test_whole_tree_agents_empty_when_scope_is_specific_packages():
         preferred_agents=["vulnerability_agent"],
     )
     assert whole_tree_agents(concern) == []
+
+
+def test_route_after_understand_concern_returns_valid():
+    state = {"structured_concern": _concern().model_dump()}
+    assert route_after_understand_concern(state) == "valid"
+
+
+def test_route_after_understand_concern_returns_invalid():
+    state = {"structured_concern": _concern(is_valid=False).model_dump()}
+    assert route_after_understand_concern(state) == "invalid"
+
+
+def test_route_after_understand_concern_defaults_to_valid_when_missing():
+    state = {"structured_concern": {}}
+    assert route_after_understand_concern(state) == "valid"

@@ -49,6 +49,7 @@ def _state(preferred_agents: list[str]) -> dict:
         "concern": "check for known CVEs",
         "prep_result_id": "prep-1",
         "structured_concern": {
+            "is_valid": True,
             "type": ["vulnerability"],
             "scope": "all_dependencies",
             "packages": [],
@@ -177,6 +178,7 @@ async def test_run_direct_agents_excludes_non_whole_tree_agents_from_a_mixed_con
         "concern": "vulnerabilities and unmaintained dependencies",
         "prep_result_id": "prep-1",
         "structured_concern": {
+            "is_valid": True,
             "type": ["vulnerability", "maintenance"],
             "scope": "all_dependencies",
             "packages": [],
@@ -220,6 +222,7 @@ async def test_run_direct_agents_skips_dao_fetch_when_no_whole_tree_agents_apply
         "concern": "how healthy is this project's dependency set?",
         "prep_result_id": "prep-1",
         "structured_concern": {
+            "is_valid": True,
             "type": ["maintenance"],
             "scope": "all_dependencies",
             "packages": [],

@@ -27,6 +27,7 @@ def _make_prep() -> PrepResult:
 @pytest.mark.asyncio
 async def test_understand_concern_writes_structured_concern_to_state():
     fake_concern = Concern(
+        is_valid=True,
         type=["vulnerability"],
         scope="all_dependencies",
         packages=[],
@@ -69,6 +70,7 @@ async def test_understand_concern_writes_structured_concern_to_state():
 @pytest.mark.asyncio
 async def test_understand_concern_passes_direct_deps_and_roster_as_context():
     fake_concern = Concern(
+        is_valid=True,
         type=["license"],
         scope="all_dependencies",
         packages=[],

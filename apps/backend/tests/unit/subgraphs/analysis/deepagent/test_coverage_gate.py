@@ -23,6 +23,7 @@ def _make_prep() -> PrepResult:
 
 def _structured_concern(**overrides) -> dict:
     defaults = dict(
+        is_valid=True,
         type=["maintenance"],
         scope="all_dependencies",
         packages=[],

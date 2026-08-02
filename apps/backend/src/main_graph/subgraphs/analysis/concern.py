@@ -14,6 +14,7 @@ ConcernScope = Literal["all_dependencies", "specific_packages"]
 
 
 class Concern(BaseModel):
+    is_valid: bool
     type: list[ConcernType]
     scope: ConcernScope
     packages: list[str] = Field(default_factory=list)
@@ -35,6 +36,14 @@ def is_simple(concern: Concern) -> bool:
 def route_concern(state: AnalysisState) -> str:
     concern = Concern(**state["structured_concern"])
     return "simple" if is_simple(concern) else "complex"
+
+
+def route_after_understand_concern(state: AnalysisState) -> str:
+    """Gate on validity before anything else runs -- no point dispatching
+    real agents (or even the deep agent) for input that was never a
+    dependency-risk concern in the first place."""
+    concern_dict = state["structured_concern"]
+    return "valid" if concern_dict.get("is_valid", True) else "invalid"
 
 
 def whole_tree_agents(concern: Concern) -> list[str]:

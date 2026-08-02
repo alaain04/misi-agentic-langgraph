@@ -23,6 +23,9 @@ from langchain_core.messages import AIMessage
 from src.main_graph.subgraphs.analysis.concern import Concern
 from src.main_graph.subgraphs.analysis.deepagent import nodes as deepagent_nodes
 from src.main_graph.subgraphs.analysis.graph import build_analysis_subgraph
+from src.main_graph.subgraphs.analysis.nodes.handle_invalid_concern import (
+    INVALID_CONCERN_MESSAGE,
+)
 from src.models.conductor import EvidenceRef, FindingNote
 from src.models.results import EvidenceBundle, PrepResult
 
@@ -76,6 +79,7 @@ async def test_simple_concern_skips_deep_agent_entirely(subgraph_config, result_
     await result_dao.save_prep(prep)
 
     fake_concern = Concern(
+        is_valid=True,
         type=["vulnerability"],
         scope="all_dependencies",
         packages=[],
@@ -140,6 +144,7 @@ async def test_complex_concern_without_per_dependency_requirement_skips_forced_c
         }
     )
     fake_concern = Concern(
+        is_valid=True,
         type=["maintenance"],
         scope="all_dependencies",
         packages=[],
@@ -234,6 +239,7 @@ async def test_mixed_concern_peels_off_vulnerability_before_deep_agent_runs(
         }
     )
     fake_concern = Concern(
+        is_valid=True,
         type=["vulnerability", "maintenance"],
         scope="all_dependencies",
         packages=[],
@@ -290,3 +296,62 @@ async def test_mixed_concern_peels_off_vulnerability_before_deep_agent_runs(
         "Already completed for this concern: ['vulnerability_agent']"
         in system_content
     )
+
+
+@pytest.mark.asyncio
+async def test_invalid_concern_ends_the_subgraph_without_an_analysis_result(
+    subgraph_config, result_dao
+):
+    """A concern the classifier flags as invalid (e.g. a greeting) must
+    never reach run_direct_agents or analysis_deepagent_node, and must not
+    set analysis_result_id -- main_graph's existing _after_analysis routing
+    (`if not analysis_result_id: return END`) is what actually skips
+    remediation/report for this job; this test only proves the analysis
+    subgraph holds up its end of that contract."""
+    job_id = f"anal-{uuid.uuid4().hex[:8]}"
+    prep = _seed_prep(job_id)
+    await result_dao.save_prep(prep)
+
+    fake_concern = Concern(
+        is_valid=False,
+        type=["other"],
+        scope="all_dependencies",
+        packages=[],
+        requires_per_dependency_analysis=False,
+        preferred_agents=[],
+    )
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
+            _fake_concern_llm(fake_concern),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.graph.run_direct_agents",
+            AsyncMock(side_effect=AssertionError("run_direct_agents must not run")),
+        ),
+        patch(
+            "src.main_graph.subgraphs.analysis.graph.analysis_deepagent_node",
+            AsyncMock(side_effect=AssertionError("deep agent must not run")),
+        ),
+    ):
+        graph = build_analysis_subgraph()
+        result = await graph.ainvoke(
+            {
+                "job_id": job_id,
+                "concern": "hello there",
+                "prep_result_id": prep.id,
+                "bundle_ids": [],
+                "agent_calls": [],
+            },
+            config=subgraph_config,
+        )
+
+    assert result.get("analysis_result_id") is None
+
+    job_repo = subgraph_config["configurable"]["job_repo"]
+    job_repo.update_artifact_data.assert_awaited_once()
+    call = job_repo.update_artifact_data.await_args
+    assert call.args[0] == job_id
+    assert call.args[1] == "analysis"
+    assert call.args[2] == {"message": INVALID_CONCERN_MESSAGE}

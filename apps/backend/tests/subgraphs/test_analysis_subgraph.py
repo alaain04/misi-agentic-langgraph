@@ -346,6 +346,7 @@ async def test_analysis_dispatches_agent_and_saves_result(subgraph_config, resul
             "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
             _fake_concern_llm(
                 Concern(
+                    is_valid=True,
                     type=["maintenance"],
                     scope="all_dependencies",
                     packages=[],
@@ -432,6 +433,7 @@ async def test_backstop_fires_when_deep_agent_never_delegates(
             "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
             _fake_concern_llm(
                 Concern(
+                    is_valid=True,
                     type=["maintenance"],
                     scope="all_dependencies",
                     packages=[],
@@ -537,6 +539,7 @@ async def test_analysis_accumulates_bundles_across_two_correction_rounds(
             "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
             _fake_concern_llm(
                 Concern(
+                    is_valid=True,
                     type=["maintenance"],
                     scope="all_dependencies",
                     packages=[],
@@ -670,6 +673,7 @@ async def test_parallel_task_calls_in_one_turn_do_not_crash_root_state(
             "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
             _fake_concern_llm(
                 Concern(
+                    is_valid=True,
                     type=["maintenance", "supply_chain"],
                     scope="all_dependencies",
                     packages=[],
@@ -755,6 +759,7 @@ async def test_coverage_gate_skips_per_package_coverage_when_whole_tree_scan_sat
             "src.main_graph.subgraphs.analysis.nodes.understand_concern._llm",
             _fake_concern_llm(
                 Concern(
+                    is_valid=True,
                     type=["vulnerability"],
                     scope="all_dependencies",
                     packages=[],

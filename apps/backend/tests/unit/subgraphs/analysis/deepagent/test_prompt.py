@@ -50,6 +50,7 @@ async def test_first_round_system_message_includes_budget_and_structured_concern
                 "concern": "check whether lodash is maintained",
                 "prep_result_id": "prep-1",
                 "structured_concern": {
+                    "is_valid": True,
                     "type": ["maintenance"],
                     "scope": "all_dependencies",
                     "packages": [],
@@ -121,6 +122,7 @@ async def test_first_round_excludes_already_run_whole_tree_agents_from_roster():
                 "concern": "vulnerabilities and unmaintained dependencies",
                 "prep_result_id": "prep-1",
                 "structured_concern": {
+                    "is_valid": True,
                     "type": ["vulnerability", "maintenance"],
                     "scope": "all_dependencies",
                     "packages": [],
