@@ -4,8 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.remediation.investigate import investigate_release
-from src.models.remediation import ReleaseDigest
+from src.main_graph.subgraphs.remediation.investigate import (
+    investigate_call_sites,
+    investigate_dependents,
+    investigate_release,
+    investigate_target,
+)
+from src.models.remediation import ReleaseDigest, RemediationTarget, TargetInvestigation
 
 
 @pytest.mark.asyncio
@@ -74,3 +79,43 @@ async def test_investigate_release_conservative_when_notes_unavailable():
     assert "unavailable" in digest.breaking_changes[0]
     # LLM should not have been consulted for unavailable notes.
     mock_llm.with_structured_output.assert_not_called()
+
+
+def test_investigate_dependents_uses_graph():
+    graph = {
+        "direct": {"eslint": "8.0.0"},
+        "packages": {
+            "eslint@8.0.0": {"version": "8.0.0", "dependencies": ["debug@4.0.0"]},
+            "debug@4.0.0": {"version": "4.0.0", "dependencies": []},
+        },
+    }
+    assert investigate_dependents(graph, "debug") == ["eslint"]
+
+
+def test_investigate_call_sites_scans_repo(tmp_path):
+    (tmp_path / "a.ts").write_text("import _ from 'lodash'\n_.map([])\n")
+    (tmp_path / "b.ts").write_text("no usage here\n")
+    sites = investigate_call_sites(str(tmp_path), "lodash")
+    assert sites == ["a.ts"]
+
+
+@pytest.mark.asyncio
+async def test_investigate_target_combines_all_three():
+    graph = {"direct": {"lodash": "4.17.15"}, "packages": {}}
+    target = RemediationTarget(
+        target_dep="lodash", addresses=["lodash"], current_range="^4.17.15", tier="r2"
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.investigate.investigate_release",
+        AsyncMock(
+            return_value=ReleaseDigest(
+                from_version="4.17.15", to_version=None, migration_needed=False
+            )
+        ),
+    ):
+        inv = await investigate_target(
+            target, "/tmp/repo", graph, MagicMock(), "img"
+        )
+    assert isinstance(inv, TargetInvestigation)
+    assert inv.target_dep == "lodash"
+    assert inv.release.migration_needed is False

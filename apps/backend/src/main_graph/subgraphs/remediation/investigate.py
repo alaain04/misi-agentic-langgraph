@@ -9,8 +9,10 @@ import logging
 from typing import cast
 
 from src.domain.ports.container_run_port import ContainerRunPort
+from src.main_graph.subgraphs.discovery.dependency_graph import dependents_of
 from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes_between
-from src.models.remediation import ReleaseDigest
+from src.main_graph.tools.search_code import find_local_usage_sites
+from src.models.remediation import ReleaseDigest, RemediationTarget, TargetInvestigation
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -100,3 +102,48 @@ async def investigate_release(
             migration_guide="",
             breaking_changes=[f"release investigation failed, assuming breaking: {exc}"],
         )
+
+
+def investigate_dependents(dependency_graph: dict, target_dep: str) -> list[str]:
+    """Deterministic Dependency investigator: packages in the tree that
+    depend on target_dep (structural, from the resolved graph)."""
+    return dependents_of(dependency_graph, target_dep)
+
+
+def investigate_call_sites(repo_path: str, target_dep: str) -> list[str]:
+    """Deterministic Source investigator: repo files that mention target_dep,
+    sorted. Reuses the local substring scan (no container, no LLM)."""
+    return sorted(
+        {hit["file"] for hit in find_local_usage_sites(repo_path, target_dep)}
+    )
+
+
+def _resolve_versions(
+    target: RemediationTarget, dependency_graph: dict
+) -> tuple[str | None, str | None]:
+    """(from_version, to_version). from = installed version from the graph;
+    to = None until analysis-finding version-enrichment supplies fixed_version
+    (release fetch then degrades to the unfiltered recent set, spec soft-dep)."""
+    installed = (dependency_graph.get("direct") or {}).get(target.target_dep)
+    return (installed, None)
+
+
+async def investigate_target(
+    target: RemediationTarget,
+    repo_path: str,
+    dependency_graph: dict,
+    container: ContainerRunPort,
+    docker_image: str,
+) -> TargetInvestigation:
+    """Combine all three investigators (deterministic Dependency + Source, and
+    LLM-digested Release) into a TargetInvestigation."""
+    from_version, to_version = _resolve_versions(target, dependency_graph)
+    release = await investigate_release(
+        target.target_dep, from_version, to_version, repo_path, container, docker_image
+    )
+    return TargetInvestigation(
+        target_dep=target.target_dep,
+        dependents=investigate_dependents(dependency_graph, target.target_dep),
+        call_sites=investigate_call_sites(repo_path, target.target_dep),
+        release=release,
+    )
