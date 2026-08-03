@@ -4,13 +4,20 @@ into a TargetInvestigation that the plan_and_orchestrate deepagent reads."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import cast
 
+from langchain_core.runnables import RunnableConfig
+
 from src.domain.ports.container_run_port import ContainerRunPort
+from src.main_graph.config import get_services
 from src.main_graph.subgraphs.discovery.dependency_graph import dependents_of
-from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes_between
+from src.main_graph.subgraphs.remediation.changelog import (
+    fetch_release_notes_between,
+)
+from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.main_graph.tools.search_code import find_local_usage_sites
 from src.models.remediation import ReleaseDigest, RemediationTarget, TargetInvestigation
 from src.utils.llm import Model, get_llm
@@ -141,7 +148,12 @@ async def investigate_target(
     LLM-digested Release) into a TargetInvestigation."""
     from_version, to_version = _resolve_versions(target, dependency_graph)
     release = await investigate_release(
-        target.target_dep, from_version, to_version, repo_path, container, docker_image
+        target.target_dep,
+        from_version,
+        to_version,
+        repo_path,
+        container,
+        docker_image,
     )
     return TargetInvestigation(
         target_dep=target.target_dep,
@@ -149,3 +161,41 @@ async def investigate_target(
         call_sites=investigate_call_sites(repo_path, target.target_dep),
         release=release,
     )
+
+
+_MAX_CONCURRENT_INVESTIGATIONS = 6  # matches classify; guards against 429s
+
+
+async def investigate_node(
+    state: RemediationState, config: RunnableConfig
+) -> dict:
+    """Fan out investigate_target over all targets with bounded concurrency."""
+    svc = get_services(config)
+    dao = svc["result_dao"]
+    container = svc["container"]
+    targets = state.get("targets") or {}
+    if not targets:
+        return {"investigations": {}}
+    prep = await dao.get_prep(state["prep_result_id"])
+
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_INVESTIGATIONS)
+
+    async def _bounded(target_dict: dict) -> TargetInvestigation:
+        target = RemediationTarget(**target_dict)
+        async with semaphore:
+            return await investigate_target(
+                target,
+                prep.repo_path,
+                prep.dependency_graph,
+                container,
+                prep.docker_image,
+            )
+
+    results = await asyncio.gather(
+        *[_bounded(t) for t in targets.values()]
+    )
+    return {
+        "investigations": {
+            inv.target_dep: inv.model_dump() for inv in results
+        }
+    }

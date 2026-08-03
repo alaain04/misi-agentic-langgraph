@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -122,3 +123,72 @@ async def test_investigate_target_combines_all_three():
     assert isinstance(inv, TargetInvestigation)
     assert inv.target_dep == "lodash"
     assert inv.release.migration_needed is False
+
+
+@pytest.mark.asyncio
+async def test_investigate_node_fans_out_and_bounds_concurrency():
+    n = 20
+    deps = [f"dep-{i}" for i in range(n)]
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        dependency_graph={"direct": {d: "1.0.0" for d in deps}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+    targets = {
+        d: RemediationTarget(target_dep=d, addresses=[d], tier="r1").model_dump()
+        for d in deps
+    }
+
+    current = 0
+    peak = 0
+    lock = asyncio.Lock()
+
+    async def _fake_investigate(target, repo_path, graph, container, image):
+        nonlocal current, peak
+        async with lock:
+            current += 1
+            peak = max(peak, current)
+        await asyncio.sleep(0.01)
+        async with lock:
+            current -= 1
+        return TargetInvestigation(
+            target_dep=target.target_dep,
+            release=ReleaseDigest(
+                from_version=None, to_version=None, migration_needed=False
+            ),
+        )
+
+    with patch(
+        "src.main_graph.subgraphs.remediation.investigate.investigate_target",
+        AsyncMock(side_effect=_fake_investigate),
+    ):
+        from src.main_graph.subgraphs.remediation.investigate import (
+            investigate_node,
+        )
+
+        out = await investigate_node(
+            {"job_id": "j", "prep_result_id": "p", "targets": targets},
+            config,
+        )
+
+    assert set(out["investigations"]) == set(deps)
+    assert peak <= 6, f"expected cap 6, saw {peak}"
+    assert peak > 1
+
+
+@pytest.mark.asyncio
+async def test_investigate_node_no_targets_short_circuits():
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=MagicMock())
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+    from src.main_graph.subgraphs.remediation.investigate import (
+        investigate_node,
+    )
+
+    out = await investigate_node(
+        {"job_id": "j", "prep_result_id": "p", "targets": {}}, config
+    )
+    assert out == {"investigations": {}}

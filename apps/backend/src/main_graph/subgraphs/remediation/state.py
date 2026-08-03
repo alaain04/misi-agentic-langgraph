@@ -14,6 +14,8 @@ class RemediationState(TypedDict):
     analysis_result_id: str
     remediation_result_id: NotRequired[str]
     targets: NotRequired[dict[str, dict]]
+    investigations: NotRequired[Annotated[dict[str, dict], _merge_replace]]
+    migration_plans: NotRequired[Annotated[dict[str, dict], _merge_replace]]
     remediations: NotRequired[Annotated[dict[str, dict], _merge_replace]]
     requires_edges: NotRequired[Annotated[dict[str, list], _merge_replace]]
     retry_targets: NotRequired[list[str]]
