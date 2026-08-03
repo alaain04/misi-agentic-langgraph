@@ -43,6 +43,24 @@ async def investigate_release(
         notes = await fetch_release_notes_between(
             target_dep, from_version, to_version, repo_path, container, docker_image
         )
+        # If release notes fetch failed, return conservative digest without LLM.
+        if not notes.get("available"):
+            logger.warning(
+                "investigate_release: notes unavailable for %s (%s->%s): %s; assuming breaking",
+                target_dep,
+                from_version,
+                to_version,
+                notes.get("error"),
+            )
+            return ReleaseDigest(
+                from_version=from_version,
+                to_version=to_version,
+                migration_needed=True,
+                migration_guide="",
+                breaking_changes=[
+                    f"release notes unavailable, assuming breaking: {notes.get('error')}"
+                ],
+            )
         structured = _llm.with_structured_output(
             ReleaseDigest, method="function_calling"
         )

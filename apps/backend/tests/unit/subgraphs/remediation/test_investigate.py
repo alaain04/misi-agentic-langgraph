@@ -54,3 +54,23 @@ async def test_investigate_release_conservative_on_failure():
         )
     assert digest.migration_needed is True  # conservative default
     assert digest.breaking_changes  # carries an explanatory reason
+
+
+@pytest.mark.asyncio
+async def test_investigate_release_conservative_when_notes_unavailable():
+    mock_llm = MagicMock()
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.investigate.fetch_release_notes_between",
+            AsyncMock(return_value={"available": False, "error": "gh CLI not found"}),
+        ),
+        patch("src.main_graph.subgraphs.remediation.investigate._llm", mock_llm),
+    ):
+        digest = await investigate_release(
+            "lodash", "1.0.0", "2.0.0", "/tmp/repo", MagicMock(), "img"
+        )
+    assert digest.migration_needed is True
+    assert digest.breaking_changes
+    assert "unavailable" in digest.breaking_changes[0]
+    # LLM should not have been consulted for unavailable notes.
+    mock_llm.with_structured_output.assert_not_called()
