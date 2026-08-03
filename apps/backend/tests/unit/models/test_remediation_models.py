@@ -1,9 +1,13 @@
 from src.models.remediation import (
     CodeChange,
+    MigrationPlan,
+    MigrationTask,
     Remediation,
+    ReleaseDigest,
     RemediationOutcome,
     RemediationResult,
     RemediationTarget,
+    TargetInvestigation,
     VerificationResult,
 )
 
@@ -89,3 +93,43 @@ def test_remediation_target_carries_addresses():
 def test_code_change_shape():
     c = CodeChange(file="src/a.js", rationale="api moved")
     assert c.file == "src/a.js"
+
+
+def test_release_digest_defaults():
+    d = ReleaseDigest(from_version="1.0.0", to_version="2.0.0", migration_needed=True)
+    assert d.migration_guide == ""
+    assert d.breaking_changes == []
+
+
+def test_target_investigation_round_trip():
+    inv = TargetInvestigation(
+        target_dep="lodash",
+        dependents=["a"],
+        call_sites=["src/x.ts"],
+        release=ReleaseDigest(from_version=None, to_version=None, migration_needed=False),
+    )
+    assert TargetInvestigation(**inv.model_dump()).call_sites == ["src/x.ts"]
+
+
+def test_migration_plan_defaults_and_task():
+    plan = MigrationPlan(
+        target_dep="lodash",
+        tier_hint="r2",
+        tasks=[MigrationTask(kind="bump", rationale="patch", to_range="^4.17.21")],
+    )
+    assert plan.requires == []
+    assert plan.migration_guide == ""
+    assert plan.tasks[0].kind == "bump"
+
+
+def test_remediation_target_carries_tier():
+    t = RemediationTarget(target_dep="lodash", addresses=["lodash"], tier="r1")
+    assert t.tier == "r1"
+    assert RemediationTarget(target_dep="x", addresses=[]).tier is None
+
+
+def test_remediation_embeds_plan():
+    plan = MigrationPlan(target_dep="lodash", tier_hint="r1", tasks=[])
+    r = Remediation(addresses=[], target_dep="lodash", plan=plan)
+    assert r.plan.target_dep == "lodash"
+    assert Remediation(addresses=[], target_dep="x").plan is None
