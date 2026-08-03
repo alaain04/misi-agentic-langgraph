@@ -79,7 +79,7 @@ def _prep(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_classify_targets_node_splits_r3_from_dispatchable_targets():
+async def test_classify_targets_node_carries_tier_hint_no_r3_settle():
     prep = _prep(
         dependency_graph={
             "direct": {"lodash": "^4.17.11", "left-pad": "1.0.0"},
@@ -88,9 +88,7 @@ async def test_classify_targets_node_splits_r3_from_dispatchable_targets():
     )
     analysis = MagicMock(
         findings=[
-            FindingNote(
-                dep_name="lodash", severity="high", description="d", evidence=[]
-            ),
+            FindingNote(dep_name="lodash", severity="high", description="d", evidence=[]),
             FindingNote(
                 dep_name="left-pad", severity="high", description="d2", evidence=[]
             ),
@@ -103,9 +101,7 @@ async def test_classify_targets_node_splits_r3_from_dispatchable_targets():
 
     async def _fake_classify(target, repo_path, container, docker_image):
         if target.target_dep == "left-pad":
-            return TargetClassification(
-                tier="r3", rationale="abandoned, superseded by left-pad2"
-            )
+            return TargetClassification(tier="r3", rationale="abandoned")
         return TargetClassification(tier="r1", rationale="patch bump")
 
     with patch(
@@ -122,13 +118,11 @@ async def test_classify_targets_node_splits_r3_from_dispatchable_targets():
             config,
         )
 
-    assert set(result["targets"]) == {"lodash"}
-    assert set(result["remediations"]) == {"left-pad"}
-    r3 = result["remediations"]["left-pad"]
-    assert r3["strategy"] == "replace"
-    assert r3["status"] == "skipped"
-    assert r3["skip_reason"] == "dependency migration - deferred, not yet supported"
-    assert r3["addresses"] == ["left-pad"]
+    # Every target flows through (r3 is NOT settled here anymore).
+    assert set(result["targets"]) == {"lodash", "left-pad"}
+    assert result["remediations"] == {}
+    assert result["targets"]["left-pad"]["tier"] == "r3"
+    assert result["targets"]["lodash"]["tier"] == "r1"
 
 
 @pytest.mark.asyncio
