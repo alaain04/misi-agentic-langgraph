@@ -28,3 +28,4 @@ class RemediationDeepAgentState(DeepAgentState):
     targets: Annotated[dict[str, dict], _keep_first_dict]
     remediations: Annotated[dict[str, dict], _merge_replace]
     requires_edges: Annotated[dict[str, list], _merge_replace]
+    migration_plans: Annotated[dict[str, dict], _merge_replace]
