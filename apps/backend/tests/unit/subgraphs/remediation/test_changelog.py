@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes
+from src.main_graph.subgraphs.remediation.changelog import (
+    _tag_version,
+    _tag_in_window,
+    fetch_release_notes,
+    fetch_release_notes_between,
+)
 
 
 class FakeContainer:
@@ -70,3 +75,57 @@ async def test_fetch_release_notes_safely_quotes_package_name():
         "eslint" in executed_command and "rm -rf" not in executed_command
     )
     assert result["available"] is False
+
+
+def test_tag_version_strips_v_prefix():
+    assert _tag_version("v4.17.21") == (4, 17, 21)
+    assert _tag_version("4.17.21") == (4, 17, 21)
+    assert _tag_version("release-1.2") is None
+
+
+def test_tag_in_window_half_open():
+    # (1.0.0, 2.0.0]: excludes current, includes target
+    assert _tag_in_window("v1.0.0", (1, 0, 0), (2, 0, 0)) is False
+    assert _tag_in_window("v1.5.0", (1, 0, 0), (2, 0, 0)) is True
+    assert _tag_in_window("v2.0.0", (1, 0, 0), (2, 0, 0)) is True
+    assert _tag_in_window("v2.0.1", (1, 0, 0), (2, 0, 0)) is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_between_filters_to_window():
+    full = {
+        "package_name": "lodash",
+        "available": True,
+        "repository": "lodash/lodash",
+        "releases": [
+            {"tag": "v2.0.0", "name": "2", "body": "b"},
+            {"tag": "v1.5.0", "name": "1.5", "body": "b"},
+            {"tag": "v1.0.0", "name": "1", "body": "b"},
+        ],
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.fetch_release_notes",
+        AsyncMock(return_value=full),
+    ):
+        out = await fetch_release_notes_between(
+            "lodash", "1.0.0", "2.0.0", "/tmp/repo", None, "img"
+        )
+    tags = [r["tag"] for r in out["releases"]]
+    assert tags == ["v2.0.0", "v1.5.0"]  # v1.0.0 excluded (half-open)
+
+
+@pytest.mark.asyncio
+async def test_fetch_between_unparseable_bounds_returns_unfiltered():
+    full = {
+        "package_name": "lodash",
+        "available": True,
+        "releases": [{"tag": "v1.5.0", "name": "x", "body": "b"}],
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.fetch_release_notes",
+        AsyncMock(return_value=full),
+    ):
+        out = await fetch_release_notes_between(
+            "lodash", None, None, "/tmp/repo", None, "img"
+        )
+    assert out["releases"] == full["releases"]
