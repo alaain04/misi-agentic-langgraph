@@ -34,46 +34,90 @@ def _prep(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_root_deepagent_node_dispatches_agent_for_seeded_targets():
-    prep = _prep()
+async def test_root_node_produces_plan_and_remediation_per_target():
+    from src.models.remediation import RemediationTarget
+
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"lodash": "4.17.15"}, "packages": {}},
+    )
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=prep)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
-    with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.nodes._root_deep_agent"
-    ) as mock_agent:
-        mock_agent.ainvoke = AsyncMock(
-            return_value={
-                "remediations": {
-                    "lodash": {
-                        "target_dep": "lodash",
-                        "addresses": ["lodash"],
-                        "status": "skipped",
-                    }
-                },
-                "requires_edges": {},
-            }
-        )
-        result = await root_deepagent_node(
+    targets = {
+        "lodash": RemediationTarget(
+            target_dep="lodash",
+            addresses=["lodash"],
+            current_range="^4.17.15",
+            tier="r1",
+        ).model_dump()
+    }
+    investigations = {
+        "lodash": {
+            "target_dep": "lodash",
+            "dependents": [],
+            "call_sites": [],
+            "release": {
+                "from_version": "4.17.15",
+                "to_version": "4.17.21",
+                "migration_needed": False,
+                "migration_guide": "",
+                "breaking_changes": [],
+            },
+        }
+    }
+
+    committed = {
+        "lodash": {
+            "target_dep": "lodash",
+            "tier_hint": "r1",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "bump",
+                    "rationale": "patch",
+                    "to_range": "^4.17.21",
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    async def _fake_invoke(initial_state, run_config):
+        return {"migration_plans": committed, "remediations": {}, "requires_edges": {}}
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent",
+            return_value=MagicMock(ainvoke=AsyncMock(side_effect=_fake_invoke)),
+        ),
+    ):
+        out = await root_deepagent_node(
             {
-                "job_id": "job-1",
-                "prep_result_id": "prep-1",
-                "analysis_result_id": "a-1",
-                "concern": "c",
-                "targets": {
-                    "lodash": {
-                        "target_dep": "lodash",
-                        "addresses": ["lodash"],
-                        "current_range": "^4.17.11",
-                    }
-                },
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": investigations,
             },
             config,
         )
 
-    assert result["remediations"]["lodash"]["target_dep"] == "lodash"
-    mock_agent.ainvoke.assert_awaited_once()
+    assert out["migration_plans"]["lodash"]["tier_hint"] == "r1"
+    rem = out["remediations"]["lodash"]
+    assert rem["target_dep"] == "lodash"
+    assert rem["to_range"] == "^4.17.21"
+    assert rem["plan"]["tasks"][0]["kind"] == "bump"
 
 
 @pytest.mark.asyncio
@@ -93,7 +137,12 @@ async def test_root_deepagent_node_no_targets_short_circuits():
         },
         config,
     )
-    assert result["remediations"] == {}
+    assert result == {
+        "targets": {},
+        "remediations": {},
+        "requires_edges": {},
+        "migration_plans": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -129,11 +178,23 @@ async def test_root_deepagent_node_retry_synthesizes_unknown_companion_target():
         },
     }
 
-    with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.nodes._root_deep_agent"
-    ) as mock_agent:
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent"
+        ) as mock_build_agent,
+    ):
+        mock_agent = mock_build_agent.return_value
         mock_agent.ainvoke = AsyncMock(
-            return_value={"remediations": {}, "requires_edges": {}}
+            return_value={
+                "remediations": {},
+                "requires_edges": {},
+                "migration_plans": {},
+            }
         )
         result = await root_deepagent_node(state, config)
         seeded_state = mock_agent.ainvoke.await_args.args[0]
@@ -143,6 +204,7 @@ async def test_root_deepagent_node_retry_synthesizes_unknown_companion_target():
         "target_dep": "companion-dep",
         "addresses": [],
         "current_range": "^2.0.0",
+        "tier": None,
     }
     # Known target keeps its real addresses/current_range untouched.
     assert seeded_state["targets"]["lodash"]["addresses"] == ["lodash"]
@@ -153,18 +215,27 @@ async def test_root_deepagent_node_retry_synthesizes_unknown_companion_target():
 async def test_root_deepagent_node_recursion_limit_returns_graceful_fallback():
     """Spec D10: every bound (recursion limit, correction-round cap, group
     cap) must fail honestly instead of crashing the job. A real
-    GraphRecursionError from the root deep agent's ainvoke must not
+    GraphRecursionError from the planning agent's ainvoke must not
     propagate -- it must degrade to the same shape root_deepagent_node
-    already returns on other paths, with remediations/requires_edges wiped
-    since nothing from the aborted run is trustworthy."""
+    already returns on other paths, with remediations/requires_edges/
+    migration_plans wiped since nothing from the aborted run is
+    trustworthy."""
     prep = _prep()
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=prep)
     config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
 
-    with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.nodes._root_deep_agent"
-    ) as mock_agent:
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent"
+        ) as mock_build_agent,
+    ):
+        mock_agent = mock_build_agent.return_value
         mock_agent.ainvoke = AsyncMock(
             side_effect=GraphRecursionError("Recursion limit reached")
         )
@@ -187,6 +258,7 @@ async def test_root_deepagent_node_recursion_limit_returns_graceful_fallback():
 
     assert result["remediations"] == {}
     assert result["requires_edges"] == {}
+    assert result["migration_plans"] == {}
     assert "lodash" in result["targets"]
 
 
