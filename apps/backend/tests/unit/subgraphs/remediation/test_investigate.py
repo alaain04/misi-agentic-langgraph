@@ -15,7 +15,10 @@ from src.models.remediation import ReleaseDigest, RemediationTarget, TargetInves
 
 @pytest.mark.asyncio
 async def test_investigate_release_returns_digest_from_llm():
-    notes = {"available": True, "releases": [{"tag": "v2.0.0", "body": "removed foo()"}]}
+    notes = {
+        "available": True,
+        "releases": [{"tag": "v2.0.0", "body": "removed foo()"}],
+    }
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
         return_value=ReleaseDigest(

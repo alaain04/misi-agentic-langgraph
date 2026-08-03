@@ -48,20 +48,21 @@ async def investigate_release(
         # If release notes fetch failed, return conservative digest without LLM.
         if not notes.get("available"):
             logger.warning(
-                "investigate_release: notes unavailable for %s (%s->%s): %s; assuming breaking",
+                "investigate_release: notes unavailable for %s (%s->%s): %s; "
+                "assuming breaking",
                 target_dep,
                 from_version,
                 to_version,
                 notes.get("error"),
             )
+            error = notes.get("error")
+            reason = f"release notes unavailable, assuming breaking: {error}"
             return ReleaseDigest(
                 from_version=from_version,
                 to_version=to_version,
                 migration_needed=True,
                 migration_guide="",
-                breaking_changes=[
-                    f"release notes unavailable, assuming breaking: {notes.get('error')}"
-                ],
+                breaking_changes=[reason],
             )
         structured = _llm.with_structured_output(
             ReleaseDigest, method="function_calling"
@@ -95,12 +96,13 @@ async def investigate_release(
             to_version,
             exc,
         )
+        reason = f"release investigation failed, assuming breaking: {exc}"
         return ReleaseDigest(
             from_version=from_version,
             to_version=to_version,
             migration_needed=True,
             migration_guide="",
-            breaking_changes=[f"release investigation failed, assuming breaking: {exc}"],
+            breaking_changes=[reason],
         )
 
 
