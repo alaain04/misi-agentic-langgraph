@@ -88,7 +88,9 @@ async def test_classify_targets_node_carries_tier_hint_no_r3_settle():
     )
     analysis = MagicMock(
         findings=[
-            FindingNote(dep_name="lodash", severity="high", description="d", evidence=[]),
+            FindingNote(
+                dep_name="lodash", severity="high", description="d", evidence=[]
+            ),
             FindingNote(
                 dep_name="left-pad", severity="high", description="d2", evidence=[]
             ),
