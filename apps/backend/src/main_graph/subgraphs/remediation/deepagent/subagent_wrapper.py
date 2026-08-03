@@ -4,6 +4,8 @@ replacement_migrator is a Spec-A stub (real r3 is Spec B)."""
 
 from __future__ import annotations
 
+from typing import NotRequired
+
 from deepagents import CompiledSubAgent, create_deep_agent
 from deepagents.backends import FilesystemBackend
 from langchain_core.runnables import RunnableConfig
@@ -62,6 +64,7 @@ def build_codemod_subagent(
 
 class _StubState(TypedDict):
     messages: list
+    structured_response: NotRequired[RemediationOutcome]
 
 
 async def _replacement_stub(state: _StubState, config: RunnableConfig) -> dict:
