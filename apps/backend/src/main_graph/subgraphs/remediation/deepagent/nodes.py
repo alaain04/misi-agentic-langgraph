@@ -236,10 +236,15 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
     plans = result.get("migration_plans") or {}
     outcomes = result.get("outcomes") or {}
     remediations = _remediations_from_plans(targets, plans, outcomes)
+    requires_edges = {
+        dep: plan["requires"]
+        for dep, plan in plans.items()
+        if plan.get("requires")
+    }
     return {
         "targets": targets,
         "remediations": remediations,
-        "requires_edges": result.get("requires_edges") or {},
+        "requires_edges": requires_edges,
         "migration_plans": plans,
     }
 

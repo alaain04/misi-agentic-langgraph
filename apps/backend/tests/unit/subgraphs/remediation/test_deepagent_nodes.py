@@ -131,6 +131,84 @@ async def test_root_node_produces_plan_and_remediation_per_target():
 
 
 @pytest.mark.asyncio
+async def test_root_node_derives_requires_edges_from_committed_plan():
+    """The planning agent never writes a `requires_edges` state channel --
+    only `commit_plan` writing `migration_plans`, where each MigrationPlan
+    carries its own `requires` field. root_deepagent_node must derive
+    requires_edges from that field itself (spec D7 companion coupling),
+    not read a `requires_edges` key off the agent's result."""
+    from src.models.remediation import RemediationTarget
+
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"eslint": "^8.0.0"}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    targets = {
+        "eslint": RemediationTarget(
+            target_dep="eslint",
+            addresses=["eslint"],
+            current_range="^8.0.0",
+            tier="r2",
+        ).model_dump()
+    }
+
+    committed = {
+        "eslint": {
+            "target_dep": "eslint",
+            "tier_hint": "r2",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "bump",
+                    "rationale": "companion coupling",
+                    "to_range": "^9.0.0",
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": ["companion-dep"],
+        }
+    }
+
+    async def _fake_invoke(initial_state, run_config):
+        return {
+            "migration_plans": committed,
+            "remediations": {},
+            "outcomes": {},
+        }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent",
+            return_value=MagicMock(ainvoke=AsyncMock(side_effect=_fake_invoke)),
+        ),
+    ):
+        out = await root_deepagent_node(
+            {
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": {},
+            },
+            config,
+        )
+
+    assert out["requires_edges"] == {"eslint": ["companion-dep"]}
+
+
+@pytest.mark.asyncio
 async def test_root_node_codemod_outcome_becomes_patch_remediation():
     from src.models.remediation import RemediationTarget
 

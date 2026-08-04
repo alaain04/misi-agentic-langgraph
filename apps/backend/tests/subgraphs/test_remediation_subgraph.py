@@ -38,14 +38,18 @@ file):
   agent is built fresh per `root_deepagent_node` call and only exposed
   through this one factory function. `_FakePlanningAgent` below stands in
   for its return value: something with an `ainvoke(state, config)` that
-  returns `{"migration_plans": ..., "outcomes": ..., "requires_edges":
-  ...}` shaped exactly like `root_deepagent_node` expects (see
-  deepagent/nodes.py). A `plan_for(dep, target_dict)` callback decides
-  each round's committed plan/outcome/requires per target actually present
-  in that round's `state["targets"]`, so one instance transparently drives
-  correction-round retries and multi-target rounds without any fake chat
-  model, `task()` dispatch, or nested `CompiledSubAgent` machinery -- all
-  of which no longer exists in this architecture.
+  returns `{"migration_plans": ..., "outcomes": ...}` shaped exactly like
+  `root_deepagent_node` expects (see deepagent/nodes.py). In the real
+  pipeline nothing writes a `requires_edges` state channel -- the
+  planning agent only commits `MigrationPlan`s via `commit_plan`, and
+  `root_deepagent_node` derives `requires_edges` itself from each
+  committed plan's `requires` field. A `plan_for(dep, target_dict)`
+  callback decides each round's committed plan/outcome per target
+  actually present in that round's `state["targets"]`, so one instance
+  transparently drives correction-round retries and multi-target rounds
+  without any fake chat model, `task()` dispatch, or nested
+  `CompiledSubAgent` machinery -- all of which no longer exists in this
+  architecture.
 
 DROPPED from the old suite (both tested machinery this rework removes
 entirely):
@@ -159,10 +163,14 @@ class _FakePlanningAgent:
     `root_deepagent_node` calls it through: an object with an
     `ainvoke(state, config)` coroutine. `plan_for(dep, target_dict)` is
     invoked once per target present in that round's `state["targets"]` and
-    returns a dict with a required "plan" (a MigrationPlan.model_dump())
-    and optional "outcome" (a RemediationOutcome.model_dump()) and
-    "requires" (list[str]) -- exactly the pieces `root_deepagent_node`
-    reads off a real agent's result. `self.calls` records every round's
+    returns a dict with a required "plan" (a MigrationPlan.model_dump(),
+    whose own "requires" field carries any companion-coupling signal) and
+    an optional "outcome" (a RemediationOutcome.model_dump()) -- exactly
+    the pieces `root_deepagent_node` reads off a real agent's result. It
+    does NOT return a top-level "requires_edges" key: the real planning
+    agent never writes one either, only `migration_plans`, and
+    `root_deepagent_node` derives `requires_edges` itself from each
+    committed plan's `requires` field. `self.calls` records every round's
     seeded state for assertions about how many rounds ran and what each
     round dispatched."""
 
@@ -174,18 +182,14 @@ class _FakePlanningAgent:
         self.calls.append(state)
         migration_plans: dict[str, dict] = {}
         outcomes: dict[str, dict] = {}
-        requires_edges: dict[str, list[str]] = {}
         for dep, target_dict in state["targets"].items():
             spec = self._plan_for(dep, target_dict)
             migration_plans[dep] = spec["plan"]
             if spec.get("outcome") is not None:
                 outcomes[dep] = spec["outcome"]
-            if spec.get("requires"):
-                requires_edges[dep] = spec["requires"]
         return {
             "migration_plans": migration_plans,
             "outcomes": outcomes,
-            "requires_edges": requires_edges,
         }
 
 
@@ -337,7 +341,9 @@ async def test_requires_signal_pulls_in_a_non_finding_companion(
     tmp_path, result_dao, subgraph_config
 ):
     """The eslint/eslint-plugin-react scenario from the spec: the planning
-    agent's plan for target A emits requires=["B"], B has no FindingNote,
+    agent commits target A's MigrationPlan with requires=["B"] (mirroring
+    the real commit_plan contract), root_deepagent_node derives
+    requires_edges from that field, B has no FindingNote,
     group_and_verify_gate routes the never-dispatched companion through a
     retry round, and both end up in ONE group/PR with B's
     Remediation.required_by == ["A"]."""
@@ -357,7 +363,6 @@ async def test_requires_signal_pulls_in_a_non_finding_companion(
                 "plan": _bump_plan(
                     "eslint", "^8.0.0", requires=["eslint-plugin-react"]
                 ),
-                "requires": ["eslint-plugin-react"],
             }
         if dep == "eslint-plugin-react":
             return {"plan": _bump_plan("eslint-plugin-react", "^7.20.1")}
