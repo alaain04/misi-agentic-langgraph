@@ -14,7 +14,12 @@ from src.main_graph.subgraphs.remediation.deepagent.nodes import (
     root_deepagent_node,
     route_after_group_verify,
 )
-from src.models.remediation import RemediationOutcome, VerificationResult
+from src.models.remediation import (
+    MigrationPlan,
+    Remediation,
+    RemediationOutcome,
+    VerificationResult,
+)
 from src.models.results import PrepResult
 
 
@@ -715,6 +720,37 @@ async def test_group_and_verify_gate_defers_whole_group_when_member_needs_migrat
         "coupled to a dependency migration (r3) target - deferred"
     )
     assert result.get("retry_targets") == []
+
+
+@pytest.mark.asyncio
+async def test_group_verify_preserves_plan_field():
+    plan = MigrationPlan(target_dep="lodash", tier_hint="r1", tasks=[])
+    rem = Remediation(
+        addresses=["lodash"], target_dep="lodash", strategy="bump",
+        to_range="^4.17.21", plan=plan,
+    ).model_dump()
+
+    prep = MagicMock(
+        repo_path="/tmp/repo", docker_image="img", detected_package_manager="npm"
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    green = VerificationResult(
+        installed=True, built=True, tested=True, finding_resolved=True
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        AsyncMock(return_value=green),
+    ):
+        out = await group_and_verify_gate(
+            {"prep_result_id": "p", "remediations": {"lodash": rem},
+             "requires_edges": {}, "targets": {"lodash": {}}},
+            config,
+        )
+    assert out["remediations"]["lodash"]["status"] == "fixed"
+    assert out["remediations"]["lodash"]["plan"]["target_dep"] == "lodash"
 
 
 @pytest.mark.asyncio
