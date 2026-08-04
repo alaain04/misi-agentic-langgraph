@@ -19,7 +19,6 @@ from src.main_graph.subgraphs.remediation.deepagent.state import (
 )
 from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
     build_codemod_subagent,
-    build_replacement_subagent,
 )
 from src.main_graph.subgraphs.remediation.deepagent.tools import (
     make_commit_plan_tool,
@@ -29,6 +28,7 @@ from src.main_graph.subgraphs.remediation.workspace import copy_repo
 from src.models.remediation import (
     MigrationPlan,
     Remediation,
+    RemediationOutcome,
     RemediationResult,
     RemediationTarget,
 )
@@ -50,11 +50,11 @@ For EACH target you MUST:
    `bump` + `codemod` task(s) when the release digest says migration_needed;
    a `replace` task only when the tier hint is r3. Put companion deps in
    `requires`.
-2. Then carry out the plan: dispatch codemod_adapter for codemod tasks
-   (give it the migration guide and the files) and replacement_migrator for
-   replace tasks. Do NOT edit code yourself. Bump tasks need no dispatch --
-   they are applied deterministically after you finish.
-Stop once every target has a committed plan and its non-bump tasks are
+2. Then dispatch codemod_adapter for every codemod task (give it the
+   dependency name, the migration guide, and the affected files). Do NOT
+   edit code yourself. Bump and replace tasks need no dispatch -- the root
+   applies bumps deterministically and defers replace tasks.
+Stop once every target has a committed plan and its codemod tasks are
 dispatched."""
 
 
@@ -64,9 +64,6 @@ def _build_planning_agent(work_dir, container, docker_image, package_manager):
         tools=[make_commit_plan_tool()],
         subagents=[
             build_codemod_subagent(
-                work_dir, container, docker_image, package_manager
-            ),
-            build_replacement_subagent(
                 work_dir, container, docker_image, package_manager
             ),
         ],
@@ -109,7 +106,7 @@ def _format_open_targets(
 def _remediations_from_plans(
     targets: dict[str, dict],
     plans: dict[str, dict],
-    agent_remediations: dict[str, dict],
+    outcomes: dict[str, dict],
 ) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for dep, target_dict in targets.items():
@@ -125,12 +122,42 @@ def _remediations_from_plans(
             ).model_dump()
             continue
         plan = MigrationPlan(**plan_dict)
-        # A codemod/replace subagent already emitted a Remediation into
-        # `remediations`; enrich it with the plan. Otherwise this is a
-        # bump-only plan -- synthesize the bump Remediation deterministically.
-        if dep in agent_remediations:
-            rem = Remediation(**agent_remediations[dep])
-            rem.plan = plan
+        kinds = {t.kind for t in plan.tasks}
+        if "replace" in kinds:
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                strategy="replace",
+                from_range=target.current_range,
+                status="skipped",
+                skip_reason="dependency replacement deferred (Spec B)",
+                plan=plan,
+            )
+        elif dep in outcomes:
+            outcome = RemediationOutcome(**outcomes[dep])
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                strategy=outcome.strategy,
+                from_range=target.current_range,
+                to_range=outcome.to_range,
+                replacement_dep=outcome.replacement_dep,
+                replacement_range=outcome.replacement_range,
+                migration_plan=outcome.migration_plan,
+                patch=outcome.code_diff,
+                status="skipped",  # provisional; gate sets real status
+                skip_reason=outcome.skip_reason,
+                plan=plan,
+            )
+        elif "codemod" in kinds:
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                from_range=target.current_range,
+                status="failed",
+                skip_reason="codemod produced no outcome",
+                plan=plan,
+            )
         else:
             bump = next((t for t in plan.tasks if t.kind == "bump"), None)
             rem = Remediation(
@@ -177,6 +204,7 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
             "remediations": {},
             "requires_edges": {},
             "migration_plans": {},
+            "outcomes": {},
         }
         run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
         try:
@@ -206,8 +234,8 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
         shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
 
     plans = result.get("migration_plans") or {}
-    agent_remediations = result.get("remediations") or {}
-    remediations = _remediations_from_plans(targets, plans, agent_remediations)
+    outcomes = result.get("outcomes") or {}
+    remediations = _remediations_from_plans(targets, plans, outcomes)
     return {
         "targets": targets,
         "remediations": remediations,

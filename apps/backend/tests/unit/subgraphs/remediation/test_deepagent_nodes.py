@@ -14,7 +14,7 @@ from src.main_graph.subgraphs.remediation.deepagent.nodes import (
     root_deepagent_node,
     route_after_group_verify,
 )
-from src.models.remediation import VerificationResult
+from src.models.remediation import RemediationOutcome, VerificationResult
 from src.models.results import PrepResult
 
 
@@ -90,7 +90,12 @@ async def test_root_node_produces_plan_and_remediation_per_target():
     }
 
     async def _fake_invoke(initial_state, run_config):
-        return {"migration_plans": committed, "remediations": {}, "requires_edges": {}}
+        return {
+            "migration_plans": committed,
+            "remediations": {},
+            "requires_edges": {},
+            "outcomes": {},
+        }
 
     with (
         patch(
@@ -118,6 +123,244 @@ async def test_root_node_produces_plan_and_remediation_per_target():
     assert rem["target_dep"] == "lodash"
     assert rem["to_range"] == "^4.17.21"
     assert rem["plan"]["tasks"][0]["kind"] == "bump"
+
+
+@pytest.mark.asyncio
+async def test_root_node_codemod_outcome_becomes_patch_remediation():
+    from src.models.remediation import RemediationTarget
+
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"lodash": "4.17.15"}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    targets = {
+        "lodash": RemediationTarget(
+            target_dep="lodash",
+            addresses=["lodash"],
+            current_range="^4.17.15",
+            tier="r2",
+        ).model_dump()
+    }
+
+    committed = {
+        "lodash": {
+            "target_dep": "lodash",
+            "tier_hint": "r2",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "codemod",
+                    "rationale": "breaking change",
+                    "to_range": "^5.0.0",
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+    }
+    outcome = RemediationOutcome(
+        strategy="bump_with_codemod",
+        to_range="^5.0.0",
+        code_diff="DIFF",
+        status="skipped",
+    ).model_dump()
+
+    async def _fake_invoke(initial_state, run_config):
+        return {
+            "migration_plans": committed,
+            "remediations": {},
+            "requires_edges": {},
+            "outcomes": {"lodash": outcome},
+        }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent",
+            return_value=MagicMock(ainvoke=AsyncMock(side_effect=_fake_invoke)),
+        ),
+    ):
+        out = await root_deepagent_node(
+            {
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": {},
+            },
+            config,
+        )
+
+    rem = out["remediations"]["lodash"]
+    assert rem["patch"] == "DIFF"
+    assert rem["to_range"] == "^5.0.0"
+    assert rem["strategy"] == "bump_with_codemod"
+    assert rem["plan"]["tasks"][0]["kind"] == "codemod"
+
+
+@pytest.mark.asyncio
+async def test_root_node_replace_plan_settles_deferred():
+    from src.models.remediation import RemediationTarget
+
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"old-dep": "1.0.0"}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    targets = {
+        "old-dep": RemediationTarget(
+            target_dep="old-dep",
+            addresses=["old-dep"],
+            current_range="^1.0.0",
+            tier="r3",
+        ).model_dump()
+    }
+
+    committed = {
+        "old-dep": {
+            "target_dep": "old-dep",
+            "tier_hint": "r3",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "replace",
+                    "rationale": "unmaintained",
+                    "to_range": None,
+                    "files": [],
+                    "replacement_dep": "new-dep",
+                    "replacement_range": "^1.0.0",
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    async def _fake_invoke(initial_state, run_config):
+        return {
+            "migration_plans": committed,
+            "remediations": {},
+            "requires_edges": {},
+            "outcomes": {},
+        }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent",
+            return_value=MagicMock(ainvoke=AsyncMock(side_effect=_fake_invoke)),
+        ),
+    ):
+        out = await root_deepagent_node(
+            {
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": {},
+            },
+            config,
+        )
+
+    rem = out["remediations"]["old-dep"]
+    assert rem["strategy"] == "replace"
+    assert rem["status"] == "skipped"
+    assert "deferred" in rem["skip_reason"]
+    assert rem["plan"]["tasks"][0]["kind"] == "replace"
+
+
+@pytest.mark.asyncio
+async def test_root_node_codemod_without_outcome_fails_honestly():
+    from src.models.remediation import RemediationTarget
+
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"lodash": "4.17.15"}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    targets = {
+        "lodash": RemediationTarget(
+            target_dep="lodash",
+            addresses=["lodash"],
+            current_range="^4.17.15",
+            tier="r2",
+        ).model_dump()
+    }
+
+    committed = {
+        "lodash": {
+            "target_dep": "lodash",
+            "tier_hint": "r2",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "codemod",
+                    "rationale": "breaking change",
+                    "to_range": "^5.0.0",
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    async def _fake_invoke(initial_state, run_config):
+        return {
+            "migration_plans": committed,
+            "remediations": {},
+            "requires_edges": {},
+            "outcomes": {},
+        }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes."
+            "_build_planning_agent",
+            return_value=MagicMock(ainvoke=AsyncMock(side_effect=_fake_invoke)),
+        ),
+    ):
+        out = await root_deepagent_node(
+            {
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": {},
+            },
+            config,
+        )
+
+    rem = out["remediations"]["lodash"]
+    assert rem["status"] == "failed"
+    assert "codemod produced no outcome" in rem["skip_reason"]
 
 
 @pytest.mark.asyncio

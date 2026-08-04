@@ -4,17 +4,19 @@ replacement_migrator is a Spec-A stub (real r3 is Spec B)."""
 
 from __future__ import annotations
 
-from typing import NotRequired
+from typing import Annotated, NotRequired
 
-from deepagents import CompiledSubAgent, create_deep_agent
+from deepagents import CompiledSubAgent, DeepAgentState, create_deep_agent
 from deepagents.backends import FilesystemBackend
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
 from src.domain.ports.container_run_port import ContainerRunPort
+from src.main_graph.subgraphs.remediation.deepagent.state import _merge_replace
 from src.main_graph.subgraphs.remediation.deepagent.tools import (
     make_bump_dependency_tool,
+    make_commit_outcome_tool,
     make_read_release_notes_tool,
     make_verify_tool,
 )
@@ -23,13 +25,26 @@ from src.main_graph.tools.search_code import make_search_code_tool
 from src.models.remediation import RemediationOutcome
 from src.utils.llm import Model, get_llm
 
+
+class _CodemodState(DeepAgentState):
+    outcomes: Annotated[dict[str, dict], _merge_replace]
+
+
 _CODEMOD_PROMPT = """\
 You adapt this Node.js project's own source to a dependency upgrade that has
-a known breaking change. You are given the migration guide and the specific
-files that use the dependency. Edit ONLY what the guide requires, then call
-verify. Iterate until verify is green or you conclude there is no safe fix.
-Finish with a structured RemediationOutcome including the unified diff of your
-edits in code_diff and a short summary."""
+a known breaking change. The dependency you must work on is named in your
+task description. You are given the migration guide and the files that use
+it. Edit ONLY what the guide requires, then call verify. Iterate until verify
+is green or you conclude there is no safe fix.
+
+Finish by calling commit_outcome with:
+- target_dep: the dependency name from your task description
+- outcome: a RemediationOutcome with strategy (usually "bump_with_codemod"),
+  to_range (the version you bumped to), code_diff (the unified diff of the
+  source files you edited -- NOT package.json), a short summary, and
+  status/skip_reason if you could not produce a safe fix.
+commit_outcome is the only thing that ships your work; a summary alone is
+discarded."""
 
 
 def build_codemod_subagent(
@@ -44,13 +59,14 @@ def build_codemod_subagent(
         make_search_code_tool(work_dir, container, docker_image),
         make_bump_dependency_tool(work_dir),
         make_verify_tool(work_dir, container, docker_image, package_manager, []),
+        make_commit_outcome_tool(),
     ]
     agent = create_deep_agent(
         model=get_llm(Model.GPT_5_4_MINI),
         tools=tools,
         system_prompt=_CODEMOD_PROMPT,
         backend=FilesystemBackend(root_dir=work_dir, virtual_mode=True),
-        response_format=RemediationOutcome,
+        state_schema=_CodemodState,
     )
     return {
         "name": "codemod_adapter",
