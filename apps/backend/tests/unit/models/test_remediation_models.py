@@ -2,8 +2,8 @@ from src.models.remediation import (
     CodeChange,
     MigrationPlan,
     MigrationTask,
-    Remediation,
     ReleaseDigest,
+    Remediation,
     RemediationOutcome,
     RemediationResult,
     RemediationTarget,
@@ -106,7 +106,9 @@ def test_target_investigation_round_trip():
         target_dep="lodash",
         dependents=["a"],
         call_sites=["src/x.ts"],
-        release=ReleaseDigest(from_version=None, to_version=None, migration_needed=False),
+        release=ReleaseDigest(
+            from_version=None, to_version=None, migration_needed=False
+        ),
     )
     assert TargetInvestigation(**inv.model_dump()).call_sites == ["src/x.ts"]
 

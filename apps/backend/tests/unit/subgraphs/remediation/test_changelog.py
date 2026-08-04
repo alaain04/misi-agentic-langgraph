@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.main_graph.subgraphs.remediation.changelog import (
-    _tag_version,
     _tag_in_window,
+    _tag_version,
     fetch_release_notes,
     fetch_release_notes_between,
 )
