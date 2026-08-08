@@ -179,7 +179,7 @@ async def test_replay_and_verify_group_keeps_workdir_when_requested(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_replay_and_verify_group_cleans_up_on_apply_failure_even_if_keep_requested(
+async def test_replay_and_verify_group_cleans_up_on_apply_failure_if_keep_requested(
     monkeypatch,
 ):
     mkdtemp_root = tempfile.mkdtemp(prefix="remediation-")

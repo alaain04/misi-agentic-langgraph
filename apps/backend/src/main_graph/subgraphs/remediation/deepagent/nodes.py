@@ -580,7 +580,7 @@ async def pr_and_persist_node(state: RemediationState, config: RunnableConfig) -
 
     for work_dir, deps in by_workdir.items():
         members = [remediations[dep] for dep in deps if dep in remediations]
-        if not members:
+        if not members or git_pr is None:
             shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
             continue
         try:

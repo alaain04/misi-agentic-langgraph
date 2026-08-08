@@ -657,7 +657,9 @@ async def test_group_and_verify_gate_requests_retry_under_cap():
     }
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
-        AsyncMock(return_value=(VerificationResult(installed=True, tested=False), None)),
+        AsyncMock(
+            return_value=(VerificationResult(installed=True, tested=False), None)
+        ),
     ):
         result = await group_and_verify_gate(state, config)
 
