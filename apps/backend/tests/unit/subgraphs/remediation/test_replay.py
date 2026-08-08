@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -101,12 +102,13 @@ async def test_replay_and_verify_group_runs_full_verification(monkeypatch):
     audit = json.dumps({"vulnerabilities": {}})
     container = FakeContainer([(0, "", ""), (0, audit, "")])
 
-    result = await replay_and_verify_group(
+    result, kept_dir = await replay_and_verify_group(
         [_bump()], "/original/repo", container, "node:lts-alpine", "npm"
     )
 
     assert result.installed is True
     assert result.finding_resolved is True
+    assert kept_dir is None
 
     # Verify the correct directory was cleaned up (the mkdtemp_root, not
     # something too broad) - this tests that replay_and_verify_group's cleanup
@@ -129,15 +131,79 @@ async def test_replay_and_verify_group_reports_apply_failure(monkeypatch):
         "src.main_graph.subgraphs.remediation.deepagent.replay.copy_repo",
         lambda src: work,
     )
-    result = await replay_and_verify_group(
+    result, kept_dir = await replay_and_verify_group(
         [_bump()], "/original/repo", FakeContainer([]), "node:lts-alpine", "npm"
     )
     assert result.installed is False
     assert "failed to apply" in result.logs_snippet
+    assert kept_dir is None
 
     # Verify the correct directory was cleaned up (the mkdtemp_root, not
     # something too broad) - this tests that replay_and_verify_group's cleanup
     # correctly removes the parent directory created by copy_repo
+    assert not os.path.exists(mkdtemp_root)
+
+
+@pytest.mark.asyncio
+async def test_replay_and_verify_group_keeps_workdir_when_requested(monkeypatch):
+    mkdtemp_root = tempfile.mkdtemp(prefix="remediation-")
+    work = os.path.join(mkdtemp_root, "repo")
+    os.makedirs(work)
+
+    pkg_path = os.path.join(work, "package.json")
+    with open(pkg_path, "w") as f:
+        json.dump({"dependencies": {"lodash": "^4.17.11"}, "scripts": {}}, f)
+
+    monkeypatch.setattr(
+        "src.main_graph.subgraphs.remediation.deepagent.replay.copy_repo",
+        lambda src: work,
+    )
+    audit = json.dumps({"vulnerabilities": {}})
+    container = FakeContainer([(0, "", ""), (0, audit, "")])
+
+    result, kept_dir = await replay_and_verify_group(
+        [_bump()],
+        "/original/repo",
+        container,
+        "node:lts-alpine",
+        "npm",
+        keep_workdir=True,
+    )
+
+    assert result.installed is True
+    assert kept_dir == work
+    # keep_workdir=True means the caller owns cleanup now.
+    assert os.path.exists(mkdtemp_root)
+
+    shutil.rmtree(mkdtemp_root, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_replay_and_verify_group_cleans_up_on_apply_failure_even_if_keep_requested(
+    monkeypatch,
+):
+    mkdtemp_root = tempfile.mkdtemp(prefix="remediation-")
+    work = os.path.join(mkdtemp_root, "repo")
+    os.makedirs(work)
+
+    pkg_path = os.path.join(work, "package.json")
+    with open(pkg_path, "w") as f:
+        json.dump({"dependencies": {}}, f)
+
+    monkeypatch.setattr(
+        "src.main_graph.subgraphs.remediation.deepagent.replay.copy_repo",
+        lambda src: work,
+    )
+    result, kept_dir = await replay_and_verify_group(
+        [_bump()],
+        "/original/repo",
+        FakeContainer([]),
+        "node:lts-alpine",
+        "npm",
+        keep_workdir=True,
+    )
+    assert result.installed is False
+    assert kept_dir is None
     assert not os.path.exists(mkdtemp_root)
 
 

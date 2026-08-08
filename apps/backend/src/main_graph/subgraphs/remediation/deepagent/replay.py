@@ -72,21 +72,37 @@ async def replay_and_verify_group(
     container: ContainerRunPort,
     docker_image: str,
     package_manager: str,
-) -> VerificationResult:
+    keep_workdir: bool = False,
+) -> tuple[VerificationResult, str | None]:
     """The deterministic backstop (spec D6): replay a settled group's
     changes onto a fresh clean clone and re-run full verification from
-    scratch. Never trusts any member's own self-reported status."""
+    scratch. Never trusts any member's own self-reported status.
+
+    When keep_workdir is True and the change applies cleanly, the working
+    copy is left on disk instead of deleted -- its install step has already
+    regenerated the lockfile against the bumped package.json, so it is
+    ready to ship as-is. The second element of the return tuple is that
+    path (or None when nothing was kept); the caller then owns its
+    cleanup. A failed apply is always cleaned up here regardless of
+    keep_workdir, since there is nothing usable to keep."""
     work_dir = copy_repo(base_repo_path)
+    keep = False
     try:
         if not await apply_group_changes(work_dir, members):
-            return VerificationResult(
-                logs_snippet="one or more changes failed to apply cleanly"
+            return (
+                VerificationResult(
+                    logs_snippet="one or more changes failed to apply cleanly"
+                ),
+                None,
             )
         targeted = sorted(
             {dep for m in members for dep in [m.target_dep, *m.addresses]}
         )
-        return await verify_working_copy(
+        result = await verify_working_copy(
             work_dir, container, docker_image, package_manager, targeted
         )
+        keep = keep_workdir
+        return result, (work_dir if keep else None)
     finally:
-        shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
+        if not keep:
+            shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
