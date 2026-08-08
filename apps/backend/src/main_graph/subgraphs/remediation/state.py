@@ -18,5 +18,6 @@ class RemediationState(TypedDict):
     migration_plans: NotRequired[Annotated[dict[str, dict], _merge_replace]]
     remediations: NotRequired[Annotated[dict[str, dict], _merge_replace]]
     requires_edges: NotRequired[Annotated[dict[str, list], _merge_replace]]
+    verified_workdirs: NotRequired[Annotated[dict[str, str], _merge_replace]]
     retry_targets: NotRequired[list[str]]
     correction_rounds: NotRequired[int]

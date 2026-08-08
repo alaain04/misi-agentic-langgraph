@@ -304,6 +304,8 @@ async def group_and_verify_gate(
     svc = get_services(config)
     dao = svc["result_dao"]
     container = svc["container"]
+    consent = bool(svc.get("remediate"))
+    git_pr = svc.get("git_pr")
     prep = await dao.get_prep(state["prep_result_id"])
 
     remediations: dict[str, dict] = dict(state.get("remediations") or {})
@@ -320,6 +322,8 @@ async def group_and_verify_gate(
 
     settled: dict[str, dict] = {}
     retry_targets: list[str] = []
+    verified_workdirs: dict[str, str] = {}
+    keep_workdir = consent and bool(git_pr)
 
     for group in groups[:_MAX_GROUPS]:
         members_dicts = [remediations[dep] for dep in group if dep in remediations]
@@ -366,14 +370,21 @@ async def group_and_verify_gate(
             continue
 
         members = [Remediation(**m) for m in members_dicts]
-        verification = await replay_and_verify_group(
+        verification, work_dir = await replay_and_verify_group(
             members,
             prep.repo_path,
             container,
             prep.docker_image,
             prep.detected_package_manager,
+            keep_workdir=keep_workdir,
         )
         group_ok = _is_green(verification)
+        if work_dir:
+            if group_ok:
+                for dep in group:
+                    verified_workdirs[dep] = work_dir
+            else:
+                shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
         for member_dict, member in zip(members_dicts, members, strict=True):
             member_dict["verification"] = verification.model_dump()
             member_dict["required_by"] = sorted(
@@ -403,8 +414,13 @@ async def group_and_verify_gate(
             "remediations": settled,
             "retry_targets": retry_targets,
             "correction_rounds": correction_rounds + 1,
+            "verified_workdirs": verified_workdirs,
         }
-    return {"remediations": settled, "retry_targets": []}
+    return {
+        "remediations": settled,
+        "retry_targets": [],
+        "verified_workdirs": verified_workdirs,
+    }
 
 
 def route_after_group_verify(state: RemediationState) -> str:

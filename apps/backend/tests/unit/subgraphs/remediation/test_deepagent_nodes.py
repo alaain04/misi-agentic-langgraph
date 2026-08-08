@@ -621,7 +621,10 @@ async def test_group_and_verify_gate_marks_group_fixed_on_green_verification():
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
         AsyncMock(
-            return_value=VerificationResult(installed=True, finding_resolved=True)
+            return_value=(
+                VerificationResult(installed=True, finding_resolved=True),
+                None,
+            )
         ),
     ):
         result = await group_and_verify_gate(state, config)
@@ -654,7 +657,7 @@ async def test_group_and_verify_gate_requests_retry_under_cap():
     }
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
-        AsyncMock(return_value=VerificationResult(installed=True, tested=False)),
+        AsyncMock(return_value=(VerificationResult(installed=True, tested=False), None)),
     ):
         result = await group_and_verify_gate(state, config)
 
@@ -663,6 +666,145 @@ async def test_group_and_verify_gate_requests_retry_under_cap():
     assert "lodash" not in {
         k: v for k, v in result["remediations"].items() if v["status"] == "fixed"
     }
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_keeps_workdir_when_consent_and_git_pr_configured():
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    git_pr = MagicMock()
+    config = {
+        "configurable": {
+            "result_dao": dao,
+            "container": MagicMock(),
+            "remediate": True,
+            "git_pr": git_pr,
+        }
+    }
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"lodash": {}},
+        "remediations": {
+            "lodash": {
+                "id": "r1",
+                "addresses": ["lodash"],
+                "target_dep": "lodash",
+                "strategy": "bump",
+                "to_range": "^4.17.21",
+                "status": "skipped",
+            }
+        },
+        "requires_edges": {},
+        "correction_rounds": 0,
+    }
+    mock_replay = AsyncMock(
+        return_value=(
+            VerificationResult(installed=True, finding_resolved=True),
+            "/tmp/kept/repo",
+        )
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        mock_replay,
+    ):
+        result = await group_and_verify_gate(state, config)
+
+    assert mock_replay.await_args.kwargs["keep_workdir"] is True
+    assert result["verified_workdirs"] == {"lodash": "/tmp/kept/repo"}
+    assert result["remediations"]["lodash"]["status"] == "fixed"
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_does_not_request_keep_workdir_without_consent():
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {
+        "configurable": {
+            "result_dao": dao,
+            "container": MagicMock(),
+            "remediate": False,
+            "git_pr": None,
+        }
+    }
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"lodash": {}},
+        "remediations": {
+            "lodash": {
+                "id": "r1",
+                "addresses": ["lodash"],
+                "target_dep": "lodash",
+                "strategy": "bump",
+                "to_range": "^4.17.21",
+                "status": "skipped",
+            }
+        },
+        "requires_edges": {},
+        "correction_rounds": 0,
+    }
+    mock_replay = AsyncMock(
+        return_value=(
+            VerificationResult(installed=True, finding_resolved=True),
+            None,
+        )
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        mock_replay,
+    ):
+        result = await group_and_verify_gate(state, config)
+
+    assert mock_replay.await_args.kwargs["keep_workdir"] is False
+    assert result["verified_workdirs"] == {}
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_deletes_kept_workdir_when_verification_failed():
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {
+        "configurable": {
+            "result_dao": dao,
+            "container": MagicMock(),
+            "remediate": True,
+            "git_pr": MagicMock(),
+        }
+    }
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"lodash": {}},
+        "remediations": {
+            "lodash": {
+                "id": "r1",
+                "addresses": ["lodash"],
+                "target_dep": "lodash",
+                "strategy": "bump",
+                "to_range": "^4.17.21",
+                "status": "skipped",
+            }
+        },
+        "requires_edges": {},
+        "correction_rounds": deepagent_nodes._MAX_CORRECTION_ROUNDS,
+    }
+    # replay_and_verify_group only returns a path when it verified green
+    # (Task 1's contract) -- a failed verification with keep_workdir=True
+    # requested still comes back with kept_dir=None, so there is nothing
+    # for the gate to clean up here. This test instead pins the contract
+    # that a failing group's entry never reaches verified_workdirs.
+    mock_replay = AsyncMock(
+        return_value=(VerificationResult(installed=True, tested=False), None)
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        mock_replay,
+    ):
+        result = await group_and_verify_gate(state, config)
+
+    assert result["verified_workdirs"] == {}
+    assert result["remediations"]["lodash"]["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -747,7 +889,10 @@ async def test_group_and_verify_gate_settles_group_once_companion_dispatched():
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
         AsyncMock(
-            return_value=VerificationResult(installed=True, finding_resolved=True)
+            return_value=(
+                VerificationResult(installed=True, finding_resolved=True),
+                None,
+            )
         ),
     ):
         result = await group_and_verify_gate(state, config)
@@ -831,7 +976,7 @@ async def test_group_verify_preserves_plan_field():
     )
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
-        AsyncMock(return_value=green),
+        AsyncMock(return_value=(green, None)),
     ):
         out = await group_and_verify_gate(
             {
