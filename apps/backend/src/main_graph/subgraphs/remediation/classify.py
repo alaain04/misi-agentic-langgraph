@@ -1,8 +1,7 @@
 """Classifies each remediation target into a tier (r1/r2/r3) from its
 GitHub release notes alone, before the expensive per-target investigate-
-and-edit subagent ever runs. r3 (dependency migration) targets are settled
-directly by classify_targets_node and never dispatched -- see
-docs/superpowers/specs/2026-08-02-remediation-tier-classification.md."""
+and-edit subagent ever runs. Tier is carried as a hint on each target --
+see docs/superpowers/specs/2026-08-02-remediation-tier-classification.md."""
 
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ from src.main_graph.config import get_services
 from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes
 from src.main_graph.subgraphs.remediation.selection import select_remediation_targets
 from src.main_graph.subgraphs.remediation.state import RemediationState
-from src.models.remediation import Remediation, RemediationTarget
+from src.models.remediation import RemediationTarget
 from src.utils.config import settings
 from src.utils.llm import Model, get_llm
 
@@ -134,19 +133,8 @@ async def classify_targets_node(
     )
 
     targets: dict[str, dict] = {}
-    remediations: dict[str, dict] = {}
     for target, classification in zip(initial, classifications, strict=True):
-        if classification.tier == "r3":
-            remediation = Remediation(
-                target_dep=target.target_dep,
-                addresses=target.addresses,
-                from_range=target.current_range,
-                strategy="replace",
-                status="skipped",
-                skip_reason="dependency migration - deferred, not yet supported",
-            )
-            remediations[target.target_dep] = remediation.model_dump()
-        else:
-            targets[target.target_dep] = target.model_dump()
+        target.tier = classification.tier
+        targets[target.target_dep] = target.model_dump()
 
-    return {"targets": targets, "remediations": remediations}
+    return {"targets": targets, "remediations": {}}

@@ -22,11 +22,20 @@ from src.main_graph.subgraphs.remediation.deepagent.state import (
     RemediationDeepAgentState,
 )
 from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
-    build_target_subagent,
+    build_codemod_subagent,
+)
+from src.main_graph.subgraphs.remediation.deepagent.tools import (
+    make_commit_plan_tool,
 )
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.main_graph.subgraphs.remediation.workspace import copy_repo
-from src.models.remediation import Remediation, RemediationResult, RemediationTarget
+from src.models.remediation import (
+    MigrationPlan,
+    Remediation,
+    RemediationOutcome,
+    RemediationResult,
+    RemediationTarget,
+)
 from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
@@ -35,102 +44,215 @@ _RECURSION_LIMIT = 50
 _MAX_CORRECTION_ROUNDS = 2
 _MAX_GROUPS = 20
 
+_PLANNER_PROMPT = """\
+You plan and delegate dependency remediation for a Node.js project. For each
+open target you are given: the tier hint, the release digest (whether a
+migration is needed and a guide), the dependents, and the call sites.
 
-def _build_root_deep_agent():
+For EACH target you MUST:
+1. Call commit_plan with a MigrationPlan: a `bump` task for a clean upgrade;
+   `bump` + `codemod` task(s) when the release digest says migration_needed;
+   a `replace` task only when the tier hint is r3. Put companion deps in
+   `requires`.
+2. Then dispatch codemod_adapter for every codemod task (give it the
+   dependency name, the migration guide, and the affected files). Do NOT
+   edit code yourself. Bump and replace tasks need no dispatch -- the root
+   applies bumps deterministically and defers replace tasks.
+Stop once every target has a committed plan and its codemod tasks are
+dispatched."""
+
+
+def _build_planning_agent(work_dir, container, docker_image, package_manager):
     return create_deep_agent(
         model=get_llm(
             Model.GPT_5_4_MINI,
             rate_limiter=REMEDIATION_RATE_LIMITER,
             max_retries=MAX_RETRIES,
         ),
-        tools=[],
-        subagents=[build_target_subagent()],
-        system_prompt=(
-            "You coordinate dependency remediation for a Node.js project. "
-            "For each open target listed in the first message, call the "
-            "remediate_target tool, describing the dependency by name. If "
-            "a call's result says another dependency is also required, "
-            "dispatch that dependency too, unless it is already open or "
-            "already remediated. Stop once every target you know about "
-            "has been dispatched."
-        ),
+        tools=[make_commit_plan_tool()],
+        subagents=[
+            build_codemod_subagent(work_dir, container, docker_image, package_manager),
+        ],
+        system_prompt=_PLANNER_PROMPT,
         state_schema=RemediationDeepAgentState,
     )
 
 
-_root_deep_agent = _build_root_deep_agent()
+def _resolve_working_targets(state: RemediationState, prep) -> dict[str, dict]:
+    retry_targets = state.get("retry_targets")
+    known = state.get("targets") or {}
+    if not retry_targets:
+        return known
+    direct = prep.dependency_graph.get("direct") or {}
+    out: dict[str, dict] = {}
+    for dep in retry_targets:
+        out[dep] = (
+            known.get(dep)
+            or RemediationTarget(
+                target_dep=dep, addresses=[], current_range=direct.get(dep)
+            ).model_dump()
+        )
+    return out
+
+
+def _format_open_targets(
+    targets: dict[str, dict], investigations: dict[str, dict]
+) -> str:
+    lines = ["Open targets:"]
+    for dep, t in targets.items():
+        inv = investigations.get(dep) or {}
+        rel = inv.get("release") or {}
+        lines.append(
+            f"- {dep} (tier={t.get('tier')}, "
+            f"addresses={t.get('addresses') or 'none'}, "
+            f"migration_needed={rel.get('migration_needed')}, "
+            f"call_sites={inv.get('call_sites') or []}, "
+            f"guide={rel.get('migration_guide') or ''})"
+        )
+    return "\n".join(lines)
+
+
+def _remediations_from_plans(
+    targets: dict[str, dict],
+    plans: dict[str, dict],
+    outcomes: dict[str, dict],
+) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for dep, target_dict in targets.items():
+        target = RemediationTarget(**target_dict)
+        plan_dict = plans.get(dep)
+        if plan_dict is None:
+            out[dep] = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                from_range=target.current_range,
+                status="failed",
+                skip_reason="planner produced no MigrationPlan",
+            ).model_dump()
+            continue
+        plan = MigrationPlan(**plan_dict)
+        kinds = {t.kind for t in plan.tasks}
+        if "replace" in kinds:
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                strategy="replace",
+                from_range=target.current_range,
+                status="skipped",
+                skip_reason="dependency replacement deferred (Spec B)",
+                plan=plan,
+            )
+        elif dep in outcomes:
+            outcome = RemediationOutcome(**outcomes[dep])
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                strategy=outcome.strategy,
+                from_range=target.current_range,
+                to_range=outcome.to_range,
+                replacement_dep=outcome.replacement_dep,
+                replacement_range=outcome.replacement_range,
+                migration_plan=outcome.migration_plan,
+                patch=outcome.code_diff,
+                status="skipped",  # provisional; gate sets real status
+                skip_reason=outcome.skip_reason,
+                plan=plan,
+            )
+        elif "codemod" in kinds:
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                from_range=target.current_range,
+                status="failed",
+                skip_reason="codemod produced no outcome",
+                plan=plan,
+            )
+        else:
+            bump = next((t for t in plan.tasks if t.kind == "bump"), None)
+            rem = Remediation(
+                addresses=target.addresses,
+                target_dep=dep,
+                strategy="bump",
+                from_range=target.current_range,
+                to_range=bump.to_range if bump else None,
+                status="skipped",  # provisional; gate sets real status
+                plan=plan,
+            )
+        out[dep] = rem.model_dump()
+    return out
 
 
 async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -> dict:
     svc = get_services(config)
     dao = svc["result_dao"]
+    container = svc["container"]
     prep = await dao.get_prep(state["prep_result_id"])
 
-    retry_targets = state.get("retry_targets")
-    if retry_targets:
-        known_targets = state.get("targets") or {}
-        direct = prep.dependency_graph.get("direct") or {}
-        targets = {}
-        for dep in retry_targets:
-            if dep in known_targets:
-                targets[dep] = known_targets[dep]
-            else:
-                # A companion target discovered mid-run purely via a
-                # subagent's `requires` signal is never added to
-                # state["targets"] anywhere (subagent_wrapper._run only
-                # returns remediations/requires_edges). Synthesize a
-                # minimal entry the same way subagent_wrapper._run does
-                # for an unknown target name, so it still gets explicitly
-                # redispatched in the retry round's open_list instead of
-                # being silently dropped.
-                targets[dep] = RemediationTarget(
-                    target_dep=dep, addresses=[], current_range=direct.get(dep)
-                ).model_dump()
-    else:
-        targets = state.get("targets") or {}
-
+    targets = _resolve_working_targets(state, prep)
     if not targets:
-        return {"targets": {}, "remediations": {}, "requires_edges": {}}
-
-    open_list = "\n".join(
-        f"- {dep} (addresses: {', '.join(t['addresses']) or 'none'})"
-        for dep, t in targets.items()
-    )
-    initial_state = {
-        "messages": [{"role": "user", "content": f"Open targets:\n{open_list}"}],
-        "job_id": state["job_id"],
-        "prep_result_id": state["prep_result_id"],
-        "targets": targets,
-        "remediations": {},
-        "requires_edges": {},
-    }
-    run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
-    try:
-        result = await _root_deep_agent.ainvoke(initial_state, run_config)
-    except GraphRecursionError:
-        # Spec D10: every bound (recursion limit, correction-round cap,
-        # group cap) must fail honestly into skipped/failed with a reason
-        # instead of crashing the job. Nothing from an aborted run is
-        # trustworthy, so discard remediations/requires_edges entirely --
-        # group_and_verify_gate then sees every target in this round as
-        # never-dispatched and routes it through the same retry mechanism
-        # used for a partial group, eventually failing honestly at the
-        # correction-round cap rather than propagating the exception.
-        logger.warning(
-            "root_deepagent_node: hit recursion_limit=%d before finishing; "
-            "discarding this round's in-progress work",
-            _RECURSION_LIMIT,
-        )
         return {
+            "targets": {},
+            "remediations": {},
+            "requires_edges": {},
+            "migration_plans": {},
+        }
+
+    investigations = state.get("investigations") or {}
+    open_list = _format_open_targets(targets, investigations)
+
+    work_dir = copy_repo(prep.repo_path)
+    try:
+        agent = _build_planning_agent(
+            work_dir, container, prep.docker_image, prep.detected_package_manager
+        )
+        initial_state = {
+            "messages": [{"role": "user", "content": open_list}],
+            "job_id": state["job_id"],
+            "prep_result_id": state["prep_result_id"],
             "targets": targets,
             "remediations": {},
             "requires_edges": {},
+            "migration_plans": {},
+            "outcomes": {},
         }
+        run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
+        try:
+            result = await agent.ainvoke(initial_state, run_config)
+        except GraphRecursionError:
+            # Spec D10: every bound (recursion limit, correction-round cap,
+            # group cap) must fail honestly into skipped/failed with a
+            # reason instead of crashing the job. Nothing from an aborted
+            # run is trustworthy, so discard remediations/requires_edges/
+            # migration_plans entirely -- group_and_verify_gate then sees
+            # every target in this round as never-dispatched and routes it
+            # through the same retry mechanism used for a partial group,
+            # eventually failing honestly at the correction-round cap
+            # rather than propagating the exception.
+            logger.warning(
+                "root_deepagent_node: hit recursion_limit=%d before "
+                "finishing; discarding this round's in-progress work",
+                _RECURSION_LIMIT,
+            )
+            return {
+                "targets": targets,
+                "remediations": {},
+                "requires_edges": {},
+                "migration_plans": {},
+            }
+    finally:
+        shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
 
+    plans = result.get("migration_plans") or {}
+    outcomes = result.get("outcomes") or {}
+    remediations = _remediations_from_plans(targets, plans, outcomes)
+    requires_edges = {
+        dep: plan["requires"] for dep, plan in plans.items() if plan.get("requires")
+    }
     return {
         "targets": targets,
-        "remediations": result.get("remediations") or {},
-        "requires_edges": result.get("requires_edges") or {},
+        "remediations": remediations,
+        "requires_edges": requires_edges,
+        "migration_plans": plans,
     }
 
 

@@ -292,3 +292,39 @@ None blocking; all prior open items resolved:
   tool, not `response_format` (D3.2).
 - r1 short-circuit — **resolved:** not built; uniform planning path, the
   short-circuit deferred as a future non-breaking optimization (D6).
+
+## Amendment (2026-08-03): codemod outcome flow via commit_outcome
+
+**Problem found in review (Task 8):** the plan assumed a dispatched subagent's
+`RemediationOutcome` would reach the root via `state["remediations"]`. It does
+not: deepagents' `task()` returns a subagent's `structured_response` only as
+ToolMessage *text* (`deepagents/middleware/subagents.py:610`,
+`_EXCLUDED_STATE_KEYS = {"messages","todos","structured_response"}`). Any
+*other* channel a subagent returns IS merged into the root state, but the
+subagents declared none, so codemod code-diffs were silently lost and replace
+targets were mislabeled `bump`.
+
+**Decision (D10):** capture codemod outcomes through a dedicated propagating
+channel.
+- Add `outcomes: Annotated[dict[str, dict], _merge_replace]` to
+  `RemediationDeepAgentState` (and a matching channel on the codemod
+  subagent's state schema, `_CodemodState(DeepAgentState)`), so it is NOT
+  excluded and merges up.
+- Add a `commit_outcome(target_dep, outcome: RemediationOutcome)` tool
+  (mirrors `commit_plan`) that returns
+  `Command(update={"outcomes": {target_dep: outcome.model_dump()}})`. Give it
+  to `codemod_adapter`; its prompt requires calling it as the final step with
+  the dependency named in its task description and the unified diff in
+  `code_diff`. Drop `response_format` reliance on the codemod agent (it does
+  not propagate).
+- `_remediations_from_plans` consumes `outcomes` (not the dead
+  `agent_remediations`): per target — no plan -> failed; plan has a `replace`
+  task -> settled `skipped` "deferred (Spec B)" DETERMINISTICALLY in the node
+  (no subagent dispatch); dep in `outcomes` -> build the `Remediation` from
+  `RemediationOutcome` fields (`patch=code_diff`, `to_range`, etc.); else a
+  planned codemod with no outcome -> failed "codemod produced no outcome";
+  else bump-only -> synthesized bump. This also removes the crash risk of
+  `Remediation(**outcome_dict)`.
+- `replacement_migrator` is no longer dispatched by the planning agent in
+  Spec A (replace is deterministic-deferred). `build_replacement_subagent`
+  stays defined as the Spec B seam.

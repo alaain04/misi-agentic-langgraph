@@ -31,6 +31,7 @@ class Remediation(BaseModel):
     replacement_dep: str | None = None
     replacement_range: str | None = None
     migration_plan: str = ""
+    plan: MigrationPlan | None = None  # persisted, reviewable (spec D5)
     code_changes: list[CodeChange] = Field(default_factory=list)
     status: Literal["fixed", "failed", "skipped"] = "skipped"
     skip_reason: str | None = None
@@ -55,6 +56,7 @@ class RemediationTarget(BaseModel):
     target_dep: str  # direct dep to bump
     addresses: list[str]  # finding dep_names grouped under it
     current_range: str | None = None  # from package.json, if known
+    tier: Literal["r1", "r2", "r3"] | None = None  # advisory hint from classify
 
 
 class RemediationOutcome(BaseModel):
@@ -75,3 +77,39 @@ class RemediationOutcome(BaseModel):
     status: Literal["fixed", "failed", "skipped"] = "skipped"
     skip_reason: str | None = None
     summary: str = ""
+
+
+class ReleaseDigest(BaseModel):
+    """Release investigator output for one target."""
+
+    from_version: str | None
+    to_version: str | None
+    migration_needed: bool  # False => clean bump, no code change
+    migration_guide: str = ""  # LLM prose; "" when not needed
+    breaking_changes: list[str] = Field(default_factory=list)
+
+
+class TargetInvestigation(BaseModel):
+    """Everything the Migration Planner reads about one target."""
+
+    target_dep: str
+    dependents: list[str] = Field(default_factory=list)
+    call_sites: list[str] = Field(default_factory=list)
+    release: ReleaseDigest
+
+
+class MigrationTask(BaseModel):
+    kind: Literal["bump", "codemod", "replace"]
+    rationale: str
+    to_range: str | None = None
+    files: list[str] = Field(default_factory=list)
+    replacement_dep: str | None = None
+    replacement_range: str | None = None
+
+
+class MigrationPlan(BaseModel):
+    target_dep: str
+    tier_hint: Literal["r1", "r2", "r3"]
+    migration_guide: str = ""
+    tasks: list[MigrationTask] = Field(default_factory=list)
+    requires: list[str] = Field(default_factory=list)

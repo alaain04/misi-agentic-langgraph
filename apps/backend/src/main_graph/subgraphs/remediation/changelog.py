@@ -132,5 +132,7 @@ async def fetch_release_notes_between(
     high = _tag_version(to_version)
     if low is None or high is None:
         return full
-    windowed = [r for r in full.get("releases", []) if _tag_in_window(r.get("tag"), low, high)]
+    windowed = [
+        r for r in full.get("releases", []) if _tag_in_window(r.get("tag"), low, high)
+    ]
     return {**full, "releases": windowed}
