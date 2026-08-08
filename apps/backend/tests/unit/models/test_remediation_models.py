@@ -1,5 +1,6 @@
 from src.models.remediation import (
     CodeChange,
+    FindingSummary,
     MigrationPlan,
     MigrationTask,
     ReleaseDigest,
@@ -135,3 +136,36 @@ def test_remediation_embeds_plan():
     r = Remediation(addresses=[], target_dep="lodash", plan=plan)
     assert r.plan.target_dep == "lodash"
     assert Remediation(addresses=[], target_dep="x").plan is None
+
+
+def test_finding_summary_defaults_and_round_trip():
+    fs = FindingSummary(
+        dep_name="lodash", severity="high", description="prototype pollution"
+    )
+    assert fs.dep_name == "lodash"
+    assert fs.severity == "high"
+    assert fs.description == "prototype pollution"
+
+
+def test_remediation_target_finding_summaries_default_empty():
+    t = RemediationTarget(target_dep="lodash", addresses=["lodash"])
+    assert t.finding_summaries == []
+
+
+def test_remediation_finding_summaries_default_empty():
+    r = Remediation(addresses=["lodash"], target_dep="lodash")
+    assert r.finding_summaries == []
+
+
+def test_remediation_carries_finding_summaries():
+    r = Remediation(
+        addresses=["lodash"],
+        target_dep="lodash",
+        finding_summaries=[
+            FindingSummary(
+                dep_name="lodash", severity="high", description="proto pollution"
+            )
+        ],
+    )
+    assert r.finding_summaries[0].dep_name == "lodash"
+    assert r.finding_summaries[0].severity == "high"

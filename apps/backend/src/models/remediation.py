@@ -20,9 +20,16 @@ class CodeChange(BaseModel):  # Tier 2/3 slot — empty in v1
     rationale: str
 
 
+class FindingSummary(BaseModel):
+    dep_name: str
+    severity: str
+    description: str
+
+
 class Remediation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     addresses: list[str]  # analysis finding dep_names this covers
+    finding_summaries: list[FindingSummary] = Field(default_factory=list)
     target_dep: str  # the DIRECT dep acted on (the anchor)
     required_by: list[str] = Field(default_factory=list)
     strategy: Literal["bump", "bump_with_codemod", "replace"] = "bump"
@@ -55,6 +62,7 @@ class RemediationTarget(BaseModel):
 
     target_dep: str  # direct dep to bump
     addresses: list[str]  # finding dep_names grouped under it
+    finding_summaries: list[FindingSummary] = Field(default_factory=list)
     current_range: str | None = None  # from package.json, if known
     tier: Literal["r1", "r2", "r3"] | None = None  # advisory hint from classify
 
@@ -113,3 +121,11 @@ class MigrationPlan(BaseModel):
     migration_guide: str = ""
     tasks: list[MigrationTask] = Field(default_factory=list)
     requires: list[str] = Field(default_factory=list)
+
+
+class MigrationPlanBatch(BaseModel):
+    """Structured-output shape for build_migration_plan_node's single
+    batched call: one MigrationPlan per target, produced together so the
+    model can reason about cross-target `requires` coupling in one pass."""
+
+    plans: list[MigrationPlan] = Field(default_factory=list)
