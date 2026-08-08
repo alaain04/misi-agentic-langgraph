@@ -136,7 +136,7 @@ flowchart TD
     class classify_targets_node,investigate_node,group_and_verify_gate,pr_and_persist_node det
 ```
 
-**Intended per-node responsibility** (target model — see mismatch note below):
+**Intended per-node responsibility** (target model):
 planner *plans*, remediator *remediates*, verifier *verifies*, PR/persist node *only* opens the PR from the already-verified state and saves the result. When the verifier finds something broken, it sends the target back to the remediator with feedback.
 
 ### Node-by-node (as built)
@@ -149,7 +149,7 @@ planner *plans*, remediator *remediates*, verifier *verifies*, PR/persist node *
 
 - **`remediate_targets_node`** (`deepagent/nodes.py`) — **The remediator.** Groups targets into connected components via `connected_groups` (targets coupled by a plan's `requires` edge share a working copy). For each group, invokes ONE flat execution deepagent directly (never nested via `task()`) against a throwaway `copy_repo` clone, with tools to bump `package.json`, apply codemods, call `verify` (self-correction only — see below), and `commit_outcome`. On a retry round (`retry_targets` from the gate), re-dispatches only the failing groups with the prior verification failure log folded into the prompt so the agent can diagnose instead of repeating the same change. Writes `remediations` (provisional — `status` is the agent's own self-report), `requires_edges`, `migration_plans` (extended for any dep pulled in only via `requires`).
 
-- **`group_and_verify_gate`** (`deepagent/nodes.py`) — **The verifier.** Deterministic, no LLM. Re-derives the same connected groups, and for each one replays the settled changes onto a *fresh* clean clone (`replay_and_verify_group`: `copy_repo` → `apply_group_changes` → `verify_working_copy` — install, build if scripted, test if scripted, re-audit) — never trusts the execution agent's self-reported status. Sets each member's real `status` (`fixed`/`failed`/`skipped`) and `required_by`. On failure with `correction_rounds < 2`, returns `retry_targets` and the graph routes back to `remediate_targets_node` — this is the feedback loop. Writes `remediations`, `retry_targets`, `correction_rounds`.
+- **`group_and_verify_gate`** (`deepagent/nodes.py`) — **The verifier.** Deterministic, no LLM. Re-derives the same connected groups, and for each one replays the settled changes onto a *fresh* clean clone (`replay_and_verify_group`: `copy_repo` → `apply_group_changes` → `verify_working_copy` — install, build if scripted, test if scripted, re-audit) — never trusts the execution agent's self-reported status. Sets each member's real `status` (`fixed`/`failed`/`skipped`) and `required_by`. On failure with `correction_rounds < 2`, returns `retry_targets` and the graph routes back to `remediate_targets_node` — this is the feedback loop. Writes `remediations`, `retry_targets`, `correction_rounds`, `verified_workdirs`.
 
 - **`pr_and_persist_node`** (`deepagent/nodes.py`) — Ship-only. Reads `verified_workdirs` (populated by `group_and_verify_gate`, one entry per member of a group it verified green AND kept because `consent` + a `git_pr` adapter were configured), groups deps by shared work dir, builds the PR title/body from the already-verified `Remediation` + `VerificationResult` data, opens the PR, and always persists the final `RemediationResult`. Does no install, no replay, no re-verification of its own.
 
@@ -159,4 +159,6 @@ Previously `pr_and_persist_node` re-derived groups, replayed changes onto a seco
 
 ### State fields (`RemediationState`)
 
-`targets`, `investigations`, `migration_plans`, `remediations` — all keyed by `target_dep`, replace-on-write (`_merge_replace`) across correction rounds. `requires_edges` (target → companions it requires). `retry_targets` (deps to re-dispatch this round). `correction_rounds` (0..2, caps the verify↔remediate loop). `remediation_result_id` — set by `pr_and_persist_node` once persisted.
+`targets`, `investigations`, `migration_plans`, `remediations` — all keyed by `target_dep`, replace-on-write (`_merge_replace`) across correction rounds. `requires_edges` (target → companions it requires). `retry_targets` (deps to re-dispatch this round). `correction_rounds` (0..2, caps the verify↔remediate loop). `verified_workdirs` (`target_dep` → `work_dir`, populated by the gate for a group it verifies green and keeps because a PR could actually be opened; every member of a group maps to the same path). `remediation_result_id` — set by `pr_and_persist_node` once persisted.
+
+A kept work dir is owned by whichever node currently holds it — the gate until it hands off, then `pr_and_persist_node` until it ships or discards it. An unhandled exception or a cancelled job in the window between the gate keeping a copy and `pr_and_persist_node` running can therefore leave that copy behind under the project's `tmp/` directory, since nothing else sweeps it. This is a known, accepted tradeoff of handing a verified copy directly to the PR step.

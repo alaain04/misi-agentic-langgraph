@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -824,6 +825,173 @@ async def test_group_and_verify_gate_deletes_kept_workdir_when_verification_fail
 
 
 @pytest.mark.asyncio
+async def test_group_and_verify_gate_deletes_prior_round_kept_workdir_when_superseded():
+    """Regression: `connected_groups` builds its groups from `targets` UNION
+    every name in `requires_edges`. On a retry round `targets` is narrowed by
+    _resolve_working_targets to just the retry deps, but `requires_edges`
+    accumulates across rounds via _merge_replace -- so an already-settled
+    coupled group from round 0 is still re-derived (and re-verified) on round
+    1 even though remediate_targets_node never re-dispatched it. With
+    keep_workdir=True that mints a SECOND kept copy for the same deps while
+    the round-0 copy stays on disk forever (nothing else ever sweeps it).
+    The gate must delete any prior kept path it superseded or invalidated for
+    a dep it settled this round. Uses real mkdtemp'd .../repo dirs so the
+    assertions prove actual filesystem state, not just mock bookkeeping."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {
+        "configurable": {
+            "result_dao": dao,
+            "container": MagicMock(),
+            "remediate": True,
+            "git_pr": MagicMock(),
+        }
+    }
+
+    round0_root = tempfile.mkdtemp(prefix="test-remediation-r0-")
+    round0_dir = os.path.join(round0_root, "repo")
+    os.makedirs(round0_dir)
+    round1_root = tempfile.mkdtemp(prefix="test-remediation-r1-")
+    round1_dir = os.path.join(round1_root, "repo")
+    os.makedirs(round1_dir)
+    lodash_root = tempfile.mkdtemp(prefix="test-remediation-lodash-")
+    lodash_dir = os.path.join(lodash_root, "repo")
+    os.makedirs(lodash_dir)
+
+    def _rem(dep, status="skipped"):
+        return {
+            "id": f"r-{dep}",
+            "addresses": [dep],
+            "target_dep": dep,
+            "strategy": "bump",
+            "to_range": "^1.0.0",
+            "status": status,
+        }
+
+    green = VerificationResult(installed=True, finding_resolved=True)
+
+    # Round 0: the coupled eslint group verifies green and its copy is kept.
+    round0_state = {
+        "prep_result_id": "prep-1",
+        "targets": {"eslint": {}, "eslint-plugin-react": {}},
+        "remediations": {
+            "eslint": _rem("eslint"),
+            "eslint-plugin-react": _rem("eslint-plugin-react"),
+        },
+        "requires_edges": {"eslint": ["eslint-plugin-react"]},
+        "correction_rounds": 0,
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        AsyncMock(return_value=(green, round0_dir)),
+    ):
+        round0_result = await group_and_verify_gate(round0_state, config)
+
+    assert round0_result["verified_workdirs"] == {
+        "eslint": round0_dir,
+        "eslint-plugin-react": round0_dir,
+    }
+    assert os.path.exists(round0_dir)
+
+    # Round 1: `targets` narrowed to the unrelated dep forcing the retry, but
+    # requires_edges (and the round-0 remediations + verified_workdirs) are
+    # still carried over by _merge_replace.
+    round1_state = {
+        "prep_result_id": "prep-1",
+        "targets": {"lodash": {}},
+        "remediations": {
+            "eslint": _rem("eslint", status="fixed"),
+            "eslint-plugin-react": _rem("eslint-plugin-react", status="fixed"),
+            "lodash": _rem("lodash"),
+        },
+        "requires_edges": {"eslint": ["eslint-plugin-react"]},
+        "correction_rounds": 1,
+        "verified_workdirs": dict(round0_result["verified_workdirs"]),
+    }
+    mock_replay = AsyncMock(
+        side_effect=[(green, round1_dir), (green, lodash_dir)],
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        mock_replay,
+    ):
+        round1_result = await group_and_verify_gate(round1_state, config)
+
+    # The already-settled eslint group really was re-verified this round --
+    # that is the bug's mechanism, reproduced.
+    assert mock_replay.await_count == 2
+    # The superseded round-0 copy is gone from disk, and only the new path is
+    # referenced.
+    assert not os.path.exists(round0_root)
+    assert round1_result["verified_workdirs"] == {
+        "eslint": round1_dir,
+        "eslint-plugin-react": round1_dir,
+        "lodash": lodash_dir,
+    }
+    assert os.path.exists(round1_dir)
+
+    shutil.rmtree(round1_root, ignore_errors=True)
+    shutil.rmtree(lodash_root, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_deletes_prior_kept_workdir_when_reverify_fails():
+    """The other half of the same bug: when the (unnecessary) re-verification
+    of an already-settled group goes red, the gate deletes the copy it just
+    made -- but this round's local verified_workdirs has no entry for those
+    deps at all, so _merge_replace would preserve the round-0 path, leaving
+    state pointing at a directory whose group is no longer `fixed`. The prior
+    path must be deleted too."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {
+        "configurable": {
+            "result_dao": dao,
+            "container": MagicMock(),
+            "remediate": True,
+            "git_pr": MagicMock(),
+        }
+    }
+
+    prior_root = tempfile.mkdtemp(prefix="test-remediation-prior-")
+    prior_dir = os.path.join(prior_root, "repo")
+    os.makedirs(prior_dir)
+    new_root = tempfile.mkdtemp(prefix="test-remediation-new-")
+    new_dir = os.path.join(new_root, "repo")
+    os.makedirs(new_dir)
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"lodash": {}},
+        "remediations": {
+            "lodash": {
+                "id": "r1",
+                "addresses": ["lodash"],
+                "target_dep": "lodash",
+                "strategy": "bump",
+                "to_range": "^4.17.21",
+                "status": "fixed",
+            }
+        },
+        "requires_edges": {},
+        "correction_rounds": deepagent_nodes._MAX_CORRECTION_ROUNDS,
+        "verified_workdirs": {"lodash": prior_dir},
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        AsyncMock(
+            return_value=(VerificationResult(installed=True, tested=False), new_dir)
+        ),
+    ):
+        result = await group_and_verify_gate(state, config)
+
+    assert result["verified_workdirs"] == {}
+    assert result["remediations"]["lodash"]["status"] == "failed"
+    assert not os.path.exists(new_root)
+    assert not os.path.exists(prior_root)
+
+
+@pytest.mark.asyncio
 async def test_group_and_verify_gate_routes_never_dispatched_companion_to_retry():
     """A companion named only via `requires` (never independently selected
     by select_remediation_targets, never dispatched) has NO Remediation
@@ -1113,6 +1281,13 @@ async def test_pr_and_persist_node_skips_pr_when_consent_false():
         }
     }
 
+    # A verified_workdirs entry is present on purpose: the node must refuse to
+    # ship on its own (`consent` check), not merely rely on the gate never
+    # having populated the channel.
+    mkdtemp_root = tempfile.mkdtemp(prefix="test-remediation-")
+    work_dir = os.path.join(mkdtemp_root, "repo")
+    os.makedirs(work_dir)
+
     state = {
         "job_id": "job-1",
         "prep_result_id": "prep-1",
@@ -1127,11 +1302,77 @@ async def test_pr_and_persist_node_skips_pr_when_consent_false():
             }
         },
         "requires_edges": {},
+        "verified_workdirs": {"lodash": work_dir},
     }
     result = await pr_and_persist_node(state, config)
 
     git_pr.open_pr.assert_not_called()
     assert result == {"remediation_result_id": "rid-1"}
+    assert not os.path.exists(mkdtemp_root)
+
+
+@pytest.mark.asyncio
+async def test_pr_and_persist_node_skips_group_not_all_fixed():
+    """Part 1's cleanup deletes a superseded/invalidated kept directory but
+    cannot remove the key from `verified_workdirs` (_merge_replace only
+    overwrites), so a dangling entry can survive into this node. Shipping it
+    would open a PR for a group the gate did NOT settle as fixed, using stale
+    verification data. Any member not `fixed` blocks the whole group, and the
+    (stale) work dir is cleaned up."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep(repo_path="/original/repo"))
+    dao.save_remediation = AsyncMock(return_value="rid-1")
+    git_pr = AsyncMock()
+    git_pr.open_pr = AsyncMock(return_value="https://gh/pr/1")
+    config = {
+        "configurable": {
+            "result_dao": dao,
+            "container": MagicMock(),
+            "remediate": True,
+            "git_pr": git_pr,
+        }
+    }
+
+    mkdtemp_root = tempfile.mkdtemp(prefix="test-remediation-")
+    work_dir = os.path.join(mkdtemp_root, "repo")
+    os.makedirs(work_dir)
+
+    verification = {"installed": True, "finding_resolved": True}
+    state = {
+        "job_id": "job-1",
+        "prep_result_id": "prep-1",
+        "remediations": {
+            "eslint": {
+                "id": "r1",
+                "addresses": ["eslint"],
+                "target_dep": "eslint",
+                "strategy": "bump",
+                "to_range": "^9.0.0",
+                "status": "fixed",
+                "verification": verification,
+            },
+            "eslint-plugin-react": {
+                "id": "r2",
+                "addresses": [],
+                "target_dep": "eslint-plugin-react",
+                "strategy": "bump",
+                "to_range": "^8.0.0",
+                "status": "failed",
+                "verification": verification,
+            },
+        },
+        "verified_workdirs": {
+            "eslint": work_dir,
+            "eslint-plugin-react": work_dir,
+        },
+    }
+    result = await pr_and_persist_node(state, config)
+
+    git_pr.open_pr.assert_not_called()
+    assert result == {"remediation_result_id": "rid-1"}
+    assert not os.path.exists(mkdtemp_root)
+    remediation = dao.save_remediation.await_args.args[0]
+    assert all(r.pr_url is None for r in remediation.remediations)
 
 
 @pytest.mark.asyncio

@@ -407,6 +407,26 @@ async def group_and_verify_gate(
                 remediations[dep]["required_by"] = sorted(required_by_map.get(dep, []))
                 settled[dep] = remediations[dep]
 
+    # `connected_groups` derives its groups from `target_deps` UNION every
+    # name in `requires_edges` -- and `requires_edges` accumulates across
+    # correction rounds (_merge_replace) while `targets` is narrowed to just
+    # this round's retry deps. So a coupled group settled in an earlier round
+    # gets re-verified here even though it was never re-dispatched, producing
+    # either a brand-new kept copy (the old one then leaks) or no kept copy at
+    # all (the prior round's entry survives the merge and would ship a stale
+    # working copy). Delete any prior kept path this round superseded or
+    # invalidated. Scope is `settled` -- exactly the deps this round rendered a
+    # final per-round decision for; a dep still in missing-member retry limbo
+    # hasn't been touched and must keep its copy.
+    prior_workdirs: dict[str, str] = state.get("verified_workdirs") or {}
+    stale_paths = {
+        prior_workdirs[dep]
+        for dep in settled
+        if dep in prior_workdirs and prior_workdirs[dep] != verified_workdirs.get(dep)
+    }
+    for stale in stale_paths:
+        shutil.rmtree(os.path.dirname(stale), ignore_errors=True)
+
     if retry_targets:
         return {
             "remediations": settled,
@@ -580,23 +600,34 @@ async def pr_and_persist_node(state: RemediationState, config: RunnableConfig) -
 
     for work_dir, deps in by_workdir.items():
         members = [remediations[dep] for dep in deps if dep in remediations]
-        if not members or git_pr is None:
+        # `verified_workdirs` can carry a dangling entry from an earlier
+        # correction round (its reducer cannot delete keys, only overwrite
+        # them), so re-check the gate's own verdict before shipping: every
+        # member must actually be `fixed`. This respects the gate's decision
+        # rather than making a new one. `consent` is checked here too so the
+        # node defends itself instead of relying on the gate never populating
+        # the channel without it.
+        if (
+            not members
+            or git_pr is None
+            or not consent
+            or not all(m.status == "fixed" for m in members)
+        ):
             shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
             continue
         try:
             branch = f"remediation/{state['job_id'][:8]}-{sorted(deps)[0]}"
             title, body = _pr_title_and_body(members, members[0].verification)
-            try:
-                pr_url = await git_pr.open_pr(work_dir, branch, title, body)
-                for member in members:
-                    member.branch = branch
-                    member.pr_url = pr_url
-            except Exception as exc:
-                logger.warning(
-                    "pr_and_persist_node: PR creation failed for group %s: %s",
-                    deps,
-                    exc,
-                )
+            pr_url = await git_pr.open_pr(work_dir, branch, title, body)
+            for member in members:
+                member.branch = branch
+                member.pr_url = pr_url
+        except Exception as exc:
+            logger.warning(
+                "pr_and_persist_node: PR creation failed for group %s: %s",
+                deps,
+                exc,
+            )
         finally:
             shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
 
