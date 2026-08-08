@@ -1104,6 +1104,8 @@ def test_pr_title_and_body_bump_case():
 
     title, body = deepagent_nodes._pr_title_and_body(members, verification)
 
+    assert "Automated dependency remediation" not in body
+    assert body.startswith("## Summary")
     assert title == "Remediate lodash (bump)"
     assert "please review before merging" not in body
     assert "| lodash | bump | `^4.17.11` -> `^4.17.21` | - |" in body

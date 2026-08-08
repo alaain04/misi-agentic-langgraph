@@ -415,8 +415,6 @@ def route_after_group_verify(state: RemediationState) -> str:
 # Reference layout for a generated remediation PR body. Keep new sections
 # additive to this shape rather than inventing a one-off format per caller.
 _PR_BODY_TEMPLATE = """\
-Automated dependency remediation ({label}).
-
 ## Summary
 
 {summary}
@@ -429,7 +427,7 @@ Automated dependency remediation ({label}).
 
 {findings_table}
 
-## Verification (sandboxed container)
+## Verification
 
 {verification}
 {migration_notes}"""
@@ -517,7 +515,6 @@ def _pr_title_and_body(
         if r.migration_plan
     )
     body = _PR_BODY_TEMPLATE.format(
-        label=label,
         summary=_pr_summary(group_remediations, label),
         changes_table=_pr_changes_table(group_remediations),
         findings_table=_pr_findings_table(group_remediations),
