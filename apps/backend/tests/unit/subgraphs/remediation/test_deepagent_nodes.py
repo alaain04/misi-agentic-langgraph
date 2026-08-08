@@ -762,6 +762,16 @@ async def test_group_and_verify_gate_does_not_request_keep_workdir_without_conse
 
 @pytest.mark.asyncio
 async def test_group_and_verify_gate_deletes_kept_workdir_when_verification_failed():
+    """replay_and_verify_group's actual (Task 1) contract: `keep` is decided
+    right after apply_group_changes succeeds, BEFORE the verification result
+    is inspected for greenness -- so a non-None work_dir comes back whenever
+    keep_workdir=True and apply succeeded, even if verification then fails.
+    group_and_verify_gate is the only place that sees this work_dir, so it
+    alone is responsible for deleting it when the group did not verify
+    green; nobody else will. Use a real mkdtemp'd .../repo dir (same shape
+    copy_repo produces, per test_replay.py/test_pr_and_persist_node_*) so
+    the assertion proves an actual shutil.rmtree happened, not just that the
+    mock was called with the right args."""
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=_prep())
     config = {
@@ -789,13 +799,13 @@ async def test_group_and_verify_gate_deletes_kept_workdir_when_verification_fail
         "requires_edges": {},
         "correction_rounds": deepagent_nodes._MAX_CORRECTION_ROUNDS,
     }
-    # replay_and_verify_group only returns a path when it verified green
-    # (Task 1's contract) -- a failed verification with keep_workdir=True
-    # requested still comes back with kept_dir=None, so there is nothing
-    # for the gate to clean up here. This test instead pins the contract
-    # that a failing group's entry never reaches verified_workdirs.
+
+    mkdtemp_root = tempfile.mkdtemp(prefix="test-remediation-")
+    work_dir = os.path.join(mkdtemp_root, "repo")
+    os.makedirs(work_dir)
+
     mock_replay = AsyncMock(
-        return_value=(VerificationResult(installed=True, tested=False), None)
+        return_value=(VerificationResult(installed=True, tested=False), work_dir)
     )
     with patch(
         "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
@@ -805,6 +815,10 @@ async def test_group_and_verify_gate_deletes_kept_workdir_when_verification_fail
 
     assert result["verified_workdirs"] == {}
     assert result["remediations"]["lodash"]["status"] == "failed"
+    # Proves group_and_verify_gate actually deleted the kept work_dir via
+    # shutil.rmtree(os.path.dirname(work_dir)), not just that it declined
+    # to record it in verified_workdirs.
+    assert not os.path.exists(mkdtemp_root)
 
 
 @pytest.mark.asyncio
