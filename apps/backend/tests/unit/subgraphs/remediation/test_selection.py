@@ -64,3 +64,32 @@ def test_unanchorable_transitive_is_dropped():
 def test_targets_sorted_by_dep():
     targets = select_remediation_targets([_f("optimist"), _f("lodash")], GRAPH, "high")
     assert [t.target_dep for t in targets] == ["lodash", "optimist"]
+
+
+def test_direct_finding_carries_finding_summary():
+    targets = select_remediation_targets([_f("lodash")], GRAPH, "high")
+    assert len(targets[0].finding_summaries) == 1
+    summary = targets[0].finding_summaries[0]
+    assert summary.dep_name == "lodash"
+    assert summary.severity == "high"
+    assert summary.description == "lodash issue"
+
+
+def test_two_transitives_under_same_direct_unify_finding_summaries():
+    graph = {
+        "direct": {"parent": "1.0.0"},
+        "packages": {
+            "parent@1.0.0": {"dependencies": ["a@1", "b@1"]},
+            "a@1": {"dependencies": []},
+            "b@1": {"dependencies": []},
+        },
+    }
+    targets = select_remediation_targets([_f("a"), _f("b")], graph, "high")
+    assert len(targets) == 1
+    names = sorted(fs.dep_name for fs in targets[0].finding_summaries)
+    assert names == ["a", "b"]
+
+
+def test_severity_filter_drops_finding_summaries_below_floor():
+    targets = select_remediation_targets([_f("lodash", "low")], GRAPH, "high")
+    assert targets == []
