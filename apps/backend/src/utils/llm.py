@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.rate_limiters import BaseRateLimiter
 
 from src.utils.config import settings
 
@@ -28,16 +29,36 @@ class Model(StrEnum):
     GPT_5_4 = "gpt-5.5-2026-04-23"
 
 
-def get_llm(model: Model = Model.GPT_4O_MINI) -> BaseChatModel:
+def get_llm(
+    model: Model = Model.GPT_4O_MINI,
+    *,
+    rate_limiter: BaseRateLimiter | None = None,
+    max_retries: int | None = None,
+) -> BaseChatModel:
     """Return a configured chat model for the given ``model`` enum value.
 
     Providers other than OpenAI require their package to be installed first.
     Importing is deferred so missing packages only raise at call time, not at
     import time for callers that never use those models.
+
+    ``rate_limiter`` must be a caller-owned shared instance (e.g. a
+    module-level ``InMemoryRateLimiter``) when the goal is to throttle
+    aggregate throughput across multiple concurrent callers -- a limiter
+    constructed fresh per `get_llm()` call gives each caller its own
+    independent token bucket and throttles nothing in aggregate.
+    ``max_retries`` overrides the provider client's default retry-with-
+    backoff budget on transient errors (e.g. 429s); ``None`` keeps the
+    provider default.
     """
     from langchain_openai import ChatOpenAI  # noqa: PLC0415
 
-    return ChatOpenAI(model=model.value, api_key=settings.openai_api_key, temperature=0)
+    return ChatOpenAI(
+        model=model.value,
+        api_key=settings.openai_api_key,
+        temperature=0,
+        rate_limiter=rate_limiter,
+        max_retries=max_retries,
+    )
 
 
 def parse_llm_json(text: str) -> Any:

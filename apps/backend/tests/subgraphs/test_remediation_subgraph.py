@@ -1,151 +1,113 @@
-"""Blackbox integration tests for the deepagent-based remediation subgraph.
+"""Blackbox integration tests for the planner/deepagent remediation
+subgraph (Task 10, task-decomposition rework).
 
 Requires Docker. Run with:
     uv run pytest tests/subgraphs/test_remediation_subgraph.py -v
 
+The subgraph is now five nodes:
+    START -> classify_targets_node -> investigate_node ->
+    root_deepagent_node -> group_and_verify_gate ->
+    (route: root_deepagent_node | pr_and_persist_node) -> END
+
 What is real:
-- LangGraph wiring: root_deepagent_node -> group_and_verify_gate ->
-  (loop | pr_and_persist_node)
-- The real `deepagents` `create_deep_agent` machinery for BOTH the root
-  coordinator agent and each per-target nested agent (task() dispatch,
-  ToolNode execution, structured_response extraction via ToolStrategy).
-- `RemediationDeepAgentState`'s reducers (_keep_first_str/_keep_first_dict/
-  _merge_replace), exercised under two concurrent task() calls landing in
-  one root superstep (test 3) -- the same bug class the analysis-subgraph
-  swap hit for real once (InvalidUpdateError: "Can receive only one value
-  per step").
-- `FilesystemBackend(root_dir=work_dir, virtual_mode=True)`: test 1 has the
-  nested worker actually call the real `read_file`/`write_file` tools
-  against a real isolated `copy_repo` clone on disk, and asserts the file
-  landed on disk with the expected content.
-- `connected_groups`, `group_and_verify_gate`'s verification/retry logic,
-  `pr_and_persist_node`'s PR-title/consent gating, and real MongoDB
-  persistence (result_dao, via the session testcontainer).
+- LangGraph wiring across all five nodes, including the retry loop back
+  from `group_and_verify_gate` to `root_deepagent_node` (investigate_node
+  runs exactly once per job -- retries never revisit it, per the graph's
+  edges).
+- `investigate_node`'s own fan-out/state-merge logic (only its leaf
+  `investigate_target` call is stubbed -- see below).
+- `root_deepagent_node`'s plan/outcome -> Remediation conversion
+  (`_remediations_from_plans`), `connected_groups`, `group_and_verify_gate`'s
+  real deterministic verify/retry loop (`replay_and_verify_group` against
+  the container mock), `pr_and_persist_node`'s PR-title/consent gating, and
+  real MongoDB persistence (`result_dao`, via the session testcontainer).
 
-What is mocked (three real LLM call sites, replaced with scripted fake chat
-models -- same structural shape as the analysis-subgraph swap):
-- The root coordinator's own model (scripted task() tool calls; content-
-  routed off the running set of already-dispatched dep names, since the
-  ToolMessage the task() tool feeds back to the root is empty for our
-  custom `remediate_target` subgraph -- see the SPIKE note below).
-- Each nested per-target worker's own model (scripted RemediationOutcome
-  tool calls, content-routed off the target dep name parsed out of the
-  worker's own system prompt).
-- `subagent_wrapper._extract_target_dep` (trivial echo -- see below).
-- `classify.classify_target` (stubbed to always return tier="r1" -- none of
-  these scenarios exercise tier classification itself; that's covered by
-  test_classify.py).
-Also patched, per the task-10 brief, purely as network/subprocess
-containment (not because any test exercises their content):
-- `asyncio.create_subprocess_exec` at the `changelog` module path,
-  so `read_release_notes` can never reach the real `gh` CLI/network.
-- `subgraph_config`'s `container` mock (real MongoDB, fake container.run).
+What is mocked, at the boundary the task-10 brief specifies (no real LLM,
+no real `deepagents` machinery, no `gh`/network calls anywhere in this
+file):
+- `classify.classify_target` (stubbed to always return tier="r1" --
+  tier classification itself is covered by test_classify.py).
+- `investigate.investigate_target` (stubbed to a fixed, deterministic
+  TargetInvestigation with `migration_needed=False` -- investigation
+  content is irrelevant here since `_build_planning_agent` is mocked out
+  entirely below it, so nothing downstream ever reads
+  `state["investigations"]` for real. Covered for real by
+  test_investigate.py).
+- `deepagent.nodes._build_planning_agent` -- the monolithic root+nested
+  `deepagents` agent from the old architecture is gone; the new planning
+  agent is built fresh per `root_deepagent_node` call and only exposed
+  through this one factory function. `_FakePlanningAgent` below stands in
+  for its return value: something with an `ainvoke(state, config)` that
+  returns `{"migration_plans": ..., "outcomes": ...}` shaped exactly like
+  `root_deepagent_node` expects (see deepagent/nodes.py). In the real
+  pipeline nothing writes a `requires_edges` state channel -- the
+  planning agent only commits `MigrationPlan`s via `commit_plan`, and
+  `root_deepagent_node` derives `requires_edges` itself from each
+  committed plan's `requires` field. A `plan_for(dep, target_dict)`
+  callback decides each round's committed plan/outcome per target
+  actually present in that round's `state["targets"]`, so one instance
+  transparently drives correction-round retries and multi-target rounds
+  without any fake chat model, `task()` dispatch, or nested
+  `CompiledSubAgent` machinery -- all of which no longer exists in this
+  architecture.
 
-SPIKE FINDINGS (required by the task-10 brief before writing the full
-suite; this settles the open question flagged by task 6's
-subagent_wrapper.py and task 8's nodes.py):
-
-    A bare `create_deep_agent(model=<fake>, tools=[], response_format=X)`
-    run was driven two ways:
-      1. The fake model's final AIMessage carries ONLY `content` (a plain
-         text "I'm done" style finalization, no tool call). Result:
-         `structured_response` is None. The prose is silently discarded.
-      2. The fake model's final AIMessage carries a `tool_calls` entry
-         whose `name` equals the response schema's `__name__` (e.g.
-         "RemediationOutcome") and whose `args` are a dict matching the
-         schema's fields. Result: `structured_response` is a real,
-         validated instance of the schema.
-
-    Root cause (read from the installed `deepagents`/`langchain.agents`
-    source, then confirmed by running both above): `create_deep_agent`
-    forwards `response_format` into `langchain.agents.create_agent`, which
-    -- absent a model with native "provider strategy" structured-output
-    support (our fakes don't declare any) -- falls back to `ToolStrategy`:
-    an artificial tool named after the schema class is added to the
-    model's toolset, and the graph only ever populates
-    `state["structured_response"]` from a tool call by that exact name
-    (`langchain/agents/factory.py::_handle_model_output`). So every
-    scripted "final answer" in this suite -- both the root's finalization
-    (a plain `content=` AIMessage is fine there, since the root doesn't use
-    response_format) and each nested worker's finalization (which DOES use
-    `response_format=RemediationOutcome`) -- had to be built accordingly:
-    the nested worker's last message is always a `tool_calls=[{"name":
-    "RemediationOutcome", "args": {...}}]` AIMessage, never prose.
-
-    A second, related finding while wiring the root<->nested boundary: the
-    `remediate_target` subagent is a *custom* CompiledSubAgent (a raw
-    StateGraph, not a `create_agent`-based one with its own
-    `response_format`), so `deepagents`'s `_return_command_with_state_update`
-    never finds a `structured_response` on its result and falls back to
-    walking the subagent's own `messages` for the last non-empty AIMessage
-    text -- but `subagent_wrapper._run` explicitly returns `"messages": []`
-    on every path (there is no `add_messages` reducer on
-    `_TargetSubagentState.messages`, so that return value REPLACES rather
-    than appends). The upshot: the ToolMessage the root model sees back
-    from a `task()` call to `remediate_target` is always the empty string.
-    A real root LLM can still act on this because it also has the
-    accumulated `remediations`/`requires_edges` STATE (not just messages)
-    on subsequent turns in a real multi-turn agentic loop with tool
-    introspection -- but our root fake model can only see `messages`, so
-    the requires-signal test (test 2 below) scripts the root's dispatch of
-    the companion dependency deterministically rather than pretending the
-    fake model "read" the requires signal out of an empty ToolMessage. This
-    mirrors the already-established pattern in
-    `test_analysis_subgraph.py`'s `_CorrectiveRetryChatModel`, which routes
-    off prior tool-call history, not tool-result content either.
+DROPPED from the old suite (both tested machinery this rework removes
+entirely):
+- The "parallel task() calls in one turn" test asserted that
+  `RemediationDeepAgentState`'s reducers survived two concurrent
+  `task()`-call writes landing in one root superstep. That specific race
+  (two independent nested-agent `Command` writes merging in one LangGraph
+  step) doesn't exist in the new shape: `_build_planning_agent`'s single
+  `ainvoke` call already returns one dict covering every dispatched target
+  in that round, so there is no separate per-target write to race. The
+  still-relevant assertion -- that dispatching two independent targets in
+  one round handles correctly -- is folded into
+  `test_consent_false_opens_zero_prs_across_every_group` below, which
+  dispatches two uncoupled targets in a single fake-agent call and checks
+  `fake_agent.calls[0]["targets"]` covers both.
+- The "nested worker writes a real file via FilesystemBackend" test
+  exercised `remediate_target`'s per-target `create_deep_agent` +
+  `FilesystemBackend(virtual_mode=True)` combo, which is gone. Real
+  filesystem-editing now happens inside `codemod_adapter`
+  (`subagent_wrapper.build_codemod_subagent`), which per the task-10
+  brief's mocking boundary never runs in this file (it lives behind the
+  mocked `_build_planning_agent`). That real-write behavior belongs to a
+  `subagent_wrapper`-focused test, not this graph-wiring integration test;
+  today it only has shape-level coverage in
+  tests/unit/subgraphs/remediation/test_subagent_wrapper.py.
 """
 
 from __future__ import annotations
 
-import re
-import shutil
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from deepagents import create_deep_agent
-from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
 
 from src.main_graph.subgraphs.remediation.deepagent import nodes as deepagent_nodes
-from src.main_graph.subgraphs.remediation.deepagent import (
-    subagent_wrapper as subagent_wrapper_module,
-)
-from src.main_graph.subgraphs.remediation.deepagent.state import (
-    RemediationDeepAgentState,
-)
-from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
-    build_target_subagent,
-)
 from src.main_graph.subgraphs.remediation.graph import build_remediation_subgraph
-from src.main_graph.subgraphs.remediation.workspace import copy_repo as _real_copy_repo
 from src.models.conductor import EvidenceRef, FindingNote
+from src.models.remediation import (
+    MigrationPlan,
+    MigrationTask,
+    ReleaseDigest,
+    TargetInvestigation,
+)
 from src.models.results import AnalysisResult, PrepResult
 
 pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------
-# Network/subprocess containment (blanket, per task-10 brief) -- no test
-# below exercises read_release_notes content, so this just returns a
-# harmless "no releases" response if anything ever calls it.
+# Deterministic stubs for the two leaf LLM call sites upstream of planning
+# (classify_target, investigate_target) -- neither is exercised by these
+# tests, they're just containment so nothing here ever reaches a real LLM
+# or the `gh` CLI. Both are covered for real by test_classify.py and
+# test_investigate.py respectively.
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _no_network_release_notes():
-    fake_proc = MagicMock()
-    fake_proc.communicate = AsyncMock(return_value=(b"[]", b""))
-    fake_proc.returncode = 0
-    with patch(
-        "src.main_graph.subgraphs.remediation.changelog.asyncio.create_subprocess_exec",
-        AsyncMock(return_value=fake_proc),
-    ):
-        yield
 
 
 @pytest.fixture(autouse=True)
@@ -163,213 +125,89 @@ def _classify_everything_as_r1():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _investigate_without_network_or_llm():
+    """Yields the AsyncMock itself (not just the patch context) so tests
+    can assert it was actually called -- proving `investigate_node` really
+    ran as a real step in the compiled graph, not merely that downstream
+    nodes tolerate a missing `investigations` channel."""
+
+    async def _fake_investigate_target(
+        target, repo_path, dependency_graph, container, docker_image
+    ):
+        return TargetInvestigation(
+            target_dep=target.target_dep,
+            dependents=[],
+            call_sites=[],
+            release=ReleaseDigest(
+                from_version=target.current_range,
+                to_version=None,
+                migration_needed=False,
+            ),
+        )
+
+    mock = AsyncMock(side_effect=_fake_investigate_target)
+    with patch(
+        "src.main_graph.subgraphs.remediation.investigate.investigate_target", mock
+    ):
+        yield mock
+
+
 # ---------------------------------------------------------------------------
-# Fake chat models
+# Fake planning agent -- stand-in for `_build_planning_agent`'s return value
 # ---------------------------------------------------------------------------
 
 
-class _ContentRoutedChatModel(FakeMessagesListChatModel):
-    """A FakeMessagesListChatModel whose bind_tools is a no-op (deepagents
-    calls model.bind_tools(...) when building the agent; the stock
-    implementation would wrap us in a RunnableBinding and break routing) and
-    whose _generate is fully delegated to an injected `router` callable
-    rather than a positional response list -- robust to however many model
-    calls deepagents makes per turn/round (same rationale as
-    test_analysis_subgraph.py's _CorrectiveRetryChatModel)."""
+class _FakePlanningAgent:
+    """Replaces the real `deepagents` planning agent at the exact boundary
+    `root_deepagent_node` calls it through: an object with an
+    `ainvoke(state, config)` coroutine. `plan_for(dep, target_dict)` is
+    invoked once per target present in that round's `state["targets"]` and
+    returns a dict with a required "plan" (a MigrationPlan.model_dump(),
+    whose own "requires" field carries any companion-coupling signal) and
+    an optional "outcome" (a RemediationOutcome.model_dump()) -- exactly
+    the pieces `root_deepagent_node` reads off a real agent's result. It
+    does NOT return a top-level "requires_edges" key: the real planning
+    agent never writes one either, only `migration_plans`, and
+    `root_deepagent_node` derives `requires_edges` itself from each
+    committed plan's `requires` field. `self.calls` records every round's
+    seeded state for assertions about how many rounds ran and what each
+    round dispatched."""
 
-    responses: list[BaseMessage] = []
-    router: Callable[[list[BaseMessage]], AIMessage] | None = None
+    def __init__(self, plan_for: Callable[[str, dict], dict[str, Any]]) -> None:
+        self._plan_for = plan_for
+        self.calls: list[dict] = []
 
-    def bind_tools(
-        self, tools: Sequence[Any], **kwargs: Any
-    ) -> _ContentRoutedChatModel:
-        return self
-
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[override]
-        assert self.router is not None
-        msg = self.router(list(messages))
-        return ChatResult(generations=[ChatGeneration(message=msg)])
-
-
-def _msg_text(m: BaseMessage) -> str:
-    content = getattr(m, "content", "")
-    return content if isinstance(content, str) else str(content)
-
-
-def _dispatched_deps(messages: list[BaseMessage]) -> set[str]:
-    """Every dep name the root has already dispatched via task(), read off
-    its own prior tool_calls (never off task()'s ToolMessage result, which
-    is empty -- see the SPIKE note in the module docstring)."""
-    deps: set[str] = set()
-    for m in messages:
-        if isinstance(m, AIMessage):
-            for tc in m.tool_calls or []:
-                if tc.get("name") == "task":
-                    deps.add(tc["args"]["description"])
-    return deps
+    async def ainvoke(self, state: dict, config: Any = None) -> dict:
+        self.calls.append(state)
+        migration_plans: dict[str, dict] = {}
+        outcomes: dict[str, dict] = {}
+        for dep, target_dict in state["targets"].items():
+            spec = self._plan_for(dep, target_dict)
+            migration_plans[dep] = spec["plan"]
+            if spec.get("outcome") is not None:
+                outcomes[dep] = spec["outcome"]
+        return {
+            "migration_plans": migration_plans,
+            "outcomes": outcomes,
+        }
 
 
-def _task_call(dep: str, call_id: str) -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "task",
-                "args": {"description": dep, "subagent_type": "remediate_target"},
-                "id": call_id,
-            }
+def _patch_planning_agent(agent: _FakePlanningAgent):
+    return patch.object(
+        deepagent_nodes, "_build_planning_agent", MagicMock(return_value=agent)
+    )
+
+
+def _bump_plan(dep: str, to_range: str, requires: list[str] | None = None) -> dict:
+    return MigrationPlan(
+        target_dep=dep,
+        tier_hint="r1",
+        tasks=[
+            MigrationTask(kind="bump", rationale="clean upgrade", to_range=to_range)
         ],
-    )
-
-
-def _multi_task_call(deps: list[str]) -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "task",
-                "args": {"description": dep, "subagent_type": "remediate_target"},
-                "id": f"call_{dep}",
-            }
-            for dep in deps
-        ],
-    )
-
-
-def _root_router_sequential(deps_in_order: list[str]) -> Callable:
-    """Dispatch each dep in `deps_in_order`, one task() call per model turn,
-    then finalize. Content-routed off prior dispatches (see
-    _dispatched_deps), so it behaves the same however many times deepagents
-    calls the model, and (for the correction-round test) identically across
-    fresh conversations in every retry round."""
-
-    def _route(messages: list[BaseMessage]) -> AIMessage:
-        dispatched = _dispatched_deps(messages)
-        for i, dep in enumerate(deps_in_order):
-            if dep not in dispatched:
-                return _task_call(dep, f"call_{i}")
-        return AIMessage(content="All targets dispatched, finalizing.")
-
-    return _route
-
-
-def _root_router_parallel(deps: list[str]) -> Callable:
-    """Dispatch every dep in ONE AIMessage carrying multiple task()
-    tool_calls (real GPT-5-class root models do this routinely for
-    independent delegations), then finalize."""
-
-    def _route(messages: list[BaseMessage]) -> AIMessage:
-        dispatched = _dispatched_deps(messages)
-        if not set(deps) <= dispatched:
-            return _multi_task_call(deps)
-        return AIMessage(content="All targets dispatched, finalizing.")
-
-    return _route
-
-
-_TARGET_RE = re.compile(r"dependency risk in a Node\.js project: ([\w@/.-]+)")
-
-
-def _target_from_messages(messages: list[BaseMessage]) -> str:
-    for m in messages:
-        match = _TARGET_RE.search(_msg_text(m))
-        if match:
-            return match.group(1)
-    msg = "could not find target dep in nested worker's own messages"
-    raise AssertionError(msg)
-
-
-def _outcome_call(call_id: str = "outcome", **kwargs: Any) -> AIMessage:
-    """A finalizing AIMessage for a nested per-target worker: per the spike,
-    structured_response is only populated when the tool call's name equals
-    the response_format schema's __name__ ("RemediationOutcome")."""
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {"name": "RemediationOutcome", "args": kwargs, "id": call_id},
-        ],
-    )
-
-
-def _immediate_outcome(**outcome_kwargs: Any) -> Callable:
-    """A nested-worker route that finalizes immediately with a fixed
-    RemediationOutcome, regardless of how many times it is called (the
-    react loop only calls the model again if the prior turn wasn't a
-    terminal structured-output tool call, so this is only ever invoked
-    once per real target conversation)."""
-
-    def _route(messages: list[BaseMessage]) -> AIMessage:
-        return _outcome_call(**outcome_kwargs)
-
-    return _route
-
-
-def _read_then_write_then_outcome(
-    notes_path: str, notes_content: str, **outcome_kwargs: Any
-) -> Callable:
-    """A nested-worker route that first reads a real file, then writes a
-    real new file (both via deepagents' FilesystemMiddleware tools against
-    the real FilesystemBackend(virtual_mode=True) clone), then finalizes --
-    exercises concern 2 from the task-10 brief for real."""
-
-    def _route(messages: list[BaseMessage]) -> AIMessage:
-        ai_count = sum(1 for m in messages if isinstance(m, AIMessage))
-        if ai_count == 0:
-            return AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "read_file",
-                        "args": {"file_path": "/package.json"},
-                        "id": "read1",
-                    }
-                ],
-            )
-        if ai_count == 1:
-            return AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "write_file",
-                        "args": {"file_path": notes_path, "content": notes_content},
-                        "id": "write1",
-                    }
-                ],
-            )
-        return _outcome_call(**outcome_kwargs)
-
-    return _route
-
-
-def _worker_router_from(routes: dict[str, Callable]) -> Callable:
-    def _route(messages: list[BaseMessage]) -> AIMessage:
-        dep = _target_from_messages(messages)
-        if dep not in routes:
-            msg = f"no worker route registered for {dep!r}"
-            raise AssertionError(msg)
-        return routes[dep](messages)
-
-    return _route
-
-
-def _build_fake_root_agent(model: _ContentRoutedChatModel):
-    """A real deep agent -- create_deep_agent with a fake root model but the
-    REAL, unmodified remediate_target subagent (same construction as
-    nodes._build_root_deep_agent, minus the real LLM)."""
-    return create_deep_agent(
-        model=model,
-        tools=[],
-        subagents=[build_target_subagent()],
-        state_schema=RemediationDeepAgentState,
-    )
-
-
-async def _extract_target_dep_echo(description: str, known_targets: list[str]) -> str:
-    """Replacement for subagent_wrapper._extract_target_dep: our root
-    routers always set task()'s `description` to the literal dep name (see
-    _task_call), so this is a trivial echo -- same pattern as
-    test_analysis_subgraph.py's _extract_as."""
-    return description
+        requires=requires or [],
+    ).model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -437,13 +275,14 @@ class _FakeGitPR:
 
 
 async def test_pure_bump_target_ships_one_fixed_pr(
-    tmp_path, result_dao, subgraph_config
+    tmp_path, result_dao, subgraph_config, _investigate_without_network_or_llm
 ):
-    """Tier 0/1 regression: a single, uncoupled target with no requires
-    signal verifies green and produces exactly one PR labeled "bump". Also
-    exercises concern 2 (FilesystemBackend virtual_mode) for real: the
-    nested worker reads package.json and writes a real new file into the
-    real isolated copy_repo clone before finalizing."""
+    """A single, uncoupled target with no requires signal: the planning
+    agent commits a bump-only plan (no outcome), the deterministic gate
+    verifies green against the container mock, and exactly one PR labeled
+    "bump" ships. Also asserts `investigate_node` itself actually ran as a
+    real step of the compiled graph (not just that downstream nodes
+    tolerate a missing `investigations` channel)."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     repo_path = _write_repo(tmp_path, {"leftpad": "1.0.0"})
     prep = _seed_prep(job_id, repo_path, {"leftpad": "1.0.0"})
@@ -451,64 +290,17 @@ async def test_pure_bump_target_ships_one_fixed_pr(
     analysis = _seed_analysis(job_id, [_finding("leftpad", "leftpad has a known CVE")])
     await result_dao.save_analysis(analysis)
 
-    fake_root_agent = _build_fake_root_agent(
-        _ContentRoutedChatModel(router=_root_router_sequential(["leftpad"]))
-    )
-    worker_model = _ContentRoutedChatModel(
-        router=_worker_router_from(
-            {
-                "leftpad": _read_then_write_then_outcome(
-                    "/REMEDIATION_NOTES.md",
-                    "Bumped leftpad to ^1.0.1\n",
-                    strategy="bump",
-                    to_range="^1.0.1",
-                    summary="bumped leftpad",
-                    status="fixed",
-                )
-            }
-        )
-    )
+    def _plan_for(dep: str, target: dict) -> dict:
+        assert dep == "leftpad"
+        return {"plan": _bump_plan("leftpad", "^1.0.1")}
 
-    captured_work_dirs: list[str] = []
-    captured_notes: list[str] = []
-    _real_rmtree = shutil.rmtree
-
-    def _spy_copy_repo(src_repo_path: str) -> str:
-        work_dir = _real_copy_repo(src_repo_path)
-        captured_work_dirs.append(work_dir)
-        return work_dir
-
-    def _spy_rmtree(path, ignore_errors=False):  # noqa: FBT002
-        # subagent_wrapper._run now cleans up its own clone in a finally
-        # block (Finding 3 of the final review) -- that happens inside the
-        # graph run, before graph.ainvoke() below ever returns. Capture the
-        # nested worker's real write_file output here, immediately before
-        # deletion, instead of inspecting the directory afterward (by then
-        # it's gone).
-        notes_path = Path(path) / "repo" / "REMEDIATION_NOTES.md"
-        if notes_path.exists():
-            captured_notes.append(notes_path.read_text())
-        _real_rmtree(path, ignore_errors=ignore_errors)
+    fake_agent = _FakePlanningAgent(_plan_for)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = True
     subgraph_config["configurable"]["git_pr"] = fake_git_pr
 
-    with (
-        patch.object(deepagent_nodes, "_root_deep_agent", fake_root_agent),
-        patch.object(
-            subagent_wrapper_module,
-            "_extract_target_dep",
-            AsyncMock(side_effect=_extract_target_dep_echo),
-        ),
-        patch.object(
-            subagent_wrapper_module, "get_llm", MagicMock(return_value=worker_model)
-        ),
-        patch.object(
-            subagent_wrapper_module, "copy_repo", MagicMock(side_effect=_spy_copy_repo)
-        ),
-        patch.object(subagent_wrapper_module.shutil, "rmtree", _spy_rmtree),
-    ):
+    with _patch_planning_agent(fake_agent):
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -520,43 +312,40 @@ async def test_pure_bump_target_ships_one_fixed_pr(
             config=subgraph_config,
         )
 
-    try:
-        assert result.get("remediation_result_id")
-        remediation_result = await result_dao.get_remediation(
-            result["remediation_result_id"]
-        )
-        assert len(remediation_result.remediations) == 1
-        r = remediation_result.remediations[0]
-        assert r.target_dep == "leftpad"
-        assert r.status == "fixed"
-        assert r.to_range == "^1.0.1"
-        assert r.branch == f"remediation/{job_id[:8]}-leftpad"
-        assert r.pr_url == "https://github.com/acme/widgets/pull/1"
+    assert result.get("remediation_result_id")
+    remediation_result = await result_dao.get_remediation(
+        result["remediation_result_id"]
+    )
+    assert len(remediation_result.remediations) == 1
+    r = remediation_result.remediations[0]
+    assert r.target_dep == "leftpad"
+    assert r.status == "fixed"
+    assert r.to_range == "^1.0.1"
+    assert r.branch == f"remediation/{job_id[:8]}-leftpad"
+    assert r.pr_url == "https://github.com/acme/widgets/pull/1"
 
-        fake_git_pr.open_pr.assert_awaited_once()
-        title = fake_git_pr.open_pr.await_args.args[2]
-        assert "bump" in title
+    fake_git_pr.open_pr.assert_awaited_once()
+    title = fake_git_pr.open_pr.await_args.args[2]
+    assert "bump" in title
+    assert len(fake_agent.calls) == 1
 
-        # Concern 2: the nested worker's real read_file/write_file tool
-        # calls actually touched a real file in the real isolated clone,
-        # captured by the rmtree spy immediately before subagent_wrapper's
-        # own cleanup removed it.
-        assert len(captured_work_dirs) == 1
-        assert captured_notes == ["Bumped leftpad to ^1.0.1\n"]
-    finally:
-        # subagent_wrapper._run already cleaned up its own clone (Finding
-        # 3); this is a defensive no-op for any that didn't (ignore_errors
-        # covers the now-common case of an already-removed directory).
-        for work_dir in captured_work_dirs:
-            shutil.rmtree(Path(work_dir).parent, ignore_errors=True)
+    # investigate_node is a real step in the compiled graph -- it must
+    # have actually fanned out to investigate_target for "leftpad" before
+    # root_deepagent_node's (mocked) planning agent ever ran.
+    _investigate_without_network_or_llm.assert_awaited_once()
+    investigated_target = _investigate_without_network_or_llm.await_args.args[0]
+    assert investigated_target.target_dep == "leftpad"
 
 
 async def test_requires_signal_pulls_in_a_non_finding_companion(
     tmp_path, result_dao, subgraph_config
 ):
-    """The eslint/eslint-plugin-react scenario from the spec: target A's
-    subagent reports requires=["B"], B has no FindingNote, the root
-    dispatches B, and both end up in ONE group/PR with B's
+    """The eslint/eslint-plugin-react scenario from the spec: the planning
+    agent commits target A's MigrationPlan with requires=["B"] (mirroring
+    the real commit_plan contract), root_deepagent_node derives
+    requires_edges from that field, B has no FindingNote,
+    group_and_verify_gate routes the never-dispatched companion through a
+    retry round, and both end up in ONE group/PR with B's
     Remediation.required_by == ["A"]."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     direct = {"eslint": "7.0.0", "eslint-plugin-react": "7.20.0"}
@@ -568,46 +357,25 @@ async def test_requires_signal_pulls_in_a_non_finding_companion(
     analysis = _seed_analysis(job_id, [_finding("eslint", "eslint has a known CVE")])
     await result_dao.save_analysis(analysis)
 
-    fake_root_agent = _build_fake_root_agent(
-        _ContentRoutedChatModel(
-            router=_root_router_sequential(["eslint", "eslint-plugin-react"])
-        )
-    )
-    worker_model = _ContentRoutedChatModel(
-        router=_worker_router_from(
-            {
-                "eslint": _immediate_outcome(
-                    strategy="bump",
-                    to_range="^8.0.0",
-                    requires=["eslint-plugin-react"],
-                    status="fixed",
-                    summary="eslint bump requires plugin bump too",
-                ),
-                "eslint-plugin-react": _immediate_outcome(
-                    strategy="bump",
-                    to_range="^7.20.1",
-                    status="fixed",
-                    summary="companion bump for eslint-plugin-react",
+    def _plan_for(dep: str, target: dict) -> dict:
+        if dep == "eslint":
+            return {
+                "plan": _bump_plan(
+                    "eslint", "^8.0.0", requires=["eslint-plugin-react"]
                 ),
             }
-        )
-    )
+        if dep == "eslint-plugin-react":
+            return {"plan": _bump_plan("eslint-plugin-react", "^7.20.1")}
+        msg = f"unexpected dep dispatched: {dep}"
+        raise AssertionError(msg)
+
+    fake_agent = _FakePlanningAgent(_plan_for)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = True
     subgraph_config["configurable"]["git_pr"] = fake_git_pr
 
-    with (
-        patch.object(deepagent_nodes, "_root_deep_agent", fake_root_agent),
-        patch.object(
-            subagent_wrapper_module,
-            "_extract_target_dep",
-            AsyncMock(side_effect=_extract_target_dep_echo),
-        ),
-        patch.object(
-            subagent_wrapper_module, "get_llm", MagicMock(return_value=worker_model)
-        ),
-    ):
+    with _patch_planning_agent(fake_agent):
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -638,83 +406,12 @@ async def test_requires_signal_pulls_in_a_non_finding_companion(
     assert by_dep["eslint"].branch == by_dep["eslint-plugin-react"].branch
     assert by_dep["eslint"].pr_url == by_dep["eslint-plugin-react"].pr_url
 
-
-async def test_parallel_task_calls_in_one_turn_do_not_crash_root_state(
-    tmp_path, result_dao, subgraph_config
-):
-    """Drive the real graph with a fake root model that emits TWO tool
-    calls to remediate_target in a single turn (two independent, uncoupled
-    targets). Assert both targets' Remediation records land correctly in
-    the final state -- proves RemediationDeepAgentState's reducers survive
-    concurrent writes in one superstep, the exact bug class the
-    analysis-subgraph swap hit and fixed (InvalidUpdateError: "Can receive
-    only one value per step")."""
-    job_id = f"rem-{uuid.uuid4().hex[:8]}"
-    direct = {"pkg-a": "1.0.0", "pkg-b": "2.0.0"}
-    repo_path = _write_repo(tmp_path, direct)
-    prep = _seed_prep(job_id, repo_path, direct)
-    await result_dao.save_prep(prep)
-    analysis = _seed_analysis(
-        job_id,
-        [
-            _finding("pkg-a", "pkg-a has a known CVE"),
-            _finding("pkg-b", "pkg-b has a known CVE"),
-        ],
-    )
-    await result_dao.save_analysis(analysis)
-
-    fake_root_agent = _build_fake_root_agent(
-        _ContentRoutedChatModel(router=_root_router_parallel(["pkg-a", "pkg-b"]))
-    )
-    worker_model = _ContentRoutedChatModel(
-        router=_worker_router_from(
-            {
-                "pkg-a": _immediate_outcome(
-                    strategy="bump", to_range="^1.0.1", status="fixed"
-                ),
-                "pkg-b": _immediate_outcome(
-                    strategy="bump", to_range="^2.0.1", status="fixed"
-                ),
-            }
-        )
-    )
-
-    with (
-        patch.object(deepagent_nodes, "_root_deep_agent", fake_root_agent),
-        patch.object(
-            subagent_wrapper_module,
-            "_extract_target_dep",
-            AsyncMock(side_effect=_extract_target_dep_echo),
-        ),
-        patch.object(
-            subagent_wrapper_module, "get_llm", MagicMock(return_value=worker_model)
-        ),
-    ):
-        graph = build_remediation_subgraph()
-        # The assertion under test is implicit: if the reducers were wrong
-        # (plain LastValue channels instead of _keep_first_str/_merge_replace),
-        # this ainvoke would raise InvalidUpdateError and the test would
-        # fail here, before any of the state assertions below run.
-        result = await graph.ainvoke(
-            {
-                "job_id": job_id,
-                "concern": "dependency health",
-                "prep_result_id": prep.id,
-                "analysis_result_id": analysis.id,
-            },
-            config=subgraph_config,
-        )
-
-    assert result.get("remediation_result_id")
-    remediation_result = await result_dao.get_remediation(
-        result["remediation_result_id"]
-    )
-    by_dep = {r.target_dep: r for r in remediation_result.remediations}
-    assert set(by_dep) == {"pkg-a", "pkg-b"}
-    assert by_dep["pkg-a"].status == "fixed"
-    assert by_dep["pkg-a"].to_range == "^1.0.1"
-    assert by_dep["pkg-b"].status == "fixed"
-    assert by_dep["pkg-b"].to_range == "^2.0.1"
+    # Round 1 dispatches eslint alone and discovers the companion via
+    # requires_edges; group_and_verify_gate then retries the never-
+    # dispatched companion, so round 2 dispatches eslint-plugin-react.
+    assert len(fake_agent.calls) == 2
+    assert set(fake_agent.calls[0]["targets"]) == {"eslint"}
+    assert set(fake_agent.calls[1]["targets"]) == {"eslint-plugin-react"}
 
 
 async def test_correction_round_retries_then_gives_up_at_cap(
@@ -722,7 +419,7 @@ async def test_correction_round_retries_then_gives_up_at_cap(
 ):
     """A target whose verification always fails: assert
     group_and_verify_gate retries it up to _MAX_CORRECTION_ROUNDS, then
-    ships status="failed" with a reason, and that root_deepagent_node was
+    ships status="failed" with a reason, and that the planning agent was
     invoked exactly (1 + _MAX_CORRECTION_ROUNDS) times, not more."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     direct = {"always-broken": "1.0.0"}
@@ -741,45 +438,13 @@ async def test_correction_round_retries_then_gives_up_at_cap(
         return_value=(1, "", "npm install failed")
     )
 
-    fake_root_agent = _build_fake_root_agent(
-        _ContentRoutedChatModel(router=_root_router_sequential(["always-broken"]))
-    )
-    worker_model = _ContentRoutedChatModel(
-        router=_worker_router_from(
-            {
-                "always-broken": _immediate_outcome(
-                    strategy="bump", to_range="^2.0.0", status="fixed"
-                )
-            }
-        )
-    )
+    def _plan_for(dep: str, target: dict) -> dict:
+        assert dep == "always-broken"
+        return {"plan": _bump_plan("always-broken", "^2.0.0")}
 
-    call_count = 0
+    fake_agent = _FakePlanningAgent(_plan_for)
 
-    async def _spy_root_node(state, config):
-        # A plain async wrapper (rather than AsyncMock(wraps=...)) so
-        # LangGraph's own arg-count introspection on the node callable still
-        # sees a real (state, config) signature -- an AsyncMock wrapper
-        # obscures that and LangGraph ends up invoking it with only `state`.
-        nonlocal call_count
-        call_count += 1
-        return await deepagent_nodes.root_deepagent_node(state, config)
-
-    with (
-        patch.object(deepagent_nodes, "_root_deep_agent", fake_root_agent),
-        patch.object(
-            subagent_wrapper_module,
-            "_extract_target_dep",
-            AsyncMock(side_effect=_extract_target_dep_echo),
-        ),
-        patch.object(
-            subagent_wrapper_module, "get_llm", MagicMock(return_value=worker_model)
-        ),
-        patch(
-            "src.main_graph.subgraphs.remediation.graph.root_deepagent_node",
-            _spy_root_node,
-        ),
-    ):
+    with _patch_planning_agent(fake_agent):
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -801,7 +466,7 @@ async def test_correction_round_retries_then_gives_up_at_cap(
     assert r.status == "failed"
     assert r.skip_reason == "verification failed after max correction rounds"
 
-    assert call_count == 1 + deepagent_nodes._MAX_CORRECTION_ROUNDS
+    assert len(fake_agent.calls) == 1 + deepagent_nodes._MAX_CORRECTION_ROUNDS
 
 
 async def test_consent_false_opens_zero_prs_across_every_group(
@@ -812,7 +477,9 @@ async def test_consent_false_opens_zero_prs_across_every_group(
     Remediation records still have branch=None, pr_url=None, and a real
     (non-default) verification result -- proves group_and_verify_gate's
     deterministic verification runs unconditionally, and only
-    pr_and_persist_node's PR step is gated on consent."""
+    pr_and_persist_node's PR step is gated on consent. Also folds in the
+    dropped "parallel dispatch" test's assertion: both targets are
+    dispatched together in a single planning-agent round."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     direct = {"pkg-c": "1.0.0", "pkg-d": "2.0.0"}
     repo_path = _write_repo(tmp_path, direct)
@@ -827,37 +494,18 @@ async def test_consent_false_opens_zero_prs_across_every_group(
     )
     await result_dao.save_analysis(analysis)
 
-    fake_root_agent = _build_fake_root_agent(
-        _ContentRoutedChatModel(router=_root_router_parallel(["pkg-c", "pkg-d"]))
-    )
-    worker_model = _ContentRoutedChatModel(
-        router=_worker_router_from(
-            {
-                "pkg-c": _immediate_outcome(
-                    strategy="bump", to_range="^1.0.1", status="fixed"
-                ),
-                "pkg-d": _immediate_outcome(
-                    strategy="bump", to_range="^2.0.1", status="fixed"
-                ),
-            }
-        )
-    )
+    ranges = {"pkg-c": "^1.0.1", "pkg-d": "^2.0.1"}
+
+    def _plan_for(dep: str, target: dict) -> dict:
+        return {"plan": _bump_plan(dep, ranges[dep])}
+
+    fake_agent = _FakePlanningAgent(_plan_for)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = False
     subgraph_config["configurable"]["git_pr"] = fake_git_pr
 
-    with (
-        patch.object(deepagent_nodes, "_root_deep_agent", fake_root_agent),
-        patch.object(
-            subagent_wrapper_module,
-            "_extract_target_dep",
-            AsyncMock(side_effect=_extract_target_dep_echo),
-        ),
-        patch.object(
-            subagent_wrapper_module, "get_llm", MagicMock(return_value=worker_model)
-        ),
-    ):
+    with _patch_planning_agent(fake_agent):
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -882,3 +530,5 @@ async def test_consent_false_opens_zero_prs_across_every_group(
         assert r.verification.installed is True
 
     fake_git_pr.open_pr.assert_not_called()
+    assert len(fake_agent.calls) == 1
+    assert set(fake_agent.calls[0]["targets"]) == {"pkg-c", "pkg-d"}

@@ -12,6 +12,28 @@ import shlex
 from src.domain.ports.container_run_port import ContainerRunPort
 
 _GITHUB_REPO_RE = re.compile(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?\s*$")
+_SEMVER_TAG_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
+
+
+def _tag_version(tag: str | None) -> tuple[int, int, int] | None:
+    if not tag:
+        return None
+    match = _SEMVER_TAG_RE.match(tag.strip())
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _tag_in_window(
+    tag: str | None,
+    low: tuple[int, int, int],
+    high: tuple[int, int, int],
+) -> bool:
+    """Half-open (low, high]: exclude the installed version, include target."""
+    v = _tag_version(tag)
+    if v is None:
+        return False
+    return low < v <= high
 
 
 async def _resolve_github_repo(
@@ -90,3 +112,27 @@ async def fetch_release_notes(
             for release in releases
         ],
     }
+
+
+async def fetch_release_notes_between(
+    package_name: str,
+    from_version: str | None,
+    to_version: str | None,
+    repo_path: str,
+    container,
+    docker_image: str,
+) -> dict:
+    """Like fetch_release_notes, but keep only releases whose tag falls in the
+    half-open window (from_version, to_version]. When either bound is missing
+    or unparseable, return the unfiltered recent set (honest degradation)."""
+    full = await fetch_release_notes(package_name, repo_path, container, docker_image)
+    if not full.get("available"):
+        return full
+    low = _tag_version(from_version)
+    high = _tag_version(to_version)
+    if low is None or high is None:
+        return full
+    windowed = [
+        r for r in full.get("releases", []) if _tag_in_window(r.get("tag"), low, high)
+    ]
+    return {**full, "releases": windowed}

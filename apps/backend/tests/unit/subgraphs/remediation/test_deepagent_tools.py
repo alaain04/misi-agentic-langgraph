@@ -4,13 +4,17 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langgraph.types import Command
 
 from src.main_graph.subgraphs.remediation.deepagent.tools import (
     make_bump_dependency_tool,
+    make_commit_outcome_tool,
+    make_commit_plan_tool,
     make_dependents_of_tool,
     make_read_release_notes_tool,
     make_verify_tool,
 )
+from src.models.remediation import MigrationPlan, MigrationTask, RemediationOutcome
 
 
 class FakeContainer:
@@ -91,3 +95,32 @@ async def test_verify_tool_reports_installed(tmp_path):
     )
     result = await tool.ainvoke({})
     assert result["installed"] is True
+
+
+@pytest.mark.asyncio
+async def test_commit_plan_writes_plan_to_state():
+    tool = make_commit_plan_tool()
+    plan = MigrationPlan(
+        target_dep="lodash",
+        tier_hint="r2",
+        tasks=[MigrationTask(kind="bump", rationale="x", to_range="^4.17.21")],
+    )
+    result = await tool.ainvoke({"plan": plan})
+    assert isinstance(result, Command)
+    assert result.update["migration_plans"]["lodash"]["tier_hint"] == "r2"
+
+
+@pytest.mark.asyncio
+async def test_commit_outcome_writes_outcome_to_state():
+    tool = make_commit_outcome_tool()
+    outcome = RemediationOutcome(
+        strategy="bump_with_codemod",
+        to_range="^5.0.0",
+        code_diff="--- a\n+++ b\n",
+        status="skipped",
+        summary="adapted call sites",
+    )
+    result = await tool.ainvoke({"target_dep": "lodash", "outcome": outcome})
+    assert isinstance(result, Command)
+    assert result.update["outcomes"]["lodash"]["to_range"] == "^5.0.0"
+    assert result.update["outcomes"]["lodash"]["code_diff"] == "--- a\n+++ b\n"
