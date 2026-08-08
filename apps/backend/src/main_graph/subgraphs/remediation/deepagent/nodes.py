@@ -23,6 +23,7 @@ from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.main_graph.subgraphs.remediation.verify import verify_working_copy
 from src.main_graph.subgraphs.remediation.workspace import copy_repo
 from src.models.remediation import (
+    FindingSummary,
     MigrationPlan,
     Remediation,
     RemediationOutcome,
@@ -473,15 +474,32 @@ def _pr_changes_table(group_remediations: list[Remediation]) -> str:
     return "\n".join([header, *rows])
 
 
+def _truncate(text: str, limit: int = 150) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
 def _pr_findings_table(group_remediations: list[Remediation]) -> str:
-    rows = [
-        f"| {finding} | {r.target_dep} |"
-        for r in group_remediations
-        for finding in (r.addresses or [r.target_dep])
-    ]
+    summaries: dict[str, FindingSummary] = {
+        fs.dep_name: fs for r in group_remediations for fs in r.finding_summaries
+    }
+    rows = []
+    for r in group_remediations:
+        for finding in r.addresses or [r.target_dep]:
+            summary = summaries.get(finding)
+            severity = summary.severity if summary else "-"
+            description = _truncate(summary.description) if summary else "-"
+            rows.append(
+                f"| {finding} | {severity} | {description} | {r.target_dep} |"
+            )
     if not rows:
         return "None."
-    header = "| Finding | Resolved by |\n| --- | --- |"
+    header = (
+        "| Finding | Severity | Description | Resolved by |\n"
+        "| --- | --- | --- | --- |"
+    )
     return "\n".join([header, *rows])
 
 

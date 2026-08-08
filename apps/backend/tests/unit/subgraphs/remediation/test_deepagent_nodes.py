@@ -1091,6 +1091,13 @@ def test_pr_title_and_body_bump_case():
         Remediation(
             id="r1",
             addresses=["lodash"],
+            finding_summaries=[
+                FindingSummary(
+                    dep_name="lodash",
+                    severity="high",
+                    description="known prototype pollution vulnerability",
+                )
+            ],
             target_dep="lodash",
             strategy="bump",
             from_range="^4.17.11",
@@ -1109,11 +1116,49 @@ def test_pr_title_and_body_bump_case():
     assert title == "Remediate lodash (bump)"
     assert "please review before merging" not in body
     assert "| lodash | bump | `^4.17.11` -> `^4.17.21` | - |" in body
-    assert "| lodash | lodash |" in body
+    assert (
+        "| lodash | high | known prototype pollution vulnerability | lodash |"
+        in body
+    )
     assert "- Install: passed" in body
     assert "- Tests: passed" in body
     assert "- Audit re-scan: finding no longer present" in body
     assert "## Migration notes" not in body
+
+
+def test_pr_findings_table_truncates_long_description():
+    long_desc = "x" * 300
+    members = [
+        Remediation(
+            addresses=["lodash"],
+            finding_summaries=[
+                FindingSummary(
+                    dep_name="lodash", severity="high", description=long_desc
+                )
+            ],
+            target_dep="lodash",
+        )
+    ]
+    table = deepagent_nodes._pr_findings_table(members)
+    row = next(line for line in table.splitlines() if line.startswith("| lodash"))
+    cell = row.split(" | ")[2]
+    assert len(cell) <= 150
+    assert cell.endswith("…")
+
+
+def test_pr_findings_table_none_when_no_addresses():
+    # `_pr_findings_table` falls back to `r.target_dep` when `addresses` is
+    # empty (pre-existing behavior, unchanged by this task), so a member with
+    # addresses=[] still yields a row. The "None." branch is only reachable
+    # with an empty group.
+    members: list[Remediation] = []
+    assert deepagent_nodes._pr_findings_table(members) == "None."
+
+
+def test_pr_findings_table_dash_when_no_summary_for_finding():
+    members = [Remediation(addresses=["lodash"], target_dep="lodash")]
+    table = deepagent_nodes._pr_findings_table(members)
+    assert "| lodash | - | - | lodash |" in table
 
 
 def test_pr_title_and_body_replace_case_includes_migration_notes():
@@ -1136,8 +1181,8 @@ def test_pr_title_and_body_replace_case_includes_migration_notes():
     assert title == "Remediate left-pad (replace - review required)"
     assert "please review before merging" in body
     assert "replaced with `pad-string@^2.0.0`" in body
-    assert "| left-pad | left-pad |" in body
-    assert "| old-transitive | left-pad |" in body
+    assert "| left-pad | - | - | left-pad |" in body
+    assert "| old-transitive | - | - | left-pad |" in body
     assert "- Audit re-scan: finding still present" in body
     assert "## Migration notes" in body
     assert "swap default import for the named `pad` export" in body
