@@ -93,3 +93,46 @@ def test_two_transitives_under_same_direct_unify_finding_summaries():
 def test_severity_filter_drops_finding_summaries_below_floor():
     targets = select_remediation_targets([_f("lodash", "low")], GRAPH, "high")
     assert targets == []
+
+
+def test_higher_severity_finding_wins_when_dep_has_multiple_findings():
+    findings = [
+        FindingNote(
+            dep_name="lodash",
+            severity="low",
+            description="package is unmaintained since 2021",
+            evidence=[],
+        ),
+        FindingNote(
+            dep_name="lodash",
+            severity="critical",
+            description="critical RCE vulnerability",
+            evidence=[],
+        ),
+    ]
+    targets = select_remediation_targets(findings, GRAPH, "low")
+    assert len(targets) == 1
+    assert targets[0].addresses == ["lodash"]
+    summary = targets[0].finding_summaries[0]
+    assert summary.severity == "critical"
+    assert summary.description == "critical RCE vulnerability"
+
+
+def test_higher_severity_finding_wins_regardless_of_order():
+    findings = [
+        FindingNote(
+            dep_name="lodash",
+            severity="critical",
+            description="critical RCE vulnerability",
+            evidence=[],
+        ),
+        FindingNote(
+            dep_name="lodash",
+            severity="low",
+            description="package is unmaintained since 2021",
+            evidence=[],
+        ),
+    ]
+    targets = select_remediation_targets(findings, GRAPH, "low")
+    summary = targets[0].finding_summaries[0]
+    assert summary.severity == "critical"

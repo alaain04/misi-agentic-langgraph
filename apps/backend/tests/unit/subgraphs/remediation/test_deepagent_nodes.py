@@ -1146,6 +1146,29 @@ def test_pr_findings_table_truncates_long_description():
     assert cell.endswith("…")
 
 
+def test_pr_findings_table_escapes_pipe_in_description():
+    members = [
+        Remediation(
+            addresses=["lodash"],
+            finding_summaries=[
+                FindingSummary(
+                    dep_name="lodash",
+                    severity="high",
+                    description=(
+                        "Prototype pollution | affects parse() | CVE-2021-44906"
+                    ),
+                )
+            ],
+            target_dep="lodash",
+        )
+    ]
+    table = deepagent_nodes._pr_findings_table(members)
+    row = next(line for line in table.splitlines() if line.startswith("| lodash"))
+    # Exactly 4 cells: Finding, Severity, Description, Resolved by.
+    assert row.count(" | ") == 3
+    assert "\\|" in row
+
+
 def test_pr_findings_table_none_when_no_addresses():
     # `_pr_findings_table` falls back to `r.target_dep` when `addresses` is
     # empty (pre-existing behavior, unchanged by this task), so a member with

@@ -477,8 +477,8 @@ def _pr_changes_table(group_remediations: list[Remediation]) -> str:
 def _truncate(text: str, limit: int = 150) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= limit:
-        return collapsed
-    return collapsed[: limit - 1].rstrip() + "…"
+        return collapsed.replace("|", "\\|")
+    return collapsed[: limit - 1].rstrip().replace("|", "\\|") + "…"
 
 
 def _pr_findings_table(group_remediations: list[Remediation]) -> str:
