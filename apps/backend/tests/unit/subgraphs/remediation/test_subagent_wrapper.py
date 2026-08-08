@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -279,6 +280,86 @@ async def test_run_reports_failed_when_agent_produces_no_structured_response():
         == "agent produced no structured decision"
     )
     assert not os.path.exists(mkdtemp_root)
+
+
+@pytest.mark.asyncio
+async def test_semaphore_caps_concurrent_nested_agent_runs():
+    """Without TARGET_SEMAPHORE, dispatching N targets in one coordinator
+    turn means N concurrent nested deep agents each making their own LLM
+    call -- unbounded and the actual mechanism behind the rate-limit
+    exhaustion this guards against. Verify concurrent _run invocations are
+    capped at the semaphore's size regardless of how many are launched."""
+    prep = _prep()
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    mkdtemp_root, work_dir = _cloned_repo()
+
+    spec = build_target_subagent()
+
+    concurrent = 0
+    peak = 0
+
+    async def _slow_ainvoke(*args, **kwargs):
+        nonlocal concurrent, peak
+        concurrent += 1
+        peak = max(peak, concurrent)
+        await asyncio.sleep(0.02)
+        concurrent -= 1
+        return {
+            "structured_response": RemediationOutcome(
+                strategy="bump", to_range="^9.0.0", summary="clean bump"
+            )
+        }
+
+    test_semaphore = asyncio.Semaphore(2)
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper._extract_target_dep",
+            AsyncMock(return_value="eslint"),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.copy_repo",
+            return_value=work_dir,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.TARGET_SEMAPHORE",
+            test_semaphore,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+        ) as mock_create,
+    ):
+        nested_agent = AsyncMock()
+        nested_agent.ainvoke = _slow_ainvoke
+        mock_create.return_value = nested_agent
+
+        await asyncio.gather(
+            *[
+                spec["runnable"].ainvoke(
+                    {
+                        "messages": [{"role": "user", "content": "Remediate eslint."}],
+                        "job_id": "job-1",
+                        "prep_result_id": "prep-1",
+                        "targets": {
+                            "eslint": {
+                                "target_dep": "eslint",
+                                "addresses": ["eslint"],
+                                "current_range": "8.0.0",
+                            }
+                        },
+                        "remediations": {},
+                        "requires_edges": {},
+                    },
+                    config,
+                )
+                for _ in range(5)
+            ]
+        )
+
+    assert peak <= 2
 
 
 @pytest.mark.asyncio

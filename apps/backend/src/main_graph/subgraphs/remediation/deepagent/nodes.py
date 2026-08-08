@@ -10,6 +10,10 @@ from langgraph.errors import GraphRecursionError
 
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.remediation.deepagent.grouping import connected_groups
+from src.main_graph.subgraphs.remediation.deepagent.limits import (
+    MAX_RETRIES,
+    REMEDIATION_RATE_LIMITER,
+)
 from src.main_graph.subgraphs.remediation.deepagent.replay import (
     apply_group_changes,
     replay_and_verify_group,
@@ -34,7 +38,11 @@ _MAX_GROUPS = 20
 
 def _build_root_deep_agent():
     return create_deep_agent(
-        model=get_llm(Model.GPT_5_4_MINI),
+        model=get_llm(
+            Model.GPT_5_4_MINI,
+            rate_limiter=REMEDIATION_RATE_LIMITER,
+            max_retries=MAX_RETRIES,
+        ),
         tools=[],
         subagents=[build_target_subagent()],
         system_prompt=(
