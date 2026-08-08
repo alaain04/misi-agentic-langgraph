@@ -1,33 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
 
-from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
 
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.remediation.deepagent.grouping import connected_groups
-from src.main_graph.subgraphs.remediation.deepagent.limits import (
-    MAX_RETRIES,
-    REMEDIATION_RATE_LIMITER,
-)
+from src.main_graph.subgraphs.remediation.deepagent.limits import TARGET_SEMAPHORE
 from src.main_graph.subgraphs.remediation.deepagent.replay import (
     apply_group_changes,
     replay_and_verify_group,
 )
-from src.main_graph.subgraphs.remediation.deepagent.state import (
-    RemediationDeepAgentState,
-)
 from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
-    build_codemod_subagent,
+    build_execution_agent,
 )
-from src.main_graph.subgraphs.remediation.deepagent.tools import (
-    make_commit_plan_tool,
-)
+from src.main_graph.subgraphs.remediation.plan import build_plans_for_targets
 from src.main_graph.subgraphs.remediation.state import RemediationState
+from src.main_graph.subgraphs.remediation.verify import verify_working_copy
 from src.main_graph.subgraphs.remediation.workspace import copy_repo
 from src.models.remediation import (
     MigrationPlan,
@@ -35,47 +28,14 @@ from src.models.remediation import (
     RemediationOutcome,
     RemediationResult,
     RemediationTarget,
+    VerificationResult,
 )
-from src.utils.llm import Model, get_llm
 
 logger = logging.getLogger(__name__)
 
 _RECURSION_LIMIT = 50
 _MAX_CORRECTION_ROUNDS = 2
 _MAX_GROUPS = 20
-
-_PLANNER_PROMPT = """\
-You plan and delegate dependency remediation for a Node.js project. For each
-open target you are given: the tier hint, the release digest (whether a
-migration is needed and a guide), the dependents, and the call sites.
-
-For EACH target you MUST:
-1. Call commit_plan with a MigrationPlan: a `bump` task for a clean upgrade;
-   `bump` + `codemod` task(s) when the release digest says migration_needed;
-   a `replace` task only when the tier hint is r3. Put companion deps in
-   `requires`.
-2. Then dispatch codemod_adapter for every codemod task (give it the
-   dependency name, the migration guide, and the affected files). Do NOT
-   edit code yourself. Bump and replace tasks need no dispatch -- the root
-   applies bumps deterministically and defers replace tasks.
-Stop once every target has a committed plan and its codemod tasks are
-dispatched."""
-
-
-def _build_planning_agent(work_dir, container, docker_image, package_manager):
-    return create_deep_agent(
-        model=get_llm(
-            Model.GPT_5_4_MINI,
-            rate_limiter=REMEDIATION_RATE_LIMITER,
-            max_retries=MAX_RETRIES,
-        ),
-        tools=[make_commit_plan_tool()],
-        subagents=[
-            build_codemod_subagent(work_dir, container, docker_image, package_manager),
-        ],
-        system_prompt=_PLANNER_PROMPT,
-        state_schema=RemediationDeepAgentState,
-    )
 
 
 def _resolve_working_targets(state: RemediationState, prep) -> dict[str, dict]:
@@ -89,41 +49,104 @@ def _resolve_working_targets(state: RemediationState, prep) -> dict[str, dict]:
         out[dep] = (
             known.get(dep)
             or RemediationTarget(
-                target_dep=dep, addresses=[], current_range=direct.get(dep)
+                target_dep=dep,
+                addresses=[],
+                finding_summaries=[],
+                current_range=direct.get(dep),
             ).model_dump()
         )
     return out
 
 
-def _format_open_targets(
-    targets: dict[str, dict], investigations: dict[str, dict]
+def _plan_kinds(plan: dict) -> set[str]:
+    return {t.get("kind") for t in plan.get("tasks") or []}
+
+
+def _format_group_message(
+    group: list[str],
+    plans: dict[str, dict],
+    investigations: dict[str, dict],
+    failures: dict[str, dict],
 ) -> str:
-    lines = ["Open targets:"]
-    for dep, t in targets.items():
+    lines = ["Targets in this working copy:"]
+    for dep in group:
+        plan = plans.get(dep) or {}
         inv = investigations.get(dep) or {}
-        rel = inv.get("release") or {}
+        kinds = sorted(_plan_kinds(plan)) or ["bump"]
         lines.append(
-            f"- {dep} (tier={t.get('tier')}, "
-            f"addresses={t.get('addresses') or 'none'}, "
-            f"migration_needed={rel.get('migration_needed')}, "
-            f"call_sites={inv.get('call_sites') or []}, "
-            f"guide={rel.get('migration_guide') or ''})"
+            f"- {dep}: kind={'+'.join(kinds)}, "
+            f"guide={plan.get('migration_guide') or 'none'}, "
+            f"call_sites={inv.get('call_sites') or []}"
         )
+        failure = failures.get(dep)
+        if failure and failure.get("logs_snippet"):
+            lines.append(
+                "  PREVIOUS ATTEMPT FAILED verification -- diagnose and fix "
+                f"this instead of repeating the same change: "
+                f"{failure['logs_snippet']}"
+            )
     return "\n".join(lines)
 
 
-def _remediations_from_plans(
+async def _run_group(
+    group: list[str],
+    plans: dict[str, dict],
+    investigations: dict[str, dict],
+    failures: dict[str, dict],
+    prep,
+    container,
+    config: RunnableConfig,
+) -> dict[str, dict] | None:
+    """Invoke ONE flat execution agent directly for this group (never via
+    deepagents' task() tool -- see subagent_wrapper.py). Returns this
+    group's {target_dep: RemediationOutcome dict} outcomes, or None if the
+    agent hit its recursion limit (the caller then omits this group's
+    targets from `remediations` entirely, which routes them through
+    group_and_verify_gate's existing missing-member retry path instead of
+    marking them individually failed)."""
+    work_dir = copy_repo(prep.repo_path)
+    try:
+        agent = build_execution_agent(
+            work_dir, container, prep.docker_image, prep.detected_package_manager
+        )
+        message = _format_group_message(group, plans, investigations, failures)
+        initial_state = {
+            "messages": [{"role": "user", "content": message}],
+            "outcomes": {},
+        }
+        run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
+        async with TARGET_SEMAPHORE:
+            try:
+                result = await agent.ainvoke(initial_state, run_config)
+            except GraphRecursionError:
+                logger.warning(
+                    "_run_group: hit recursion_limit=%d for group %s before "
+                    "finishing; discarding this round's in-progress work",
+                    _RECURSION_LIMIT,
+                    group,
+                )
+                return None
+        return result.get("outcomes") or {}
+    finally:
+        shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
+
+
+def _assemble_remediations(
     targets: dict[str, dict],
     plans: dict[str, dict],
     outcomes: dict[str, dict],
+    omit: set[str],
 ) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for dep, target_dict in targets.items():
+        if dep in omit:
+            continue
         target = RemediationTarget(**target_dict)
         plan_dict = plans.get(dep)
         if plan_dict is None:
             out[dep] = Remediation(
                 addresses=target.addresses,
+                finding_summaries=target.finding_summaries,
                 target_dep=dep,
                 from_range=target.current_range,
                 status="failed",
@@ -131,10 +154,10 @@ def _remediations_from_plans(
             ).model_dump()
             continue
         plan = MigrationPlan(**plan_dict)
-        kinds = {t.kind for t in plan.tasks}
-        if "replace" in kinds:
+        if "replace" in _plan_kinds(plan_dict):
             rem = Remediation(
                 addresses=target.addresses,
+                finding_summaries=target.finding_summaries,
                 target_dep=dep,
                 strategy="replace",
                 from_range=target.current_range,
@@ -146,6 +169,7 @@ def _remediations_from_plans(
             outcome = RemediationOutcome(**outcomes[dep])
             rem = Remediation(
                 addresses=target.addresses,
+                finding_summaries=target.finding_summaries,
                 target_dep=dep,
                 strategy=outcome.strategy,
                 from_range=target.current_range,
@@ -158,31 +182,23 @@ def _remediations_from_plans(
                 skip_reason=outcome.skip_reason,
                 plan=plan,
             )
-        elif "codemod" in kinds:
+        else:
             rem = Remediation(
                 addresses=target.addresses,
+                finding_summaries=target.finding_summaries,
                 target_dep=dep,
                 from_range=target.current_range,
                 status="failed",
-                skip_reason="codemod produced no outcome",
-                plan=plan,
-            )
-        else:
-            bump = next((t for t in plan.tasks if t.kind == "bump"), None)
-            rem = Remediation(
-                addresses=target.addresses,
-                target_dep=dep,
-                strategy="bump",
-                from_range=target.current_range,
-                to_range=bump.to_range if bump else None,
-                status="skipped",  # provisional; gate sets real status
+                skip_reason="execution agent produced no outcome",
                 plan=plan,
             )
         out[dep] = rem.model_dump()
     return out
 
 
-async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -> dict:
+async def remediate_targets_node(
+    state: RemediationState, config: RunnableConfig
+) -> dict:
     svc = get_services(config)
     dao = svc["result_dao"]
     container = svc["container"]
@@ -198,56 +214,72 @@ async def root_deepagent_node(state: RemediationState, config: RunnableConfig) -
         }
 
     investigations = state.get("investigations") or {}
-    open_list = _format_open_targets(targets, investigations)
+    plans = dict(state.get("migration_plans") or {})
 
-    work_dir = copy_repo(prep.repo_path)
-    try:
-        agent = _build_planning_agent(
-            work_dir, container, prep.docker_image, prep.detected_package_manager
-        )
-        initial_state = {
-            "messages": [{"role": "user", "content": open_list}],
-            "job_id": state["job_id"],
-            "prep_result_id": state["prep_result_id"],
-            "targets": targets,
-            "remediations": {},
-            "requires_edges": {},
-            "migration_plans": {},
-            "outcomes": {},
-        }
-        run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
-        try:
-            result = await agent.ainvoke(initial_state, run_config)
-        except GraphRecursionError:
-            # Spec D10: every bound (recursion limit, correction-round cap,
-            # group cap) must fail honestly into skipped/failed with a
-            # reason instead of crashing the job. Nothing from an aborted
-            # run is trustworthy, so discard remediations/requires_edges/
-            # migration_plans entirely -- group_and_verify_gate then sees
-            # every target in this round as never-dispatched and routes it
-            # through the same retry mechanism used for a partial group,
-            # eventually failing honestly at the correction-round cap
-            # rather than propagating the exception.
-            logger.warning(
-                "root_deepagent_node: hit recursion_limit=%d before "
-                "finishing; discarding this round's in-progress work",
-                _RECURSION_LIMIT,
-            )
-            return {
-                "targets": targets,
-                "remediations": {},
-                "requires_edges": {},
-                "migration_plans": {},
-            }
-    finally:
-        shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
+    # A dep named only via some other target's `requires` (never in the
+    # original selection) has no plan from build_migration_plan_node's
+    # batch call -- plan it now, scoped to just this dep, not a re-run of
+    # the whole batch.
+    unplanned = {dep: t for dep, t in targets.items() if dep not in plans}
+    if unplanned:
+        plans.update(await build_plans_for_targets(unplanned, investigations))
 
-    plans = result.get("migration_plans") or {}
-    outcomes = result.get("outcomes") or {}
-    remediations = _remediations_from_plans(targets, plans, outcomes)
-    requires_edges = {
-        dep: plan["requires"] for dep, plan in plans.items() if plan.get("requires")
+    replace_deps = {
+        dep for dep in targets if "replace" in _plan_kinds(plans.get(dep, {}))
     }
+    # A dep with no plan at all (the batch/single-target planning call
+    # failed or omitted it) has nothing to give the execution agent -- fail
+    # it honestly via _assemble_remediations instead of dispatching an
+    # agent with no guidance.
+    exec_deps = [dep for dep in targets if dep in plans and dep not in replace_deps]
+
+    requires_edges = {
+        dep: plans[dep]["requires"]
+        for dep in targets
+        if plans.get(dep, {}).get("requires")
+    }
+    # Grouping can pull in names that are only ever a `requires` value (a
+    # companion never independently selected, or a replace-tier dep another
+    # target happens to require) -- neither has an exec plan to dispatch on
+    # this round. Filter each group down to real exec targets before
+    # dispatch; group_and_verify_gate's own (unfiltered) grouping still
+    # catches a companion-only name via its missing-member retry branch.
+    groups = [
+        [dep for dep in group if dep in exec_deps]
+        for group in connected_groups(exec_deps, requires_edges)
+    ]
+    groups = [g for g in groups if g]
+
+    prior_remediations = state.get("remediations") or {}
+    retrying = set(state.get("retry_targets") or [])
+
+    def _failures_for(group: list[str]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for dep in group:
+            if dep not in retrying:
+                continue
+            verification = (prior_remediations.get(dep) or {}).get("verification") or {}
+            if verification.get("logs_snippet"):
+                out[dep] = {"logs_snippet": verification["logs_snippet"]}
+        return out
+
+    async def _bounded(group: list[str]) -> tuple[list[str], dict[str, dict] | None]:
+        outcomes = await _run_group(
+            group, plans, investigations, _failures_for(group), prep, container, config
+        )
+        return group, outcomes
+
+    group_results = await asyncio.gather(*[_bounded(g) for g in groups])
+
+    outcomes: dict[str, dict] = {}
+    recursion_hit: set[str] = set()
+    for group, group_outcomes in group_results:
+        if group_outcomes is None:
+            recursion_hit.update(group)
+            continue
+        outcomes.update(group_outcomes)
+
+    remediations = _assemble_remediations(targets, plans, outcomes, recursion_hit)
     return {
         "targets": targets,
         "remediations": remediations,
@@ -298,15 +330,15 @@ async def group_and_verify_gate(
                 # record yet -- it was never dispatched, not dispatched-
                 # and-failed. Route it through the same retry mechanism
                 # used for failed verification instead of immediately
-                # failing the whole group: root_deepagent_node's retry-mode
-                # branch synthesizes a target entry for any retry_targets
-                # name not already in state["targets"] and explicitly
-                # instructs the root to dispatch it by name. Leave this
-                # group's already-dispatched members untouched in
-                # `remediations` (the outer state's _merge_replace reducer
-                # preserves them across rounds) and don't settle anything
-                # from this group yet -- its fate is decided once all
-                # members exist.
+                # failing the whole group: remediate_targets_node's retry-
+                # mode branch synthesizes a target entry for any
+                # retry_targets name not already in state["targets"] and
+                # explicitly instructs the root to dispatch it by name.
+                # Leave this group's already-dispatched members untouched
+                # in `remediations` (the outer state's _merge_replace
+                # reducer preserves them across rounds) and don't settle
+                # anything from this group yet -- its fate is decided once
+                # all members exist.
                 retry_targets.extend(missing)
                 continue
             for member_dict in members_dicts:
@@ -375,38 +407,132 @@ async def group_and_verify_gate(
 
 
 def route_after_group_verify(state: RemediationState) -> str:
-    return (
-        "root_deepagent_node" if state.get("retry_targets") else "pr_and_persist_node"
-    )
+    if state.get("retry_targets"):
+        return "remediate_targets_node"
+    return "pr_and_persist_node"
 
 
-def _pr_title_and_body(group_remediations: list[Remediation]) -> tuple[str, str]:
+# Reference layout for a generated remediation PR body. Keep new sections
+# additive to this shape rather than inventing a one-off format per caller.
+_PR_BODY_TEMPLATE = """\
+Automated dependency remediation ({label}).
+
+## Summary
+
+{summary}
+
+## Changes
+
+{changes_table}
+
+## Findings addressed
+
+{findings_table}
+
+## Verification (sandboxed container)
+
+{verification}
+{migration_notes}"""
+
+
+def _pr_strategy_label(group_remediations: list[Remediation]) -> str:
     strategies = {r.strategy for r in group_remediations}
     if "replace" in strategies:
-        label = "replace - review required"
-    elif "bump_with_codemod" in strategies:
-        label = "codemod - review required"
-    else:
-        label = "bump"
-    deps = ", ".join(sorted(r.target_dep for r in group_remediations))
-    title = f"Remediate {deps} ({label})"
-    lines = [f"Automated dependency remediation - {label} (verified in sandbox):", ""]
+        return "replace"
+    if "bump_with_codemod" in strategies:
+        return "codemod"
+    return "bump"
+
+
+def _pr_summary(group_remediations: list[Remediation], label: str) -> str:
+    dep_count = len(group_remediations)
+    finding_count = len(
+        {f for r in group_remediations for f in (r.addresses or [r.target_dep])}
+    )
+    dep_word = "dependency" if dep_count == 1 else "dependencies"
+    finding_word = "finding" if finding_count == 1 else "findings"
+    summary = (
+        f"- Fixes {dep_count} {dep_word}, resolving {finding_count} {finding_word}."
+    )
+    lines = [summary]
+    if label != "bump":
+        lines.append(f"- Strategy: {label} -- please review before merging.")
+    return "\n".join(lines)
+
+
+def _pr_changes_table(group_remediations: list[Remediation]) -> str:
+    header = (
+        "| Dependency | Strategy | Change | Required by |\n| --- | --- | --- | --- |"
+    )
+    rows = []
     for r in group_remediations:
         if r.strategy == "replace":
-            change = f"replace with {r.replacement_dep} {r.replacement_range}"
+            change = f"replaced with `{r.replacement_dep}@{r.replacement_range}`"
         else:
-            change = f"{r.from_range} -> {r.to_range}"
-        addresses = f" (fixes: {', '.join(r.addresses)})" if r.addresses else ""
-        reason = f" (required by {', '.join(r.required_by)})" if r.required_by else ""
-        lines.append(f"- {r.target_dep}: {change}{addresses}{reason}")
-        if r.migration_plan:
-            lines.append(f"  migration notes: {r.migration_plan}")
-    return title, "\n".join(lines)
+            change = f"`{r.from_range}` -> `{r.to_range}`"
+        required_by = ", ".join(r.required_by) if r.required_by else "-"
+        rows.append(f"| {r.target_dep} | {r.strategy} | {change} | {required_by} |")
+    return "\n".join([header, *rows])
+
+
+def _pr_findings_table(group_remediations: list[Remediation]) -> str:
+    rows = [
+        f"| {finding} | {r.target_dep} |"
+        for r in group_remediations
+        for finding in (r.addresses or [r.target_dep])
+    ]
+    if not rows:
+        return "None."
+    header = "| Finding | Resolved by |\n| --- | --- |"
+    return "\n".join([header, *rows])
+
+
+def _pr_verification_summary(verification: VerificationResult) -> str:
+    lines = [f"- Install: {'passed' if verification.installed else 'failed'}"]
+    if verification.built is not None:
+        lines.append(f"- Build: {'passed' if verification.built else 'failed'}")
+    if verification.tested is not None:
+        lines.append(f"- Tests: {'passed' if verification.tested else 'failed'}")
+    if verification.finding_resolved is not None:
+        resolved = (
+            "finding no longer present"
+            if verification.finding_resolved
+            else "finding still present"
+        )
+        lines.append(f"- Audit re-scan: {resolved}")
+    return "\n".join(lines)
+
+
+def _pr_title_and_body(
+    group_remediations: list[Remediation], verification: VerificationResult
+) -> tuple[str, str]:
+    label = _pr_strategy_label(group_remediations)
+    deps = ", ".join(sorted(r.target_dep for r in group_remediations))
+    title_label = label if label == "bump" else f"{label} - review required"
+    title = f"Remediate {deps} ({title_label})"
+
+    migration_notes = "\n".join(
+        f"- **{r.target_dep}**: {r.migration_plan}"
+        for r in group_remediations
+        if r.migration_plan
+    )
+    body = _PR_BODY_TEMPLATE.format(
+        label=label,
+        summary=_pr_summary(group_remediations, label),
+        changes_table=_pr_changes_table(group_remediations),
+        findings_table=_pr_findings_table(group_remediations),
+        verification=_pr_verification_summary(verification),
+        migration_notes=f"\n## Migration notes\n\n{migration_notes}\n"
+        if migration_notes
+        else "",
+    )
+    return title, body
 
 
 async def pr_and_persist_node(state: RemediationState, config: RunnableConfig) -> dict:
     svc = get_services(config)
     dao = svc["result_dao"]
+    container = svc["container"]
     consent = bool(svc.get("remediate"))
     git_pr = svc.get("git_pr")
     prep = await dao.get_prep(state["prep_result_id"])
@@ -430,8 +556,32 @@ async def pr_and_persist_node(state: RemediationState, config: RunnableConfig) -
                         group,
                     )
                     continue
+                # group_and_verify_gate's verification ran install/build/test
+                # against a throwaway replay copy that is deleted right after
+                # -- it never touched this work_dir, so its lock file is
+                # still the pre-bump one. Re-install here, on the copy that
+                # actually gets committed, so the lock file matches the
+                # bumped package.json before it ships.
+                targeted = sorted(
+                    {dep for m in members for dep in [m.target_dep, *m.addresses]}
+                )
+                verification = await verify_working_copy(
+                    work_dir,
+                    container,
+                    prep.docker_image,
+                    prep.detected_package_manager,
+                    targeted,
+                )
+                if not _is_green(verification):
+                    logger.warning(
+                        "pr_and_persist_node: final install/verify failed for "
+                        "group %s, skipping PR: %s",
+                        group,
+                        verification.logs_snippet,
+                    )
+                    continue
                 branch = f"remediation/{state['job_id'][:8]}-{group[0]}"
-                title, body = _pr_title_and_body(members)
+                title, body = _pr_title_and_body(members, verification)
                 try:
                     pr_url = await git_pr.open_pr(work_dir, branch, title, body)
                     for member in members:
