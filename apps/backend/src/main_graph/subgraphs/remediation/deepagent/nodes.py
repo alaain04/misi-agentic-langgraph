@@ -503,19 +503,24 @@ def _pr_findings_table(group_remediations: list[Remediation]) -> str:
     return "\n".join([header, *rows])
 
 
+def _checkbox(passed: bool, label: str) -> str:
+    return f"- [x] {label}" if passed else f"- [ ] {label} (failed)"
+
+
 def _pr_verification_summary(verification: VerificationResult) -> str:
-    lines = [f"- Install: {'passed' if verification.installed else 'failed'}"]
+    lines = [_checkbox(verification.installed, "Install")]
     if verification.built is not None:
-        lines.append(f"- Build: {'passed' if verification.built else 'failed'}")
+        lines.append(_checkbox(verification.built, "Build"))
     if verification.tested is not None:
-        lines.append(f"- Tests: {'passed' if verification.tested else 'failed'}")
+        lines.append(_checkbox(verification.tested, "Tests"))
     if verification.finding_resolved is not None:
         resolved = (
             "finding no longer present"
             if verification.finding_resolved
             else "finding still present"
         )
-        lines.append(f"- Audit re-scan: {resolved}")
+        box = "x" if verification.finding_resolved else " "
+        lines.append(f"- [{box}] Audit re-scan: {resolved}")
     return "\n".join(lines)
 
 

@@ -1120,9 +1120,9 @@ def test_pr_title_and_body_bump_case():
         "| lodash | high | known prototype pollution vulnerability | lodash |"
         in body
     )
-    assert "- Install: passed" in body
-    assert "- Tests: passed" in body
-    assert "- Audit re-scan: finding no longer present" in body
+    assert "- [x] Install" in body
+    assert "- [x] Tests" in body
+    assert "- [x] Audit re-scan: finding no longer present" in body
     assert "## Migration notes" not in body
 
 
@@ -1161,6 +1161,27 @@ def test_pr_findings_table_dash_when_no_summary_for_finding():
     assert "| lodash | - | - | lodash |" in table
 
 
+def test_pr_verification_summary_all_passed():
+    v = VerificationResult(
+        installed=True, built=True, tested=True, finding_resolved=True
+    )
+    summary = deepagent_nodes._pr_verification_summary(v)
+    assert summary == (
+        "- [x] Install\n"
+        "- [x] Build\n"
+        "- [x] Tests\n"
+        "- [x] Audit re-scan: finding no longer present"
+    )
+
+
+def test_pr_verification_summary_failure_and_omitted_fields():
+    v = VerificationResult(
+        installed=True, built=None, tested=False, finding_resolved=None
+    )
+    summary = deepagent_nodes._pr_verification_summary(v)
+    assert summary == "- [x] Install\n- [ ] Tests (failed)"
+
+
 def test_pr_title_and_body_replace_case_includes_migration_notes():
     members = [
         Remediation(
@@ -1183,6 +1204,7 @@ def test_pr_title_and_body_replace_case_includes_migration_notes():
     assert "replaced with `pad-string@^2.0.0`" in body
     assert "| left-pad | - | - | left-pad |" in body
     assert "| old-transitive | - | - | left-pad |" in body
-    assert "- Audit re-scan: finding still present" in body
+    assert "- [ ] Audit re-scan (failed)" not in body
+    assert "- [ ] Audit re-scan: finding still present" in body
     assert "## Migration notes" in body
     assert "swap default import for the named `pad` export" in body
