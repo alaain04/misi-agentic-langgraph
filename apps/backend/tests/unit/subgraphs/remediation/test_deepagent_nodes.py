@@ -1139,27 +1139,25 @@ async def test_pr_and_persist_node_opens_one_pr_when_consent_true():
     dao.save_remediation = AsyncMock(return_value="rid-1")
     git_pr = AsyncMock()
     git_pr.open_pr = AsyncMock(return_value="https://gh/pr/1")
-    container = MagicMock()
-    container.run = AsyncMock(return_value=(0, "", "{}"))
     config = {
         "configurable": {
             "result_dao": dao,
-            "container": container,
+            "container": MagicMock(),
             "remediate": True,
             "git_pr": git_pr,
         }
     }
 
     # A real dst/repo-shaped temp dir matching copy_repo's actual contract
-    # (see test_replay.py) -- pr_and_persist_node now cleans up via
+    # -- pr_and_persist_node cleans up via
     # shutil.rmtree(os.path.dirname(work_dir)), so a test double shaped any
     # other way (e.g. a bare tmp_path, not tmp_path/repo) would make that
     # cleanup target something far too broad, like a shared pytest tmp root.
+    # This dir is now pre-verified by group_and_verify_gate (Task 2) --
+    # pr_and_persist_node must not touch its contents, only ship it.
     mkdtemp_root = tempfile.mkdtemp(prefix="test-remediation-")
     work_dir = os.path.join(mkdtemp_root, "repo")
     os.makedirs(work_dir)
-    with open(os.path.join(work_dir, "package.json"), "w") as f:
-        f.write('{"dependencies": {"lodash": "^4.17.11"}}')
 
     state = {
         "job_id": "job-1",
@@ -1172,43 +1170,35 @@ async def test_pr_and_persist_node_opens_one_pr_when_consent_true():
                 "strategy": "bump",
                 "to_range": "^4.17.21",
                 "status": "fixed",
+                "verification": {"installed": True, "finding_resolved": True},
             }
         },
-        "requires_edges": {},
+        "verified_workdirs": {"lodash": work_dir},
     }
-    with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
-        return_value=work_dir,
-    ):
-        result = await pr_and_persist_node(state, config)
+    result = await pr_and_persist_node(state, config)
 
     git_pr.open_pr.assert_awaited_once()
+    branch = git_pr.open_pr.await_args.args[1]
+    assert branch == "remediation/job-1-lodash"
     assert result == {"remediation_result_id": "rid-1"}
-    # The commit must be built from a freshly-installed work_dir -- not just
-    # the raw package.json bump -- so the lock file it ships is regenerated
-    # against the new range instead of going stale.
-    container.run.assert_awaited()
-    # Cleanup must target the mkdtemp root copy_repo actually created, not
-    # something broader.
+    # Cleanup must target the mkdtemp root, not something broader.
     assert not os.path.exists(mkdtemp_root)
 
 
 @pytest.mark.asyncio
-async def test_pr_and_persist_node_skips_pr_when_final_install_fails():
-    """A group can pass group_and_verify_gate's replay (a throwaway copy)
-    and still fail to install on the copy that actually gets committed --
-    e.g. a transient registry error. That copy must never reach open_pr with
-    a package.json/lock file mismatch."""
+async def test_pr_and_persist_node_groups_shared_workdir_into_one_pr():
+    """Two deps whose verified_workdirs entries point at the SAME path (a
+    coupled group group_and_verify_gate already verified together) must
+    ship as one PR, not two."""
     dao = AsyncMock()
     dao.get_prep = AsyncMock(return_value=_prep(repo_path="/original/repo"))
     dao.save_remediation = AsyncMock(return_value="rid-1")
     git_pr = AsyncMock()
-    container = MagicMock()
-    container.run = AsyncMock(return_value=(1, "", "network error"))
+    git_pr.open_pr = AsyncMock(return_value="https://gh/pr/1")
     config = {
         "configurable": {
             "result_dao": dao,
-            "container": container,
+            "container": MagicMock(),
             "remediate": True,
             "git_pr": git_pr,
         }
@@ -1217,32 +1207,45 @@ async def test_pr_and_persist_node_skips_pr_when_final_install_fails():
     mkdtemp_root = tempfile.mkdtemp(prefix="test-remediation-")
     work_dir = os.path.join(mkdtemp_root, "repo")
     os.makedirs(work_dir)
-    with open(os.path.join(work_dir, "package.json"), "w") as f:
-        f.write('{"dependencies": {"lodash": "^4.17.11"}}')
 
+    verification = {"installed": True, "finding_resolved": True}
     state = {
         "job_id": "job-1",
         "prep_result_id": "prep-1",
         "remediations": {
-            "lodash": {
+            "eslint": {
                 "id": "r1",
-                "addresses": ["lodash"],
-                "target_dep": "lodash",
+                "addresses": ["eslint"],
+                "target_dep": "eslint",
                 "strategy": "bump",
-                "to_range": "^4.17.21",
+                "to_range": "^9.0.0",
                 "status": "fixed",
-            }
+                "verification": verification,
+            },
+            "eslint-plugin-react": {
+                "id": "r2",
+                "addresses": [],
+                "target_dep": "eslint-plugin-react",
+                "strategy": "bump",
+                "to_range": "^8.0.0",
+                "status": "fixed",
+                "verification": verification,
+            },
         },
-        "requires_edges": {},
+        "verified_workdirs": {
+            "eslint": work_dir,
+            "eslint-plugin-react": work_dir,
+        },
     }
-    with patch(
-        "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
-        return_value=work_dir,
-    ):
-        result = await pr_and_persist_node(state, config)
+    result = await pr_and_persist_node(state, config)
 
-    git_pr.open_pr.assert_not_called()
+    git_pr.open_pr.assert_awaited_once()
     assert result == {"remediation_result_id": "rid-1"}
+    remediation = dao.save_remediation.await_args.args[0]
+    by_dep = {r.target_dep: r for r in remediation.remediations}
+    assert by_dep["eslint"].pr_url == "https://gh/pr/1"
+    assert by_dep["eslint-plugin-react"].pr_url == "https://gh/pr/1"
+    assert by_dep["eslint"].branch == by_dep["eslint-plugin-react"].branch
 
 
 def test_pr_title_and_body_bump_case():

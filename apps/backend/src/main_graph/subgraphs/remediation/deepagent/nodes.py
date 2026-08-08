@@ -12,7 +12,6 @@ from src.main_graph.config import get_services
 from src.main_graph.subgraphs.remediation.deepagent.grouping import connected_groups
 from src.main_graph.subgraphs.remediation.deepagent.limits import TARGET_SEMAPHORE
 from src.main_graph.subgraphs.remediation.deepagent.replay import (
-    apply_group_changes,
     replay_and_verify_group,
 )
 from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
@@ -20,7 +19,6 @@ from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
 )
 from src.main_graph.subgraphs.remediation.plan import build_plans_for_targets
 from src.main_graph.subgraphs.remediation.state import RemediationState
-from src.main_graph.subgraphs.remediation.verify import verify_working_copy
 from src.main_graph.subgraphs.remediation.workspace import copy_repo
 from src.models.remediation import (
     FindingSummary,
@@ -568,69 +566,39 @@ def _pr_title_and_body(
 async def pr_and_persist_node(state: RemediationState, config: RunnableConfig) -> dict:
     svc = get_services(config)
     dao = svc["result_dao"]
-    container = svc["container"]
     consent = bool(svc.get("remediate"))
     git_pr = svc.get("git_pr")
-    prep = await dao.get_prep(state["prep_result_id"])
 
     remediations = {
         dep: Remediation(**r) for dep, r in (state.get("remediations") or {}).items()
     }
-    requires_edges = state.get("requires_edges") or {}
-    groups = connected_groups(list(remediations), requires_edges)
+    verified_workdirs: dict[str, str] = state.get("verified_workdirs") or {}
 
-    for group in groups:
-        members = [remediations[dep] for dep in group if dep in remediations]
-        if not members or not all(m.status == "fixed" for m in members):
+    by_workdir: dict[str, list[str]] = {}
+    for dep, work_dir in verified_workdirs.items():
+        by_workdir.setdefault(work_dir, []).append(dep)
+
+    for work_dir, deps in by_workdir.items():
+        members = [remediations[dep] for dep in deps if dep in remediations]
+        if not members:
+            shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
             continue
-        if consent and git_pr:
-            work_dir = copy_repo(prep.repo_path)
+        try:
+            branch = f"remediation/{state['job_id'][:8]}-{sorted(deps)[0]}"
+            title, body = _pr_title_and_body(members, members[0].verification)
             try:
-                if not await apply_group_changes(work_dir, members):
-                    logger.warning(
-                        "pr_and_persist_node: replay failed for group %s, skipping PR",
-                        group,
-                    )
-                    continue
-                # group_and_verify_gate's verification ran install/build/test
-                # against a throwaway replay copy that is deleted right after
-                # -- it never touched this work_dir, so its lock file is
-                # still the pre-bump one. Re-install here, on the copy that
-                # actually gets committed, so the lock file matches the
-                # bumped package.json before it ships.
-                targeted = sorted(
-                    {dep for m in members for dep in [m.target_dep, *m.addresses]}
+                pr_url = await git_pr.open_pr(work_dir, branch, title, body)
+                for member in members:
+                    member.branch = branch
+                    member.pr_url = pr_url
+            except Exception as exc:
+                logger.warning(
+                    "pr_and_persist_node: PR creation failed for group %s: %s",
+                    deps,
+                    exc,
                 )
-                verification = await verify_working_copy(
-                    work_dir,
-                    container,
-                    prep.docker_image,
-                    prep.detected_package_manager,
-                    targeted,
-                )
-                if not _is_green(verification):
-                    logger.warning(
-                        "pr_and_persist_node: final install/verify failed for "
-                        "group %s, skipping PR: %s",
-                        group,
-                        verification.logs_snippet,
-                    )
-                    continue
-                branch = f"remediation/{state['job_id'][:8]}-{group[0]}"
-                title, body = _pr_title_and_body(members, verification)
-                try:
-                    pr_url = await git_pr.open_pr(work_dir, branch, title, body)
-                    for member in members:
-                        member.branch = branch
-                        member.pr_url = pr_url
-                except Exception as exc:
-                    logger.warning(
-                        "pr_and_persist_node: PR creation failed for group %s: %s",
-                        group,
-                        exc,
-                    )
-            finally:
-                shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
+        finally:
+            shutil.rmtree(os.path.dirname(work_dir), ignore_errors=True)
 
     result = RemediationResult(
         job_id=state["job_id"],
