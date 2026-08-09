@@ -7,12 +7,13 @@ from langchain_core.runnables import RunnableConfig
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.report.state import ReportState
 from src.models.results import ReportFinding, ReportResult
-from src.utils.llm import Model, get_llm, parse_llm_json
+from src.utils.llm import parse_llm_json
+from src.utils.model_registry import AgentRole, get_role_llm
 from src.utils.severity import SEVERITY_ORDER
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.REPORT_SYNTHESIZER)
 
 _SYSTEM = """\
 You are a technical report writer. You are given a list of already-vetted

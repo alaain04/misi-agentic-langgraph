@@ -7,9 +7,9 @@ from pydantic import BaseModel
 
 from src.models.conductor import FindingNote, ToolResult
 from src.models.results import ReportFinding
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.REPORT_CRITIQUE)
 
 _SYSTEM = textwrap.dedent("""\
     You are an evidence auditor for a dependency risk report. You are given

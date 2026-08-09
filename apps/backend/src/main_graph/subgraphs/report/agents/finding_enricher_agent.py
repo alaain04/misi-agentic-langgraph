@@ -25,12 +25,12 @@ from src.models.results import (
     PrepResult,
     ReportFinding,
 )
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
 logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 4
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.FINDING_ENRICHER)
 
 _TOOL_DESCRIPTIONS = {
     "web_search": "web_search(query: str): search the web for advisories/issues/"

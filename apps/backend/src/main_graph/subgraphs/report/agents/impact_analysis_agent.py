@@ -18,12 +18,12 @@ from src.main_graph.tools.search_code import find_local_usage_sites
 from src.models.conductor import FindingNote, ToolCall, ToolResult
 from src.models.results import BlastRadiusSummary, ImpactAnalysisDecision, PrepResult
 from src.utils.config import settings
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
 logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 4
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.IMPACT_ANALYSIS)
 _BLAST_RADIUS_FIELDS = {
     "affected_file_count",
     "affected_files",
