@@ -28,9 +28,9 @@ from src.main_graph.subgraphs.analysis.deepagent.limits import (
 )
 from src.main_graph.subgraphs.analysis.deepagent.specialist_runner import run_specialist
 from src.models.results import AgentDispatch
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.ANALYSIS_DISPATCH)
 
 
 class _SubagentState(TypedDict):

@@ -26,12 +26,12 @@ from src.models.results import (
     PrepResult,
 )
 from src.utils.config import settings
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
 logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 6
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.SPECIALIST_AGENT)
 
 _INJECTED_PARAMS = {
     "repo_path",

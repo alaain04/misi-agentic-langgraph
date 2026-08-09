@@ -29,6 +29,7 @@ from src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper import (
 )
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.utils.llm import Model, get_llm
+from src.utils.model_registry import resolve_model
 
 _MAX_CORRECTION_ROUNDS = 2
 _RECURSION_LIMIT = 50
@@ -79,9 +80,10 @@ def _roster(exclude: set[str] | None = None) -> str:
 
 
 def _build_deep_agent():
+    from src.utils.model_registry import AgentRole
     subagents = [build_agent_subagent(agent_type) for agent_type in REGISTRY]
     return create_deep_agent(
-        model=get_llm(Model.GPT_5_4_MINI),
+        model=get_llm(resolve_model(AgentRole.ANALYSIS_ROOT_DEEPAGENT)),
         subagents=subagents,
         state_schema=AnalysisDeepAgentState,
     )

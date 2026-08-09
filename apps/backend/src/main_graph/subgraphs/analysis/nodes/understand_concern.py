@@ -17,9 +17,9 @@ from src.main_graph.subgraphs.analysis.concern import (
     packages_valid,
 )
 from src.main_graph.subgraphs.analysis.state import AnalysisState
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.UNDERSTAND_CONCERN)
 
 _UNDERSTAND_CONCERN_SYSTEM = textwrap.dedent("""\
     Classify a user's dependency-risk concern for a Node.js project into a

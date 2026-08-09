@@ -19,7 +19,7 @@ from src.main_graph.subgraphs.analysis.agents.registry import (
     REGISTRY,
     get_agents,
 )
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def compute_missing_direct_deps(
     return [dep for dep in direct_deps if dep not in covered]
 
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.COVERAGE_JUDGE)
 
 _COVERAGE_JUDGE_SYSTEM = textwrap.dedent("""\
     You decide whether a dependency-risk investigation has already fully
