@@ -85,3 +85,48 @@ def test_total_cost_and_tokens_unchanged_by_breakdown_tracking():
     asyncio.run(llm.ainvoke("hi", config={"callbacks": [cb]}))
     assert cb.total_tokens == 1500
     assert cb.cost() > 0
+
+
+def test_nested_tags_prefer_last_role_tag_for_specificity():
+    # Regression test: when a parent graph tag (inherited) and child tag (local)
+    # are both present, LangChain puts the parent tag first and the child tag last.
+    # _role_from_tags should return the LAST matching tag (most specific/innermost),
+    # not the first. This ensures subagent calls are attributed to their own role,
+    # not the root deep agent's role.
+    # See: langchain_core.callbacks.manager._configure appends inheritable_tags
+    # before local_tags.
+    from uuid import uuid4
+
+    from langchain_core.outputs import Generation, LLMResult
+
+    cb = CostCallback()
+
+    # Simulate nested call: parent (root agent) tag followed by child (subagent) tag.
+    # This mirrors the real scenario where _deep_agent.with_config(
+    #   tags=["agent_role:analysis_root_deepagent"]
+    # ) causes that tag to be inherited, and then the subagent's
+    # get_role_llm(AgentRole.ANALYSIS_DISPATCH) adds its own tag.
+    parent_and_child_tags = [
+        "agent_role:analysis_root_deepagent",
+        "agent_role:analysis_dispatch",
+    ]
+
+    run_id = uuid4()
+    cb._start_times[run_id] = None  # Prevent latency calc issues
+    response = LLMResult(
+        generations=[[Generation(text="ok")]],
+        llm_output={
+            "token_usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+            },
+            "model_name": "gpt-5.4-mini-2026-03-17",
+        },
+    )
+    cb.on_llm_end(response=response, run_id=run_id, tags=parent_and_child_tags)
+
+    # Should attribute to analysis_dispatch (the child/last tag), not analysis_root_deepagent
+    breakdown = cb.breakdown()
+    assert set(breakdown) == {"analysis_dispatch"}
+    assert breakdown["analysis_dispatch"]["prompt_tokens"] == 100
+    assert breakdown["analysis_dispatch"]["completion_tokens"] == 50

@@ -20,7 +20,10 @@ _UNTAGGED = "untagged"
 
 
 def _role_from_tags(tags: list[str] | None) -> str:
-    for tag in tags or []:
+    # Iterate in reverse: LangChain appends local/bound tags after inherited tags,
+    # so the last matching tag is the most specific (innermost) role. This correctly
+    # handles both flat (one tag) and nested (parent + child tags) scenarios.
+    for tag in reversed(tags or []):
         if tag.startswith(_ROLE_TAG_PREFIX):
             return tag[len(_ROLE_TAG_PREFIX) :]
     return _UNTAGGED
