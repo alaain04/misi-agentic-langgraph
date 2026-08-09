@@ -47,5 +47,12 @@ class Settings(BaseSettings):
     # coverage, to avoid hammering the registry on large trees.
     license_lookup_concurrency: int
 
+    # Per-role LLM model overrides (docs/model-selection.md). Maps an
+    # AgentRole value to a Model value, e.g.
+    # MODEL_OVERRIDES='{"specialist_agent": "gpt-5.4-nano-2026-03-17"}'.
+    # Empty by default: every role uses the one default model until a role
+    # earns a documented deviation (docs/model-selection.md section 8).
+    model_overrides: dict[str, str] = {}
+
 
 settings = Settings()
