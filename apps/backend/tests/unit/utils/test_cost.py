@@ -117,7 +117,7 @@ def test_every_model_has_pricing():
 
 
 def test_role_tag_survives_structured_output_and_is_attributed():
-    # The regression this whole mechanism turns on: 12 of the 14 call sites do
+    # The regression this whole mechanism turns on: 11 of the 14 call sites do
     # get_role_llm(role).with_structured_output(...). A tag bound with
     # .with_config() is dropped there (RunnableBindingBase.__getattr__
     # delegates to the wrapped model), so those calls landed in "untagged".

@@ -56,7 +56,7 @@ def test_unknown_override_key_is_rejected_even_for_an_unrelated_role(monkeypatch
 
 def test_get_role_llm_tags_the_model_instance_with_its_role():
     # The tag must live on the model instance (BaseChatModel.tags), not on a
-    # surrounding RunnableBinding: 12 of the 14 call sites immediately call
+    # surrounding RunnableBinding: 11 of the 14 call sites immediately call
     # .with_structured_output(), which discards a binding's config.
     llm = get_role_llm(AgentRole.REMEDIATION_PLAN)
     assert "agent_role:remediation_plan" in (llm.tags or [])

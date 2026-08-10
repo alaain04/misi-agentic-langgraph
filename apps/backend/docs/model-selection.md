@@ -31,7 +31,7 @@ default model.
 The tag is set on the model instance (`BaseChatModel.tags`) rather than bound
 with `.with_config(tags=[...])`. That is load-bearing, not stylistic:
 `.with_config()` returns a `RunnableBinding`, and
-`.with_structured_output(...)` — which 12 of the 14 sites call immediately —
+`.with_structured_output(...)` — which 11 of the 14 sites call immediately —
 delegates through `RunnableBindingBase.__getattr__` to the wrapped model, so a
 bound tag is silently discarded and those calls land in the `untagged` bucket.
 A `RunnableBinding` is also not a `BaseChatModel`, which is why the two
@@ -243,7 +243,7 @@ persisted on `Job.cost_breakdown`. Landed same plan (task 2; commit
 pass: nested calls inherit the parent's ambient tag ahead of their own, so
 attribution prefers the *last* matching tag (`942b9a0`); and the tag itself
 had to move from `.with_config()` onto the model instance, because
-`.with_structured_output()` discarded it at 12 of the 14 sites and would
+`.with_structured_output()` discarded it at 11 of the 14 sites and would
 otherwise have collapsed the breakdown to ~4 buckets. The ordering assumption
 is no longer taken on faith — it is exercised against a real compiled
 LangGraph in
