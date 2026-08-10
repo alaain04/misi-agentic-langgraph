@@ -12,7 +12,19 @@ Every LLM call in the backend goes through one factory:
 def get_llm(model: Model = Model.GPT_4O_MINI, *, rate_limiter=None, max_retries=None) -> BaseChatModel
 ```
 
-There are 14 call sites. **All 14 pass `Model.GPT_5_4_MINI`.**
+There are 14 call sites. As of Phase 0
+(`.superpowers/sdd/2026-08-09-model-selection-phase0/`), each call site
+resolves its model through `AgentRole` -> `src/utils/model_registry.py`'s
+`get_role_llm(role)` (two exceptions build the plain model via
+`get_llm(resolve_model(role), ...)` and tag the compiled graph afterward,
+because `deepagents.create_deep_agent(model=...)` rejects a
+`.with_config()`-wrapped model — see inline comments in
+`analysis/deepagent/nodes.py` and
+`remediation/deepagent/subagent_wrapper.py`). All 14 roles currently
+resolve to `Model.GPT_5_4_MINI` by default; a role can be pointed at a
+different model via `settings.model_overrides` (env var `MODEL_OVERRIDES`,
+a JSON-encoded `{role: model}` dict — pydantic-settings parses dict-typed
+fields from a JSON env var automatically), with no source edit required.
 
 | Subgraph | Call site | Role | Shape |
 |---|---|---|---|
@@ -31,18 +43,23 @@ There are 14 call sites. **All 14 pass `Model.GPT_5_4_MINI`.**
 | remediation | `plan.py:20` | Fix planning | structured |
 | remediation | `deepagent/subagent_wrapper.py:80` | Code-editing deep agent | tool-calling |
 
-Three facts follow from this, and they set the agenda:
+Three facts held before Phase 0 landed (see section 6.1-6.3 for what
+changed and when):
 
-1. **There is no differentiation to justify yet.** The honest current claim is
-   "one default model, uniformly applied" — which is a defensible baseline, but
-   only if stated as such.
-2. **Model choice is bound at import time.** `_llm = get_llm(Model.X)` runs at
-   module load, so a model cannot be swapped by configuration, only by editing
-   source. Any comparison experiment is blocked on this.
-3. **Cost is measured, but not attributed.** `CostCallback`
-   (`src/utils/cost.py:17`) accumulates one scalar per job into `Job.cost`. It
-   knows the model per response but discards that dimension, and has no notion
-   of which node spent the tokens.
+1. **There is no differentiation to justify yet.** Still true — all 14 roles
+   resolve to the same default model. The honest current claim is "one
+   default model, uniformly applied by policy, swappable per role without a
+   source edit" — a defensible baseline, stated as such.
+2. ~~**Model choice is bound at import time.**~~ **Resolved (6.1).** Call
+   sites now ask `get_role_llm(AgentRole.X)` for a role, and resolution
+   happens per call via `settings.model_overrides`, not at module import. A
+   comparison experiment is now a settings/env change, not a source edit.
+3. ~~**Cost is measured, but not attributed.**~~ **Resolved (6.2/6.3).**
+   `CostCallback` (`src/utils/cost.py:17`) now keys its accumulators on
+   `(role, model)` — read off the `agent_role:<role>` tag `get_role_llm`
+   attaches to each call — and persists the full per-role breakdown (cost,
+   prompt/completion tokens, call count, latency) on `Job.cost_breakdown`,
+   exposed via `AnalysisStatusResponse.cost_breakdown`.
 
 ## 2. Methodological position
 
@@ -182,29 +199,41 @@ the gate.
 
 ## 6. Enabling work
 
-None of the above can be executed against the code as it stands. In dependency
-order:
+In dependency order:
 
-**6.1 Make model choice configurable per role.** Introduce an `AgentRole`
-enum and a role -> model registry resolved from `settings`, with env overrides.
-Replace module-level `_llm = get_llm(...)` with lazy resolution so an override
-takes effect without editing source or restarting reasoning about import order.
-This is the hard blocker: without it there is no sweep, and with it the
-"one default + documented deviations" policy becomes expressible in one place.
+**6.1 Make model choice configurable per role. DONE.** `AgentRole` enum and
+a role -> model registry (`src/utils/model_registry.py`) resolved from
+`settings.model_overrides`, with env overrides via `MODEL_OVERRIDES`
+(JSON-encoded). All 14 call sites ask `get_role_llm(role)` for a role
+instead of importing a module-level `get_llm(Model.X)`; an override now
+takes effect via settings/env, no source edit. Landed
+`.superpowers/sdd/2026-08-09-model-selection-phase0/` (plan tasks 1, 3-5;
+commits `b2490d7`, `e1386d2`, `92d11ad`, `90288b3`).
 
-**6.2 Attribute cost and tokens per (role, model).** Extend `CostCallback` to
-key its accumulators on both, and persist the breakdown alongside `Job.cost`.
-Without this, "which agent dominates spend" is unanswerable and step 2's scope
-discipline cannot be applied.
+**6.2 Attribute cost and tokens per (role, model). DONE.** `CostCallback`
+keys its accumulators on the `agent_role:<role>` tag `get_role_llm` attaches
+to each call, and the per-role breakdown (cost, prompt/completion tokens,
+call count) is persisted on `Job.cost_breakdown`. Landed same plan (task 2;
+commit `a580c17`, regression fix `942b9a0` — nested deep-agent calls
+inherit the parent's tag ahead of their own, so attribution must prefer the
+*last* matching tag, not the first).
 
-**6.3 Instrument latency uniformly.** Extend the `duration_ms` pattern to all
-14 call sites.
+**6.3 Instrument latency uniformly. DONE.** `duration_ms` is now recorded
+per role in the same `CostCallback` breakdown rather than only on the three
+previously-instrumented conductor artifacts. Landed same plan (task 2;
+commit `a580c17`).
 
 **6.4 Unblock the corpus.** `scripts/corpus_check.py` SKIPs all 8 fixtures
-because they are private and `clone_repo` has no auth (workstream D1). Until
-this lands there is no quality axis and therefore no confirmatory evidence.
-This is the second hard blocker and should be treated as prerequisite work for
-the evaluation chapter, not as remediation-only work.
+because they are private. Auth itself is *not* the blocker: `clone_repo`
+has supported authenticated cloning via a `github_token` parameter since
+workstream D1 (PR #28, landed 2026-07-23) — see
+`src/main_graph/subgraphs/discovery/nodes/clone_repo.py`'s
+`_clone_command`. The actual remaining gap is that nobody has run
+`scripts/corpus_check.py --assert-live` with `CORPUS_PAT_AVAILABLE=1`
+against the real private `misi-e2e-validation-*` fixtures to confirm the
+auth path works end-to-end — that live verification step is still
+outstanding and is prerequisite work for the evaluation chapter, not
+remediation-only work.
 
 **6.5 Build the sweep harness.** Given 6.1-6.4: run the corpus across a model
 matrix, emit a per-role table of quality / cost / latency / reliability. Repeat

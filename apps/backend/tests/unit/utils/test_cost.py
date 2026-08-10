@@ -125,7 +125,8 @@ def test_nested_tags_prefer_last_role_tag_for_specificity():
     )
     cb.on_llm_end(response=response, run_id=run_id, tags=parent_and_child_tags)
 
-    # Should attribute to analysis_dispatch (the child/last tag), not analysis_root_deepagent
+    # Should attribute to analysis_dispatch (the child/last tag), not the
+    # inherited parent tag analysis_root_deepagent
     breakdown = cb.breakdown()
     assert set(breakdown) == {"analysis_dispatch"}
     assert breakdown["analysis_dispatch"]["prompt_tokens"] == 100
