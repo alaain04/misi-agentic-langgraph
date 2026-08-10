@@ -746,44 +746,26 @@ git commit -m "refactor: route remediation subgraph LLM calls through the role r
 - Consumes: `CostCallback.breakdown()` from Task 2.
 - Produces: `Job.cost_breakdown: dict | None`, `JobRepositoryPort.save_cost_breakdown(job_id: str, breakdown: dict) -> None`, `AnalysisStatusResponse.cost_breakdown: dict | None`.
 
-- [ ] **Step 1: Write the failing test for the DAO method**
+**Convention note:** this codebase does not unit-test `JobDAO`'s Mongo-backed methods directly — `save_cost` (the method `save_cost_breakdown` mirrors) has no dedicated test at all. DAO methods are verified either as port-interface presence checks (see `tests/unit/services/test_job_dao_push_artifact_message.py`, which asserts a method name is a member of `JobRepositoryPort` via `inspect.getmembers`) or exercised end-to-end through Docker-based `testcontainers` integration tests (see `tests/subgraphs/conftest.py`) for DAOs that do get that treatment (`ResultDAO`, not `JobDAO`). Follow the port-interface-check convention here — do not introduce a new mongomock/testcontainer dependency for this one method, that would be inconsistent with how every other `JobDAO` method is (or isn't) tested in this repo.
+
+- [ ] **Step 1: Write the failing test for the port method**
 
 ```python
 # apps/backend/tests/unit/services/test_job_dao_cost_breakdown.py
-import pytest
-from mongomock_motor import AsyncMongoMockClient  # already a test dependency; see test_job_dao-adjacent tests for the exact import if this differs
+import inspect
 
-from src.models.job import Job, JobMetadata
-from src.services.job_dao import JobDAO
+from src.domain.ports.job_repository_port import JobRepositoryPort
 
 
-@pytest.mark.asyncio
-async def test_save_cost_breakdown_persists_and_is_readable_back():
-    dao = JobDAO()
-    job = Job(metadata=JobMetadata(repo_url="https://example.com/r", concern="x"))
-    await dao.create(job)
-
-    breakdown = {
-        "specialist_agent": {
-            "cost": 0.01,
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "call_count": 1,
-            "latency_ms": 250.0,
-        }
-    }
-    await dao.save_cost_breakdown(job.id, breakdown)
-
-    saved = await dao.get(job.id)
-    assert saved.cost_breakdown == breakdown
+def test_save_cost_breakdown_is_on_port():
+    members = {name for name, _ in inspect.getmembers(JobRepositoryPort)}
+    assert "save_cost_breakdown" in members
 ```
-
-Before writing this test, read `apps/backend/tests/unit/services/test_job_runner.py`'s existing fixtures for however this codebase currently spins up a `JobDAO` against a fake/mock Mongo collection for unit tests, and match that exact setup instead of guessing a new one — the placeholder import above must be replaced with whatever this repo already uses (check for a `conftest.py` fixture or an in-memory Mongo double).
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/backend && uv run pytest tests/unit/services/test_job_dao_cost_breakdown.py -v`
-Expected: FAIL with `AttributeError: 'JobDAO' object has no attribute 'save_cost_breakdown'`
+Expected: FAIL — `save_cost_breakdown` is not yet a member of `JobRepositoryPort`
 
 - [ ] **Step 3: Add the field, port method, and DAO implementation**
 
