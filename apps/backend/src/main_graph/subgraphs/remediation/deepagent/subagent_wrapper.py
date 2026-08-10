@@ -28,8 +28,7 @@ from src.main_graph.subgraphs.remediation.deepagent.tools import (
 )
 from src.main_graph.tools.blast_radius import make_blast_radius_tool
 from src.main_graph.tools.search_code import make_search_code_tool
-from src.utils.llm import get_llm
-from src.utils.model_registry import AgentRole, resolve_model
+from src.utils.model_registry import AgentRole, get_role_llm
 
 
 class ExecutionState(DeepAgentState):
@@ -77,13 +76,9 @@ def build_execution_agent(
         make_verify_tool(work_dir, container, docker_image, package_manager, []),
         make_commit_outcome_tool(),
     ]
-    # Use resolve_model() + get_llm() instead of get_role_llm() to avoid wrapping.
-    # The latter returns a RunnableBinding (via .with_config()), which isn't a
-    # BaseChatModel and breaks create_deep_agent's model resolution. Tag the
-    # compiled graph instead.
-    agent = create_deep_agent(
-        model=get_llm(
-            resolve_model(AgentRole.REMEDIATION_EXECUTION_DEEPAGENT),
+    return create_deep_agent(
+        model=get_role_llm(
+            AgentRole.REMEDIATION_EXECUTION_DEEPAGENT,
             rate_limiter=REMEDIATION_RATE_LIMITER,
             max_retries=MAX_RETRIES,
         ),
@@ -91,7 +86,4 @@ def build_execution_agent(
         system_prompt=EXECUTION_PROMPT,
         backend=FilesystemBackend(root_dir=work_dir, virtual_mode=True),
         state_schema=ExecutionState,
-    )
-    return agent.with_config(
-        tags=[f"agent_role:{AgentRole.REMEDIATION_EXECUTION_DEEPAGENT.value}"]
     )

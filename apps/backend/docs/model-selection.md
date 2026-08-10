@@ -9,22 +9,35 @@ Every LLM call in the backend goes through one factory:
 
 ```python
 # src/utils/llm.py:32
-def get_llm(model: Model = Model.GPT_4O_MINI, *, rate_limiter=None, max_retries=None) -> BaseChatModel
+def get_llm(model: Model = Model.GPT_4O_MINI, *, rate_limiter=None, max_retries=None, tags=None) -> BaseChatModel
 ```
 
 There are 14 call sites. As of Phase 0
-(`.superpowers/sdd/2026-08-09-model-selection-phase0/`), each call site
-resolves its model through `AgentRole` -> `src/utils/model_registry.py`'s
-`get_role_llm(role)` (two exceptions build the plain model via
-`get_llm(resolve_model(role), ...)` and tag the compiled graph afterward,
-because `deepagents.create_deep_agent(model=...)` rejects a
-`.with_config()`-wrapped model — see inline comments in
-`analysis/deepagent/nodes.py` and
-`remediation/deepagent/subagent_wrapper.py`). All 14 roles currently
-resolve to `Model.GPT_5_4_MINI` by default; a role can be pointed at a
-different model via `settings.model_overrides` (env var `MODEL_OVERRIDES`,
-a JSON-encoded `{role: model}` dict — pydantic-settings parses dict-typed
-fields from a JSON env var automatically), with no source edit required.
+(`.superpowers/sdd/2026-08-09-model-selection-phase0/`), all 14 resolve
+their model through `AgentRole` -> `src/utils/model_registry.py`'s
+`get_role_llm(role)`, with no exceptions: `get_role_llm` returns a real
+`BaseChatModel` carrying an instance-level `agent_role:<role>` tag, so the
+same call works for a plain `.invoke()`, for `.with_structured_output(...)`,
+and for `deepagents.create_deep_agent(model=...)` alike. All 14 roles
+currently resolve to `Model.GPT_5_4_MINI` by default; a role can be pointed
+at a different model via `settings.model_overrides` (env var
+`MODEL_OVERRIDES`, a JSON-encoded `{role: model}` dict — pydantic-settings
+parses dict-typed fields from a JSON env var automatically), with no source
+edit required. Both halves of an override are validated loudly: an
+unrecognised model value raises via `Model(...)`, and an unrecognised role
+key raises too, so a typo cannot silently leave the experiment measuring the
+default model.
+
+The tag is set on the model instance (`BaseChatModel.tags`) rather than bound
+with `.with_config(tags=[...])`. That is load-bearing, not stylistic:
+`.with_config()` returns a `RunnableBinding`, and
+`.with_structured_output(...)` — which 12 of the 14 sites call immediately —
+delegates through `RunnableBindingBase.__getattr__` to the wrapped model, so a
+bound tag is silently discarded and those calls land in the `untagged` bucket.
+A `RunnableBinding` is also not a `BaseChatModel`, which is why the two
+deepagents sites previously needed a workaround. Both properties are pinned by
+tests in `tests/unit/utils/test_cost.py` and
+`tests/unit/utils/test_model_registry.py`.
 
 | Subgraph | Call site | Role | Shape |
 |---|---|---|---|
@@ -50,16 +63,23 @@ changed and when):
    resolve to the same default model. The honest current claim is "one
    default model, uniformly applied by policy, swappable per role without a
    source edit" — a defensible baseline, stated as such.
-2. ~~**Model choice is bound at import time.**~~ **Resolved (6.1).** Call
-   sites now ask `get_role_llm(AgentRole.X)` for a role, and resolution
-   happens per call via `settings.model_overrides`, not at module import. A
-   comparison experiment is now a settings/env change, not a source edit.
+2. ~~**Model choice is hardcoded at the call site.**~~ **Resolved (6.1).**
+   Call sites now ask `get_role_llm(AgentRole.X)` for a role rather than
+   naming a `Model`. Resolution still happens once at import time (every
+   site is a module-level `_llm = get_role_llm(...)`), but it reads from a
+   config-driven source — `settings.model_overrides`, populated from the
+   `MODEL_OVERRIDES` env var — instead of a literal in the source. A
+   comparison experiment is therefore an env change plus a process restart,
+   not a source edit. It is *not* per-call laziness: changing
+   `settings.model_overrides` in a live process does not re-point an
+   already-constructed `_llm`.
 3. ~~**Cost is measured, but not attributed.**~~ **Resolved (6.2/6.3).**
-   `CostCallback` (`src/utils/cost.py:17`) now keys its accumulators on
-   `(role, model)` — read off the `agent_role:<role>` tag `get_role_llm`
-   attaches to each call — and persists the full per-role breakdown (cost,
-   prompt/completion tokens, call count, latency) on `Job.cost_breakdown`,
-   exposed via `AnalysisStatusResponse.cost_breakdown`.
+   `CostCallback` (`src/utils/cost.py:62`) now buckets usage per role — read
+   off the `agent_role:<role>` tag `get_role_llm` sets on each model — and
+   records, per bucket, the `model` those calls actually ran on alongside
+   cost, prompt/completion tokens, call count and latency. The full
+   breakdown is persisted on `Job.cost_breakdown` and exposed via
+   `AnalysisStatusResponse.cost_breakdown`.
 
 ## 2. Methodological position
 
@@ -161,10 +181,13 @@ Four axes, measured per agent role, per candidate model.
 ```
 cost(agent) = calls_per_run x (avg_in_tok x in_rate + avg_out_tok x out_rate)
 ```
-Rates are already tabulated in `src/utils/cost.py:7`. Note that `_FALLBACK_RATE`
+Rates are already tabulated in `src/utils/cost.py:10`. `_FALLBACK_RATE`
 silently mis-prices any model not in the table — adding a candidate model
-without adding its rate produces plausible-looking but wrong cost figures. Make
-the fallback loud before running any sweep.
+without adding its rate would produce plausible-looking but wrong cost
+figures. `tests/unit/utils/test_cost.py::test_every_model_has_pricing` now
+fails if a `Model` enum member has no `_PRICING` entry, so that mistake is
+caught before a sweep rather than after. The fallback still applies to a model
+name that reaches the callback without going through the enum at all.
 
 **Latency** — wall-clock per node. `duration_ms` exists on conductor artifacts
 for three agents only (`base_agent.py:161`, `finding_enricher_agent.py:174`,
@@ -204,19 +227,27 @@ In dependency order:
 **6.1 Make model choice configurable per role. DONE.** `AgentRole` enum and
 a role -> model registry (`src/utils/model_registry.py`) resolved from
 `settings.model_overrides`, with env overrides via `MODEL_OVERRIDES`
-(JSON-encoded). All 14 call sites ask `get_role_llm(role)` for a role
-instead of importing a module-level `get_llm(Model.X)`; an override now
-takes effect via settings/env, no source edit. Landed
+(JSON-encoded, both keys and values validated against `AgentRole` / `Model`).
+All 14 call sites ask `get_role_llm(role)` for a role instead of importing a
+module-level `get_llm(Model.X)`; an override now takes effect via
+settings/env, no source edit. Landed
 `.superpowers/sdd/2026-08-09-model-selection-phase0/` (plan tasks 1, 3-5;
 commits `b2490d7`, `e1386d2`, `92d11ad`, `90288b3`).
 
-**6.2 Attribute cost and tokens per (role, model). DONE.** `CostCallback`
-keys its accumulators on the `agent_role:<role>` tag `get_role_llm` attaches
-to each call, and the per-role breakdown (cost, prompt/completion tokens,
-call count) is persisted on `Job.cost_breakdown`. Landed same plan (task 2;
-commit `a580c17`, regression fix `942b9a0` — nested deep-agent calls
-inherit the parent's tag ahead of their own, so attribution must prefer the
-*last* matching tag, not the first).
+**6.2 Attribute cost and tokens per role, with the model recorded. DONE.**
+`CostCallback` buckets usage on the `agent_role:<role>` tag `get_role_llm`
+sets on each model instance, records the `model` each bucket ran on, and the
+breakdown (cost, prompt/completion tokens, call count, latency, model) is
+persisted on `Job.cost_breakdown`. Landed same plan (task 2; commit
+`a580c17`). Two attribution bugs were fixed afterwards in the final review
+pass: nested calls inherit the parent's ambient tag ahead of their own, so
+attribution prefers the *last* matching tag (`942b9a0`); and the tag itself
+had to move from `.with_config()` onto the model instance, because
+`.with_structured_output()` discarded it at 12 of the 14 sites and would
+otherwise have collapsed the breakdown to ~4 buckets. The ordering assumption
+is no longer taken on faith — it is exercised against a real compiled
+LangGraph in
+`tests/unit/utils/test_cost.py::test_nested_graph_attributes_child_model_to_its_own_role`.
 
 **6.3 Instrument latency uniformly. DONE.** `duration_ms` is now recorded
 per role in the same `CostCallback` breakdown rather than only on the three

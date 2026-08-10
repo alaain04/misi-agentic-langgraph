@@ -37,7 +37,27 @@ class AgentRole(StrEnum):
 _DEFAULT_MODEL = Model.GPT_5_4_MINI
 
 
+def _validate_override_keys(overrides: dict[str, str]) -> None:
+    """Fail loudly on a role key that is not an AgentRole.
+
+    A typo'd override *value* already raises via ``Model(override)``; without
+    this, a typo'd override *key* (``{"specialst_agent": ...}``) would be
+    silently ignored and the experiment would quietly measure the default
+    model instead. The whole dict is checked, not just the key being looked
+    up, so a typo surfaces on the first resolution rather than only when the
+    misspelled role happens to be resolved (it never is -- that's the bug).
+    """
+    unknown = sorted(set(overrides) - {role.value for role in AgentRole})
+    if unknown:
+        raise ValueError(
+            f"MODEL_OVERRIDES contains unknown agent role key(s): "
+            f"{', '.join(unknown)}. Valid roles: "
+            f"{', '.join(role.value for role in AgentRole)}"
+        )
+
+
 def resolve_model(role: AgentRole) -> Model:
+    _validate_override_keys(settings.model_overrides)
     override = settings.model_overrides.get(role.value)
     if override is None:
         return _DEFAULT_MODEL
@@ -50,7 +70,20 @@ def get_role_llm(
     rate_limiter: BaseRateLimiter | None = None,
     max_retries: int | None = None,
 ) -> BaseChatModel:
-    llm = get_llm(
-        resolve_model(role), rate_limiter=rate_limiter, max_retries=max_retries
+    """Return the model backing ``role``, tagged ``agent_role:<role>`` so
+    CostCallback can attribute cost/latency to it.
+
+    The tag is set on the model instance (``BaseChatModel.tags``) rather than
+    bound with ``.with_config()``. Two things depend on that: the tag has to
+    survive ``.with_structured_output()`` (which drops a surrounding
+    RunnableBinding's config, so a bound tag would silently vanish at 12 of
+    the 14 call sites), and the return value has to stay a real
+    ``BaseChatModel`` so it can be handed to ``create_deep_agent(model=...)``
+    like any other call site.
+    """
+    return get_llm(
+        resolve_model(role),
+        rate_limiter=rate_limiter,
+        max_retries=max_retries,
+        tags=[f"agent_role:{role.value}"],
     )
-    return llm.with_config(tags=[f"agent_role:{role.value}"])

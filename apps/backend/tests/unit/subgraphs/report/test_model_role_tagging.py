@@ -3,7 +3,7 @@ import importlib
 
 def _tags_of(module_path: str, attr: str = "_llm") -> list[str]:
     module = importlib.import_module(module_path)
-    return getattr(module, attr).config.get("tags", [])
+    return list(getattr(module, attr).tags or [])
 
 
 def test_report_synthesizer_tagged_correctly():

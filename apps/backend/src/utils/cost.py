@@ -20,9 +20,14 @@ _UNTAGGED = "untagged"
 
 
 def _role_from_tags(tags: list[str] | None) -> str:
-    # Iterate in reverse: LangChain appends local/bound tags after inherited tags,
-    # so the last matching tag is the most specific (innermost) role. This correctly
-    # handles both flat (one tag) and nested (parent + child tags) scenarios.
+    # Iterate in reverse: a model's instance-level `tags` reach the callback
+    # manager as local tags, added after the inherited/ambient ones
+    # (langchain_core.callbacks.manager._configure: add_tags(inheritable_tags)
+    # then add_tags(local_tags, inherit=False)), so the last matching tag is the
+    # most specific (innermost) role. Verified end-to-end against a compiled
+    # LangGraph dispatching a nested tagged model -- see test_cost.py's
+    # test_nested_graph_attributes_child_model_to_its_own_role.
+    # Handles both flat (one tag) and nested (parent + child tags) scenarios.
     for tag in reversed(tags or []):
         if tag.startswith(_ROLE_TAG_PREFIX):
             return tag[len(_ROLE_TAG_PREFIX) :]
@@ -58,10 +63,11 @@ class CostCallback(BaseCallbackHandler):
     """Accumulates token usage and computes USD cost across all LLM calls.
 
     Also keys usage by the calling AgentRole (via the `agent_role:<role>`
-    tag `get_role_llm` binds on every LLM runnable — see
+    tag `get_role_llm` sets on every model instance — see
     src/utils/model_registry.py) so cost/latency can be attributed per role,
-    not just summed globally. Calls with no such tag bucket under
-    "untagged".
+    not just summed globally. Each bucket also records the `model` those
+    calls ran on, which is what the cost figure was priced against. Calls
+    with no such tag bucket under "untagged".
     """
 
     def __init__(self) -> None:
@@ -110,8 +116,15 @@ class CostCallback(BaseCallbackHandler):
                 "completion_tokens": 0,
                 "call_count": 0,
                 "latency_ms": 0.0,
+                "model": "",
             },
         )
+        # resolve_model() is deterministic per role, so every call in a role's
+        # bucket runs on the same model; record it (empty until a response
+        # actually reports one) so the breakdown says what the cost was priced
+        # against, instead of extracting the model and throwing it away.
+        if model and not bucket["model"]:
+            bucket["model"] = model
         bucket["cost"] += call_cost
         bucket["prompt_tokens"] += prompt
         bucket["completion_tokens"] += completion
@@ -135,6 +148,7 @@ class CostCallback(BaseCallbackHandler):
                 "completion_tokens": b["completion_tokens"],
                 "call_count": b["call_count"],
                 "latency_ms": round(b["latency_ms"], 1),
+                "model": b["model"],
             }
             for role, b in self._breakdown.items()
         }

@@ -6,8 +6,8 @@ from langchain_core.messages import AIMessage
 from src.utils.cost import CostCallback
 
 
-def _fake_llm_with_usage(role: str, prompt_tokens: int, completion_tokens: int):
-    msg = AIMessage(
+def _usage_message(prompt_tokens: int, completion_tokens: int, **kwargs) -> AIMessage:
+    return AIMessage(
         content="ok",
         response_metadata={
             "token_usage": {
@@ -16,9 +16,21 @@ def _fake_llm_with_usage(role: str, prompt_tokens: int, completion_tokens: int):
             },
             "model_name": "gpt-5.4-mini-2026-03-17",
         },
+        **kwargs,
     )
-    return GenericFakeChatModel(messages=iter([msg])).with_config(
-        tags=[f"agent_role:{role}"]
+
+
+def _fake_llm_with_usage(
+    role: str, prompt_tokens: int, completion_tokens: int, responses: int = 1
+):
+    # Tags go on the model instance, exactly like get_role_llm() sets them --
+    # NOT via .with_config(), which produces a RunnableBinding whose tag is
+    # silently dropped by later composition (see the structured-output test).
+    return GenericFakeChatModel(
+        messages=iter(
+            [_usage_message(prompt_tokens, completion_tokens) for _ in range(responses)]
+        ),
+        tags=[f"agent_role:{role}"],
     )
 
 
@@ -87,47 +99,121 @@ def test_total_cost_and_tokens_unchanged_by_breakdown_tracking():
     assert cb.cost() > 0
 
 
-def test_nested_tags_prefer_last_role_tag_for_specificity():
-    # Regression test: when a parent graph tag (inherited) and child tag (local)
-    # are both present, LangChain puts the parent tag first and the child tag last.
-    # _role_from_tags should return the LAST matching tag (most specific/innermost),
-    # not the first. This ensures subagent calls are attributed to their own role,
-    # not the root deep agent's role.
-    # See: langchain_core.callbacks.manager._configure appends inheritable_tags
-    # before local_tags.
-    from uuid import uuid4
+def test_breakdown_records_the_model_each_role_ran_on():
+    cb = CostCallback()
+    llm = _fake_llm_with_usage("impact_analysis", 10, 5)
+    asyncio.run(llm.ainvoke("hi", config={"callbacks": [cb]}))
+    assert cb.breakdown()["impact_analysis"]["model"] == "gpt-5.4-mini-2026-03-17"
 
-    from langchain_core.outputs import Generation, LLMResult
+
+def test_every_model_has_pricing():
+    # A new Model enum member without a _PRICING entry would silently bill at
+    # _FALLBACK_RATE and quietly corrupt every cost figure in the thesis data.
+    from src.utils.cost import _PRICING
+    from src.utils.llm import Model
+
+    missing = [m.value for m in Model if m.value not in _PRICING]
+    assert not missing, f"Model(s) missing a _PRICING entry: {missing}"
+
+
+def test_role_tag_survives_structured_output_and_is_attributed():
+    # The regression this whole mechanism turns on: 12 of the 14 call sites do
+    # get_role_llm(role).with_structured_output(...). A tag bound with
+    # .with_config() is dropped there (RunnableBindingBase.__getattr__
+    # delegates to the wrapped model), so those calls landed in "untagged".
+    # An instance-level tag -- what get_role_llm now sets -- survives.
+    # Exercised through real LangChain composition, not a hand-built tag list.
+    from pydantic import BaseModel
+
+    class _Out(BaseModel):
+        answer: str
+
+    class _ToolCallingFake(GenericFakeChatModel):
+        """GenericFakeChatModel has no bind_tools, which
+        BaseChatModel.with_structured_output needs."""
+
+        def bind_tools(self, tools, **kwargs):
+            return self.bind(tools=list(tools), **kwargs)
+
+    def _tool_call_response():
+        return _usage_message(
+            100,
+            50,
+            tool_calls=[{"name": "_Out", "args": {"answer": "42"}, "id": "call_1"}],
+        )
+
+    tagged = CostCallback()
+    instance_tagged = _ToolCallingFake(
+        messages=iter([_tool_call_response()]),
+        tags=["agent_role:remediation_plan"],
+    )
+    result = instance_tagged.with_structured_output(_Out).invoke(
+        "q", config={"callbacks": [tagged]}
+    )
+    assert result.answer == "42"
+    assert set(tagged.breakdown()) == {"remediation_plan"}
+
+    # And the old .with_config() mechanism demonstrably does NOT survive --
+    # this asserts the bug is real, so the test fails if someone reintroduces it.
+    bound = CostCallback()
+    config_tagged = _ToolCallingFake(
+        messages=iter([_tool_call_response()])
+    ).with_config(tags=["agent_role:remediation_plan"])
+    config_tagged.with_structured_output(_Out).invoke(
+        "q", config={"callbacks": [bound]}
+    )
+    assert set(bound.breakdown()) == {"untagged"}
+
+
+def test_two_tagged_models_get_separate_buckets_through_real_invocation():
+    cb = CostCallback()
+    root = _fake_llm_with_usage("analysis_root_deepagent", 100, 50)
+    child = _fake_llm_with_usage("analysis_dispatch", 20, 10)
+
+    root.invoke("root question", config={"callbacks": [cb]})
+    child.invoke("child question", config={"callbacks": [cb]})
+
+    breakdown = cb.breakdown()
+    assert set(breakdown) == {"analysis_root_deepagent", "analysis_dispatch"}
+    assert breakdown["analysis_root_deepagent"]["prompt_tokens"] == 100
+    assert breakdown["analysis_dispatch"]["prompt_tokens"] == 20
+
+
+def test_nested_graph_attributes_child_model_to_its_own_role():
+    # The deep-agent shape: a compiled graph whose node runs its own root model
+    # and then dispatches a nested child model. Both models carry instance-level
+    # role tags (what get_role_llm sets). The child's call must be attributed to
+    # the child's role, not swallowed by the ambient parent tag -- which is what
+    # _role_from_tags' prefer-the-LAST-tag rule exists for. Driven through real
+    # LangGraph machinery so the tag ORDER is observed, not assumed.
+    from langgraph.graph import END, START, StateGraph
+    from typing_extensions import TypedDict
+
+    class _S(TypedDict):
+        done: bool
+
+    root = _fake_llm_with_usage("analysis_root_deepagent", 100, 50)
+    child = _fake_llm_with_usage("analysis_dispatch", 20, 10)
+
+    def _root_node(state: _S) -> _S:
+        root.invoke("root question")
+        child.invoke("child question")  # nested; config propagates implicitly
+        return {"done": True}
+
+    graph = StateGraph(_S)
+    graph.add_node("root", _root_node)
+    graph.add_edge(START, "root")
+    graph.add_edge("root", END)
 
     cb = CostCallback()
+    # .with_config on the compiled graph makes the root role an AMBIENT tag on
+    # every nested call -- the exact condition under which naive first-tag
+    # attribution would misattribute the child's call to the root.
+    compiled = graph.compile().with_config(tags=["agent_role:analysis_root_deepagent"])
+    compiled.invoke({"done": False}, config={"callbacks": [cb]})
 
-    # Simulate nested call: parent (root agent) tag followed by child (subagent) tag.
-    # This mirrors the real scenario where _deep_agent.with_config(
-    #   tags=["agent_role:analysis_root_deepagent"]
-    # ) causes that tag to be inherited, and then the subagent's
-    # get_role_llm(AgentRole.ANALYSIS_DISPATCH) adds its own tag.
-    parent_and_child_tags = [
-        "agent_role:analysis_root_deepagent",
-        "agent_role:analysis_dispatch",
-    ]
-
-    run_id = uuid4()
-    cb._start_times[run_id] = None  # Prevent latency calc issues
-    response = LLMResult(
-        generations=[[Generation(text="ok")]],
-        llm_output={
-            "token_usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-            },
-            "model_name": "gpt-5.4-mini-2026-03-17",
-        },
-    )
-    cb.on_llm_end(response=response, run_id=run_id, tags=parent_and_child_tags)
-
-    # Should attribute to analysis_dispatch (the child/last tag), not the
-    # inherited parent tag analysis_root_deepagent
     breakdown = cb.breakdown()
-    assert set(breakdown) == {"analysis_dispatch"}
-    assert breakdown["analysis_dispatch"]["prompt_tokens"] == 100
-    assert breakdown["analysis_dispatch"]["completion_tokens"] == 50
+    assert set(breakdown) == {"analysis_root_deepagent", "analysis_dispatch"}
+    assert breakdown["analysis_dispatch"]["prompt_tokens"] == 20
+    assert breakdown["analysis_dispatch"]["call_count"] == 1
+    assert breakdown["analysis_root_deepagent"]["prompt_tokens"] == 100

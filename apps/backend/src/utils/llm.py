@@ -34,6 +34,7 @@ def get_llm(
     *,
     rate_limiter: BaseRateLimiter | None = None,
     max_retries: int | None = None,
+    tags: list[str] | None = None,
 ) -> BaseChatModel:
     """Return a configured chat model for the given ``model`` enum value.
 
@@ -49,6 +50,12 @@ def get_llm(
     ``max_retries`` overrides the provider client's default retry-with-
     backoff budget on transient errors (e.g. 429s); ``None`` keeps the
     provider default.
+    ``tags`` are set on the model instance itself (``BaseChatModel.tags``),
+    not bound via ``.with_config()``. That distinction matters: instance
+    tags survive later composition -- notably ``.with_structured_output()``,
+    which discards a surrounding ``RunnableBinding``'s config -- and they
+    reach callbacks as local (non-inherited) tags, appended after any
+    ambient parent tags. See src/utils/model_registry.py.
     """
     from langchain_openai import ChatOpenAI  # noqa: PLC0415
 
@@ -58,6 +65,7 @@ def get_llm(
         temperature=0,
         rate_limiter=rate_limiter,
         max_retries=max_retries,
+        tags=tags,
     )
 
 

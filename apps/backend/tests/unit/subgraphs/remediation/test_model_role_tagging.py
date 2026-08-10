@@ -3,7 +3,7 @@ import importlib
 
 def _tags_of(module_path: str, attr: str = "_llm") -> list[str]:
     module = importlib.import_module(module_path)
-    return getattr(module, attr).config.get("tags", [])
+    return list(getattr(module, attr).tags or [])
 
 
 def test_remediation_classify_tagged_correctly():
@@ -22,18 +22,41 @@ def test_remediation_plan_tagged_correctly():
 
 
 def test_remediation_execution_deepagent_tagged_correctly():
-    from src.domain.ports.container_run_port import ContainerRunPort
+    # This site hands its model to create_deep_agent, so the tag has to ride
+    # on the model instance handed over -- there is no module-level _llm.
+    from unittest.mock import MagicMock, patch
+
     from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
         build_execution_agent,
     )
 
-    class _FakeContainer(ContainerRunPort):
-        async def run(self, *args, **kwargs):
-            raise NotImplementedError
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper.create_deep_agent"
+    ) as mock_create:
+        build_execution_agent(
+            work_dir="/tmp/does-not-need-to-exist",
+            container=MagicMock(),
+            docker_image="irrelevant:latest",
+            package_manager="npm",
+        )
+
+    model = mock_create.call_args.kwargs["model"]
+    assert "agent_role:remediation_execution_deepagent" in (model.tags or [])
+
+
+def test_execution_deepagent_compiles_with_the_tagged_model_unmocked():
+    # The tagged model must remain acceptable to the real
+    # deepagents.create_deep_agent -- it rejects anything that is not a
+    # BaseChatModel, which is what ruled out the old .with_config() wrapping.
+    from unittest.mock import MagicMock
+
+    from src.main_graph.subgraphs.remediation.deepagent.subagent_wrapper import (
+        build_execution_agent,
+    )
 
     agent = build_execution_agent(
         work_dir="/tmp/does-not-need-to-exist",
-        container=_FakeContainer(),
+        container=MagicMock(),
         docker_image="irrelevant:latest",
         package_manager="npm",
     )

@@ -28,8 +28,7 @@ from src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper import (
     build_agent_subagent,
 )
 from src.main_graph.subgraphs.analysis.state import AnalysisState
-from src.utils.llm import get_llm
-from src.utils.model_registry import AgentRole, resolve_model
+from src.utils.model_registry import AgentRole, get_role_llm
 
 _MAX_CORRECTION_ROUNDS = 2
 _RECURSION_LIMIT = 50
@@ -80,21 +79,15 @@ def _roster(exclude: set[str] | None = None) -> str:
 
 
 def _build_deep_agent():
-    # Use resolve_model() + get_llm() instead of get_role_llm() to avoid wrapping.
-    # The latter returns a RunnableBinding (via .with_config()), which isn't a
-    # BaseChatModel and breaks create_deep_agent's model resolution. Tag the
-    # compiled graph instead (see _deep_agent assignment).
     subagents = [build_agent_subagent(agent_type) for agent_type in REGISTRY]
     return create_deep_agent(
-        model=get_llm(resolve_model(AgentRole.ANALYSIS_ROOT_DEEPAGENT)),
+        model=get_role_llm(AgentRole.ANALYSIS_ROOT_DEEPAGENT),
         subagents=subagents,
         state_schema=AnalysisDeepAgentState,
     )
 
 
-_deep_agent = _build_deep_agent().with_config(
-    tags=[f"agent_role:{AgentRole.ANALYSIS_ROOT_DEEPAGENT.value}"]
-)
+_deep_agent = _build_deep_agent()
 
 
 async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) -> dict:
