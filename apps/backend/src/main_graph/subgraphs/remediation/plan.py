@@ -13,11 +13,11 @@ from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.models.remediation import MigrationPlanBatch, MigrationTask
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.REMEDIATION_PLAN)
 
 _PLAN_SYSTEM_PROMPT = """\
 You plan dependency remediation for a Node.js project. You are given a list \

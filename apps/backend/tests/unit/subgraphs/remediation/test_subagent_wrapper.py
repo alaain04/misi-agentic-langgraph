@@ -26,4 +26,9 @@ def test_build_execution_agent_returns_directly_invocable_agent():
     assert len(kwargs["tools"]) == 6
     # never registered as a task()-dispatchable subagent
     assert "subagents" not in kwargs
-    assert agent is mock_create.return_value
+    # the compiled graph is tagged for role-aware cost tracking, since the
+    # model itself can't carry a get_role_llm() tag into create_deep_agent
+    mock_create.return_value.with_config.assert_called_once_with(
+        tags=["agent_role:remediation_execution_deepagent"]
+    )
+    assert agent is mock_create.return_value.with_config.return_value

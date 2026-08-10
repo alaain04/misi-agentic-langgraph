@@ -23,12 +23,12 @@ from src.main_graph.subgraphs.remediation.selection import select_remediation_ta
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.models.remediation import RemediationTarget
 from src.utils.config import settings
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 from src.utils.semver import parse_semver, range_floor
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.REMEDIATION_CLASSIFY)
 
 _CLASSIFY_SYSTEM_PROMPT = """\
 You classify an npm dependency remediation into exactly one tier, from its \

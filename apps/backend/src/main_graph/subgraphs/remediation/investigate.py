@@ -20,11 +20,11 @@ from src.main_graph.subgraphs.remediation.changelog import (
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.main_graph.tools.search_code import find_local_usage_sites
 from src.models.remediation import ReleaseDigest, RemediationTarget, TargetInvestigation
-from src.utils.llm import Model, get_llm
+from src.utils.model_registry import AgentRole, get_role_llm
 
 logger = logging.getLogger(__name__)
 
-_llm = get_llm(Model.GPT_5_4_MINI)
+_llm = get_role_llm(AgentRole.REMEDIATION_INVESTIGATE)
 
 _RELEASE_SYSTEM_PROMPT = """\
 You are the release note analyst for an npm dependency upgrade. Given the \
