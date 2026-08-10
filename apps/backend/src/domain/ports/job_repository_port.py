@@ -47,6 +47,9 @@ class JobRepositoryPort(ABC):
     async def save_cost(self, job_id: str, cost: float) -> None: ...
 
     @abstractmethod
+    async def save_cost_breakdown(self, job_id: str, breakdown: dict) -> None: ...
+
+    @abstractmethod
     async def get_pending(self) -> list[Job]: ...
 
     @abstractmethod

@@ -154,6 +154,11 @@ class JobDAO(JobRepositoryPort):
     async def save_cost(self, job_id: str, cost: float) -> None:
         await self._col.update_one({"_id": job_id}, {"$set": {"cost": cost}})
 
+    async def save_cost_breakdown(self, job_id: str, breakdown: dict) -> None:
+        await self._col.update_one(
+            {"_id": job_id}, {"$set": {"cost_breakdown": breakdown}}
+        )
+
     async def save_dep_tree(self, job_id: str, tree: dict) -> None:
         await self._dep_trees_col.replace_one(
             {"_id": job_id},

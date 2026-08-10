@@ -29,6 +29,8 @@ async def test_run_analysis_marks_failed_on_exception():
         )
 
     dao.mark_failed.assert_awaited_once_with("job-1", error="graph exploded")
+    dao.save_cost.assert_awaited_once_with("job-1", 0.0)
+    dao.save_cost_breakdown.assert_awaited_once_with("job-1", {})
 
 
 @pytest.mark.asyncio
@@ -42,6 +44,8 @@ async def test_run_analysis_records_cost_per_subgraph():
 
     fake_cost_cb = MagicMock()
     fake_cost_cb.cost = MagicMock(side_effect=[0.01, 0.03, 0.07, 0.07])
+    fake_breakdown = {"planner": {"cost": 0.07, "call_count": 3}}
+    fake_cost_cb.breakdown = MagicMock(return_value=fake_breakdown)
 
     with (
         patch("src.services.job_runner.main_graph") as mock_graph,
@@ -63,6 +67,8 @@ async def test_run_analysis_records_cost_per_subgraph():
     dao.update_artifact_data.assert_any_call("job-2", "prep", {"cost": 0.01})
     dao.update_artifact_data.assert_any_call("job-2", "analysis", {"cost": 0.02})
     dao.update_artifact_data.assert_any_call("job-2", "remediation", {"cost": 0.04})
+    dao.save_cost.assert_awaited_once_with("job-2", 0.07)
+    dao.save_cost_breakdown.assert_awaited_once_with("job-2", fake_breakdown)
 
 
 @pytest.mark.asyncio

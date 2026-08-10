@@ -164,6 +164,7 @@ async def run_analysis(
             cost_cb,
         )
         await dao.save_cost(job_id, cost_cb.cost())
+        await dao.save_cost_breakdown(job_id, cost_cb.breakdown())
         await _finalize(dao, job_id, config)
         await dao.update_status(job_id, JobStatus.done)
 
@@ -171,6 +172,7 @@ async def run_analysis(
         logger.exception("job=%s unhandled error", job_id)
         clear_cache()
         await dao.save_cost(job_id, cost_cb.cost())
+        await dao.save_cost_breakdown(job_id, cost_cb.breakdown())
         await dao.mark_failed(job_id, error=str(exc))
 
 
@@ -193,6 +195,7 @@ async def resume_analysis(
             cost_cb,
         )
         await dao.save_cost(job_id, cost_cb.cost())
+        await dao.save_cost_breakdown(job_id, cost_cb.breakdown())
         await _finalize(dao, job_id, config)
         await dao.update_status(job_id, JobStatus.done)
 
@@ -200,4 +203,5 @@ async def resume_analysis(
         logger.exception("job=%s unhandled error on resume", job_id)
         clear_cache()
         await dao.save_cost(job_id, cost_cb.cost())
+        await dao.save_cost_breakdown(job_id, cost_cb.breakdown())
         await dao.mark_failed(job_id, error=str(exc))

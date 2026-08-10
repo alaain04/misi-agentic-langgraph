@@ -28,6 +28,7 @@ class AnalysisStatusResponse(BaseModel):
     error: str | None = None
     artifacts: list[dict] = []
     cost: float | None = None
+    cost_breakdown: dict | None = None
 
 
 class ChatRequest(BaseModel):
