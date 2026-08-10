@@ -1,11 +1,15 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.models.job import JobMetadata, JobStatus
 
 
 class AnalysisRequest(BaseModel):
+    # Reject unknown fields (e.g. a "consent" typo for "remediate") instead
+    # of silently dropping them and falling back to the field default.
+    model_config = ConfigDict(extra="forbid")
+
     repo_url: str
     concern: str
     autopilot: bool = False

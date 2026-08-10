@@ -1,80 +1,66 @@
-"""Blackbox integration tests for the planner/deepagent remediation
-subgraph (Task 10, task-decomposition rework).
+"""Blackbox integration tests for the remediation subgraph, rewritten for
+the flatten-planning-execution rework
+(docs/superpowers/specs/2026-08-08-remediation-flatten-planning-execution.md).
 
 Requires Docker. Run with:
     uv run pytest tests/subgraphs/test_remediation_subgraph.py -v
 
-The subgraph is now five nodes:
+The subgraph is now six nodes:
     START -> classify_targets_node -> investigate_node ->
-    root_deepagent_node -> group_and_verify_gate ->
-    (route: root_deepagent_node | pr_and_persist_node) -> END
+    build_migration_plan_node -> remediate_targets_node ->
+    group_and_verify_gate -> (route: remediate_targets_node |
+    pr_and_persist_node) -> END
 
 What is real:
-- LangGraph wiring across all five nodes, including the retry loop back
-  from `group_and_verify_gate` to `root_deepagent_node` (investigate_node
-  runs exactly once per job -- retries never revisit it, per the graph's
-  edges).
+- LangGraph wiring across all six nodes, including the retry loop back from
+  `group_and_verify_gate` to `remediate_targets_node` (`build_migration_plan_node`
+  runs exactly once per job -- retries never revisit it, they reuse the
+  existing `migration_plans` state, per spec D3).
 - `investigate_node`'s own fan-out/state-merge logic (only its leaf
   `investigate_target` call is stubbed -- see below).
-- `root_deepagent_node`'s plan/outcome -> Remediation conversion
-  (`_remediations_from_plans`), `connected_groups`, `group_and_verify_gate`'s
+- `remediate_targets_node`'s plan/outcome -> Remediation conversion
+  (`_assemble_remediations`), `connected_groups`, `group_and_verify_gate`'s
   real deterministic verify/retry loop (`replay_and_verify_group` against
   the container mock), `pr_and_persist_node`'s PR-title/consent gating, and
   real MongoDB persistence (`result_dao`, via the session testcontainer).
 
-What is mocked, at the boundary the task-10 brief specifies (no real LLM,
-no real `deepagents` machinery, no `gh`/network calls anywhere in this
+What is mocked, at the two boundaries this architecture now has (no real
+LLM, no real `deepagents` machinery, no `gh`/network calls anywhere in this
 file):
-- `classify.classify_target` (stubbed to always return tier="r1" --
-  tier classification itself is covered by test_classify.py).
+- `classify.classify_target` (stubbed to always return tier="r1" -- tier
+  classification itself is covered by test_classify.py).
 - `investigate.investigate_target` (stubbed to a fixed, deterministic
-  TargetInvestigation with `migration_needed=False` -- investigation
-  content is irrelevant here since `_build_planning_agent` is mocked out
-  entirely below it, so nothing downstream ever reads
-  `state["investigations"]` for real. Covered for real by
+  TargetInvestigation with `migration_needed=False` -- covered for real by
   test_investigate.py).
-- `deepagent.nodes._build_planning_agent` -- the monolithic root+nested
-  `deepagents` agent from the old architecture is gone; the new planning
-  agent is built fresh per `root_deepagent_node` call and only exposed
-  through this one factory function. `_FakePlanningAgent` below stands in
-  for its return value: something with an `ainvoke(state, config)` that
-  returns `{"migration_plans": ..., "outcomes": ...}` shaped exactly like
-  `root_deepagent_node` expects (see deepagent/nodes.py). In the real
-  pipeline nothing writes a `requires_edges` state channel -- the
-  planning agent only commits `MigrationPlan`s via `commit_plan`, and
-  `root_deepagent_node` derives `requires_edges` itself from each
-  committed plan's `requires` field. A `plan_for(dep, target_dict)`
-  callback decides each round's committed plan/outcome per target
-  actually present in that round's `state["targets"]`, so one instance
-  transparently drives correction-round retries and multi-target rounds
-  without any fake chat model, `task()` dispatch, or nested
-  `CompiledSubAgent` machinery -- all of which no longer exists in this
-  architecture.
+- `plan.build_plans_for_targets` -- the ONE batched structured-output
+  planning call. Patched at both `plan.build_plans_for_targets` (used by
+  `build_migration_plan_node`, the initial batch) and
+  `deepagent.nodes.build_plans_for_targets` (used by `remediate_targets_node`'s
+  retry-discovered-companion fallback, a single-target call). `_fake_planner`
+  drives both from one `plan_for(dep, target_dict)` callback and records
+  every call's dep set into `plan_calls`.
+- `deepagent.nodes.build_execution_agent` -- the ONE flat execution agent,
+  invoked directly per group (never via deepagents' `task()`, which no
+  longer exists anywhere in this path). `_FakeExecutionAgent` stands in for
+  its return value: an object with `ainvoke(state, config)` that parses the
+  group's dep names straight out of `_format_group_message`'s own text
+  (a "- {dep}: kind=..." line per target) and returns `{"outcomes": ...}`
+  for whichever of those deps `plan_for` gave an `outcome` -- exactly the
+  shape `_run_group` expects. `_FakeExecutionAgent.calls` (aliased below as
+  `exec_calls`) records the dep list dispatched to it on every distinct
+  group invocation, which is now the right level to assert dispatch
+  behavior at: independent groups get separate concurrent agent
+  invocations (spec goal 2), not one fused call covering every target in a
+  round the way the old single-agent design did.
 
-DROPPED from the old suite (both tested machinery this rework removes
-entirely):
-- The "parallel task() calls in one turn" test asserted that
-  `RemediationDeepAgentState`'s reducers survived two concurrent
-  `task()`-call writes landing in one root superstep. That specific race
-  (two independent nested-agent `Command` writes merging in one LangGraph
-  step) doesn't exist in the new shape: `_build_planning_agent`'s single
-  `ainvoke` call already returns one dict covering every dispatched target
-  in that round, so there is no separate per-target write to race. The
-  still-relevant assertion -- that dispatching two independent targets in
-  one round handles correctly -- is folded into
-  `test_consent_false_opens_zero_prs_across_every_group` below, which
-  dispatches two uncoupled targets in a single fake-agent call and checks
-  `fake_agent.calls[0]["targets"]` covers both.
-- The "nested worker writes a real file via FilesystemBackend" test
-  exercised `remediate_target`'s per-target `create_deep_agent` +
-  `FilesystemBackend(virtual_mode=True)` combo, which is gone. Real
-  filesystem-editing now happens inside `codemod_adapter`
-  (`subagent_wrapper.build_codemod_subagent`), which per the task-10
-  brief's mocking boundary never runs in this file (it lives behind the
-  mocked `_build_planning_agent`). That real-write behavior belongs to a
-  `subagent_wrapper`-focused test, not this graph-wiring integration test;
-  today it only has shape-level coverage in
-  tests/unit/subgraphs/remediation/test_subagent_wrapper.py.
+DROPPED from the prior suite (machinery this rework removes entirely):
+- Assertions phrased around "the planning agent's calls" as a single
+  combined plan+dispatch boundary no longer make sense -- planning and
+  execution are now two independently-mockable steps with different
+  cardinality (see `test_correction_round_retries_then_gives_up_at_cap`,
+  where planning happens exactly once but execution retries
+  `1 + _MAX_CORRECTION_ROUNDS` times -- the concrete benefit of spec D3:
+  a retry no longer re-plans, only re-executes with the existing plan).
 """
 
 from __future__ import annotations
@@ -83,7 +69,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -94,6 +80,7 @@ from src.models.remediation import (
     MigrationPlan,
     MigrationTask,
     ReleaseDigest,
+    RemediationOutcome,
     TargetInvestigation,
 )
 from src.models.results import AnalysisResult, PrepResult
@@ -154,53 +141,18 @@ def _investigate_without_network_or_llm():
 
 
 # ---------------------------------------------------------------------------
-# Fake planning agent -- stand-in for `_build_planning_agent`'s return value
+# Fake planning + execution boundaries
 # ---------------------------------------------------------------------------
 
 
-class _FakePlanningAgent:
-    """Replaces the real `deepagents` planning agent at the exact boundary
-    `root_deepagent_node` calls it through: an object with an
-    `ainvoke(state, config)` coroutine. `plan_for(dep, target_dict)` is
-    invoked once per target present in that round's `state["targets"]` and
-    returns a dict with a required "plan" (a MigrationPlan.model_dump(),
-    whose own "requires" field carries any companion-coupling signal) and
-    an optional "outcome" (a RemediationOutcome.model_dump()) -- exactly
-    the pieces `root_deepagent_node` reads off a real agent's result. It
-    does NOT return a top-level "requires_edges" key: the real planning
-    agent never writes one either, only `migration_plans`, and
-    `root_deepagent_node` derives `requires_edges` itself from each
-    committed plan's `requires` field. `self.calls` records every round's
-    seeded state for assertions about how many rounds ran and what each
-    round dispatched."""
-
-    def __init__(self, plan_for: Callable[[str, dict], dict[str, Any]]) -> None:
-        self._plan_for = plan_for
-        self.calls: list[dict] = []
-
-    async def ainvoke(self, state: dict, config: Any = None) -> dict:
-        self.calls.append(state)
-        migration_plans: dict[str, dict] = {}
-        outcomes: dict[str, dict] = {}
-        for dep, target_dict in state["targets"].items():
-            spec = self._plan_for(dep, target_dict)
-            migration_plans[dep] = spec["plan"]
-            if spec.get("outcome") is not None:
-                outcomes[dep] = spec["outcome"]
-        return {
-            "migration_plans": migration_plans,
-            "outcomes": outcomes,
-        }
-
-
-def _patch_planning_agent(agent: _FakePlanningAgent):
-    return patch.object(
-        deepagent_nodes, "_build_planning_agent", MagicMock(return_value=agent)
-    )
-
-
-def _bump_plan(dep: str, to_range: str, requires: list[str] | None = None) -> dict:
-    return MigrationPlan(
+def _bump_spec(
+    dep: str, to_range: str, requires: list[str] | None = None
+) -> dict[str, Any]:
+    """A plan_for() return value for the common case: a clean bump that the
+    execution agent commits an outcome for on the first try (bump is folded
+    into the execution agent now, spec goal 3 -- it always needs an
+    outcome, never a bare data-carry)."""
+    plan = MigrationPlan(
         target_dep=dep,
         tier_hint="r1",
         tasks=[
@@ -208,6 +160,78 @@ def _bump_plan(dep: str, to_range: str, requires: list[str] | None = None) -> di
         ],
         requires=requires or [],
     ).model_dump()
+    outcome = RemediationOutcome(strategy="bump", to_range=to_range).model_dump()
+    return {"plan": plan, "outcome": outcome}
+
+
+def _fake_build_plans_for_targets(
+    plan_for: Callable[[str, dict], dict[str, Any]], plan_calls: list[set[str]]
+):
+    async def _build(targets: dict[str, dict], investigations: dict[str, dict]):
+        plan_calls.append(set(targets))
+        return {dep: plan_for(dep, t)["plan"] for dep, t in targets.items()}
+
+    return _build
+
+
+def _deps_from_group_message(content: str) -> list[str]:
+    """Parse the dep names straight out of _format_group_message's own
+    "- {dep}: kind=..." lines -- the only way a fake execution agent can
+    know which targets it was asked to handle, since build_execution_agent
+    itself is never given a dep list directly (only work_dir/container/
+    image/package_manager; the group is threaded through the agent's
+    initial message, not its constructor)."""
+    deps = []
+    for line in content.splitlines():
+        if line.startswith("- ") and ":" in line:
+            deps.append(line[2:].split(":", 1)[0])
+    return deps
+
+
+class _FakeExecutionAgent:
+    def __init__(
+        self,
+        plan_for: Callable[[str, dict], dict[str, Any]],
+        exec_calls: list[list[str]],
+    ) -> None:
+        self._plan_for = plan_for
+        self._exec_calls = exec_calls
+
+    async def ainvoke(self, state: dict, config: Any = None) -> dict:
+        deps = _deps_from_group_message(state["messages"][0]["content"])
+        self._exec_calls.append(deps)
+        outcomes: dict[str, dict] = {}
+        for dep in deps:
+            spec = self._plan_for(dep, None)
+            if spec.get("outcome") is not None:
+                outcomes[dep] = spec["outcome"]
+        return {"outcomes": outcomes}
+
+
+def _patch_planner_and_executor(
+    plan_for: Callable[[str, dict], dict[str, Any]],
+):
+    """Patches both mockable boundaries with one shared plan_for callback.
+    Returns (plan_calls, exec_calls) -- lists the caller can assert against
+    after the `with` block, plus the three patch context managers to enter."""
+    plan_calls: list[set[str]] = []
+    exec_calls: list[list[str]] = []
+    fake_build_plans = _fake_build_plans_for_targets(plan_for, plan_calls)
+    patches = (
+        patch(
+            "src.main_graph.subgraphs.remediation.plan.build_plans_for_targets",
+            fake_build_plans,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_plans_for_targets",
+            fake_build_plans,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_execution_agent",
+            side_effect=lambda *a, **k: _FakeExecutionAgent(plan_for, exec_calls),
+        ),
+    )
+    return plan_calls, exec_calls, patches
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +301,8 @@ class _FakeGitPR:
 async def test_pure_bump_target_ships_one_fixed_pr(
     tmp_path, result_dao, subgraph_config, _investigate_without_network_or_llm
 ):
-    """A single, uncoupled target with no requires signal: the planning
-    agent commits a bump-only plan (no outcome), the deterministic gate
+    """A single, uncoupled target with no requires signal: one batched
+    planning call commits a bump plan + outcome, the deterministic gate
     verifies green against the container mock, and exactly one PR labeled
     "bump" ships. Also asserts `investigate_node` itself actually ran as a
     real step of the compiled graph (not just that downstream nodes
@@ -290,17 +314,17 @@ async def test_pure_bump_target_ships_one_fixed_pr(
     analysis = _seed_analysis(job_id, [_finding("leftpad", "leftpad has a known CVE")])
     await result_dao.save_analysis(analysis)
 
-    def _plan_for(dep: str, target: dict) -> dict:
+    def _plan_for(dep: str, target: dict | None) -> dict:
         assert dep == "leftpad"
-        return {"plan": _bump_plan("leftpad", "^1.0.1")}
+        return _bump_spec("leftpad", "^1.0.1")
 
-    fake_agent = _FakePlanningAgent(_plan_for)
+    plan_calls, exec_calls, patches = _patch_planner_and_executor(_plan_for)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = True
     subgraph_config["configurable"]["git_pr"] = fake_git_pr
 
-    with _patch_planning_agent(fake_agent):
+    with patches[0], patches[1], patches[2]:
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -327,11 +351,12 @@ async def test_pure_bump_target_ships_one_fixed_pr(
     fake_git_pr.open_pr.assert_awaited_once()
     title = fake_git_pr.open_pr.await_args.args[2]
     assert "bump" in title
-    assert len(fake_agent.calls) == 1
+    assert plan_calls == [{"leftpad"}]
+    assert exec_calls == [["leftpad"]]
 
-    # investigate_node is a real step in the compiled graph -- it must
-    # have actually fanned out to investigate_target for "leftpad" before
-    # root_deepagent_node's (mocked) planning agent ever ran.
+    # investigate_node is a real step in the compiled graph -- it must have
+    # actually fanned out to investigate_target for "leftpad" before
+    # build_migration_plan_node's (mocked) planning call ever ran.
     _investigate_without_network_or_llm.assert_awaited_once()
     investigated_target = _investigate_without_network_or_llm.await_args.args[0]
     assert investigated_target.target_dep == "leftpad"
@@ -340,13 +365,15 @@ async def test_pure_bump_target_ships_one_fixed_pr(
 async def test_requires_signal_pulls_in_a_non_finding_companion(
     tmp_path, result_dao, subgraph_config
 ):
-    """The eslint/eslint-plugin-react scenario from the spec: the planning
-    agent commits target A's MigrationPlan with requires=["B"] (mirroring
-    the real commit_plan contract), root_deepagent_node derives
-    requires_edges from that field, B has no FindingNote,
-    group_and_verify_gate routes the never-dispatched companion through a
-    retry round, and both end up in ONE group/PR with B's
-    Remediation.required_by == ["A"]."""
+    """The eslint/eslint-plugin-react scenario from the spec: the batched
+    planning call commits eslint's MigrationPlan with
+    requires=["eslint-plugin-react"], remediate_targets_node derives
+    requires_edges from that field, eslint-plugin-react has no FindingNote
+    and is never in the initial target set, group_and_verify_gate routes
+    the never-dispatched companion through a retry round (which plans it
+    fresh via the single-target fallback, then dispatches it), and both end
+    up in ONE group/PR with eslint-plugin-react's Remediation.required_by
+    == ["eslint"]."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     direct = {"eslint": "7.0.0", "eslint-plugin-react": "7.20.0"}
     repo_path = _write_repo(tmp_path, direct)
@@ -357,25 +384,21 @@ async def test_requires_signal_pulls_in_a_non_finding_companion(
     analysis = _seed_analysis(job_id, [_finding("eslint", "eslint has a known CVE")])
     await result_dao.save_analysis(analysis)
 
-    def _plan_for(dep: str, target: dict) -> dict:
+    def _plan_for(dep: str, target: dict | None) -> dict:
         if dep == "eslint":
-            return {
-                "plan": _bump_plan(
-                    "eslint", "^8.0.0", requires=["eslint-plugin-react"]
-                ),
-            }
+            return _bump_spec("eslint", "^8.0.0", requires=["eslint-plugin-react"])
         if dep == "eslint-plugin-react":
-            return {"plan": _bump_plan("eslint-plugin-react", "^7.20.1")}
+            return _bump_spec("eslint-plugin-react", "^7.20.1")
         msg = f"unexpected dep dispatched: {dep}"
         raise AssertionError(msg)
 
-    fake_agent = _FakePlanningAgent(_plan_for)
+    plan_calls, exec_calls, patches = _patch_planner_and_executor(_plan_for)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = True
     subgraph_config["configurable"]["git_pr"] = fake_git_pr
 
-    with _patch_planning_agent(fake_agent):
+    with patches[0], patches[1], patches[2]:
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -406,12 +429,12 @@ async def test_requires_signal_pulls_in_a_non_finding_companion(
     assert by_dep["eslint"].branch == by_dep["eslint-plugin-react"].branch
     assert by_dep["eslint"].pr_url == by_dep["eslint-plugin-react"].pr_url
 
-    # Round 1 dispatches eslint alone and discovers the companion via
-    # requires_edges; group_and_verify_gate then retries the never-
-    # dispatched companion, so round 2 dispatches eslint-plugin-react.
-    assert len(fake_agent.calls) == 2
-    assert set(fake_agent.calls[0]["targets"]) == {"eslint"}
-    assert set(fake_agent.calls[1]["targets"]) == {"eslint-plugin-react"}
+    # Round 1's ONE batched planning call covers only eslint (the only
+    # initial target) and dispatches it alone; group_and_verify_gate then
+    # retries the never-dispatched companion, so round 2 plans (via the
+    # single-target fallback) and dispatches eslint-plugin-react.
+    assert plan_calls == [{"eslint"}, {"eslint-plugin-react"}]
+    assert exec_calls == [["eslint"], ["eslint-plugin-react"]]
 
 
 async def test_correction_round_retries_then_gives_up_at_cap(
@@ -419,8 +442,10 @@ async def test_correction_round_retries_then_gives_up_at_cap(
 ):
     """A target whose verification always fails: assert
     group_and_verify_gate retries it up to _MAX_CORRECTION_ROUNDS, then
-    ships status="failed" with a reason, and that the planning agent was
-    invoked exactly (1 + _MAX_CORRECTION_ROUNDS) times, not more."""
+    ships status="failed" with a reason. Planning happens exactly ONCE
+    (spec D3: a retry reuses the existing MigrationPlan instead of
+    re-planning); only execution is retried, `1 + _MAX_CORRECTION_ROUNDS`
+    times."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     direct = {"always-broken": "1.0.0"}
     repo_path = _write_repo(tmp_path, direct)
@@ -438,13 +463,13 @@ async def test_correction_round_retries_then_gives_up_at_cap(
         return_value=(1, "", "npm install failed")
     )
 
-    def _plan_for(dep: str, target: dict) -> dict:
+    def _plan_for(dep: str, target: dict | None) -> dict:
         assert dep == "always-broken"
-        return {"plan": _bump_plan("always-broken", "^2.0.0")}
+        return _bump_spec("always-broken", "^2.0.0")
 
-    fake_agent = _FakePlanningAgent(_plan_for)
+    plan_calls, exec_calls, patches = _patch_planner_and_executor(_plan_for)
 
-    with _patch_planning_agent(fake_agent):
+    with patches[0], patches[1], patches[2]:
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -466,20 +491,24 @@ async def test_correction_round_retries_then_gives_up_at_cap(
     assert r.status == "failed"
     assert r.skip_reason == "verification failed after max correction rounds"
 
-    assert len(fake_agent.calls) == 1 + deepagent_nodes._MAX_CORRECTION_ROUNDS
+    assert plan_calls == [{"always-broken"}]
+    expected_rounds = 1 + deepagent_nodes._MAX_CORRECTION_ROUNDS
+    assert exec_calls == [["always-broken"]] * expected_rounds
 
 
 async def test_consent_false_opens_zero_prs_across_every_group(
     tmp_path, result_dao, subgraph_config
 ):
     """Two independent fixed targets, remediate=False in configurable:
-    assert the fake git_pr's open_pr is never called, and both
-    Remediation records still have branch=None, pr_url=None, and a real
-    (non-default) verification result -- proves group_and_verify_gate's
-    deterministic verification runs unconditionally, and only
-    pr_and_persist_node's PR step is gated on consent. Also folds in the
-    dropped "parallel dispatch" test's assertion: both targets are
-    dispatched together in a single planning-agent round."""
+    assert the fake git_pr's open_pr is never called, and both Remediation
+    records still have branch=None, pr_url=None, and a real (non-default)
+    verification result -- proves group_and_verify_gate's deterministic
+    verification runs unconditionally, and only pr_and_persist_node's PR
+    step is gated on consent. Also asserts the two independent targets get
+    separate concurrent execution-agent invocations (one group each,
+    unlike the old single-agent design that fused every target in a round
+    into one call) even though planning covers both in a single batched
+    call."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     direct = {"pkg-c": "1.0.0", "pkg-d": "2.0.0"}
     repo_path = _write_repo(tmp_path, direct)
@@ -496,16 +525,16 @@ async def test_consent_false_opens_zero_prs_across_every_group(
 
     ranges = {"pkg-c": "^1.0.1", "pkg-d": "^2.0.1"}
 
-    def _plan_for(dep: str, target: dict) -> dict:
-        return {"plan": _bump_plan(dep, ranges[dep])}
+    def _plan_for(dep: str, target: dict | None) -> dict:
+        return _bump_spec(dep, ranges[dep])
 
-    fake_agent = _FakePlanningAgent(_plan_for)
+    plan_calls, exec_calls, patches = _patch_planner_and_executor(_plan_for)
 
     fake_git_pr = _FakeGitPR()
     subgraph_config["configurable"]["remediate"] = False
     subgraph_config["configurable"]["git_pr"] = fake_git_pr
 
-    with _patch_planning_agent(fake_agent):
+    with patches[0], patches[1], patches[2]:
         graph = build_remediation_subgraph()
         result = await graph.ainvoke(
             {
@@ -530,5 +559,5 @@ async def test_consent_false_opens_zero_prs_across_every_group(
         assert r.verification.installed is True
 
     fake_git_pr.open_pr.assert_not_called()
-    assert len(fake_agent.calls) == 1
-    assert set(fake_agent.calls[0]["targets"]) == {"pkg-c", "pkg-d"}
+    assert plan_calls == [{"pkg-c", "pkg-d"}]
+    assert {tuple(c) for c in exec_calls} == {("pkg-c",), ("pkg-d",)}

@@ -15,6 +15,7 @@ const CONCERN_PILLS = [
 ]
 
 const AUTOPILOT_KEY = 'deprisk.autopilot'
+const REMEDIATE_KEY = 'deprisk.remediate'
 
 function loadAutopilot(): boolean {
   return localStorage.getItem(AUTOPILOT_KEY) === 'true'
@@ -22,6 +23,14 @@ function loadAutopilot(): boolean {
 
 function saveAutopilot(value: boolean): void {
   localStorage.setItem(AUTOPILOT_KEY, String(value))
+}
+
+function loadRemediate(): boolean {
+  return localStorage.getItem(REMEDIATE_KEY) === 'true'
+}
+
+function saveRemediate(value: boolean): void {
+  localStorage.setItem(REMEDIATE_KEY, String(value))
 }
 
 interface FormErrors {
@@ -33,6 +42,7 @@ export default function NewAnalysisPage() {
   const [repoUrl, setRepoUrl] = useState('')
   const [concern, setConcern] = useState('')
   const [autopilot, setAutopilot] = useState(loadAutopilot)
+  const [remediate, setRemediate] = useState(loadRemediate)
   const [errors, setErrors] = useState<FormErrors>({})
   const { submit, isSubmitting, error: submitError } = useJobSubmit()
 
@@ -48,12 +58,17 @@ export default function NewAnalysisPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!validate()) return
-    await submit({ repo_url: repoUrl.trim(), concern: concern.trim() })
+    await submit({ repo_url: repoUrl.trim(), concern: concern.trim(), autopilot, remediate })
   }
 
   function handleAutopilotChange(checked: boolean) {
     setAutopilot(checked)
     saveAutopilot(checked)
+  }
+
+  function handleRemediateChange(checked: boolean) {
+    setRemediate(checked)
+    saveRemediate(checked)
   }
 
   return (
@@ -159,6 +174,23 @@ export default function NewAnalysisPage() {
               <p className="font-mono text-xs font-semibold text-(--color-text)">Autopilot mode</p>
               <p className="font-mono text-[10px] leading-relaxed text-(--color-muted)">
                 The AI auto-approves both review gates and runs to completion without asking for your input.
+              </p>
+            </div>
+          </label>
+
+          {/* Remediate consent */}
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-(--color-border) bg-(--color-surface) p-4">
+            <input
+              type="checkbox"
+              checked={remediate}
+              onChange={(e) => handleRemediateChange(e.target.checked)}
+              className="mt-0.5 accent-(--color-accent)"
+            />
+            <div>
+              <p className="font-mono text-xs font-semibold text-(--color-text)">Open pull requests for fixes</p>
+              <p className="font-mono text-[10px] leading-relaxed text-(--color-muted)">
+                Verified remediations are pushed to a branch and opened as a PR on the target repo. Leave off to
+                only see what would be fixed, without changing the repo.
               </p>
             </div>
           </label>

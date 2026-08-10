@@ -169,3 +169,86 @@ def test_comma_separated_fixed_version_leaves_is_semver_major_none():
     findings = parse_trivy_vuln_findings(output, min_severity="high")
     assert findings[0].fixed_version == "3.2.19, 4.1.9"
     assert findings[0].is_semver_major is None
+
+
+def test_multiple_cves_on_same_package_collapse_into_one_finding():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-A",
+            "PkgName": "lodash",
+            "InstalledVersion": "4.17.11",
+            "FixedVersion": "4.17.12",
+            "Severity": "CRITICAL",
+            "Title": "prototype pollution in defaultsDeep",
+            "Description": "d1",
+            "PrimaryURL": "https://example.com/a",
+        },
+        {
+            "VulnerabilityID": "CVE-B",
+            "PkgName": "lodash",
+            "InstalledVersion": "4.17.11",
+            "FixedVersion": "4.17.21",
+            "Severity": "HIGH",
+            "Title": "command injection via template",
+            "Description": "d2",
+            "PrimaryURL": "https://example.com/b",
+        },
+        {
+            "VulnerabilityID": "CVE-C",
+            "PkgName": "lodash",
+            "InstalledVersion": "4.17.11",
+            "FixedVersion": "4.18.0",
+            "Severity": "MEDIUM",
+            "Title": "prototype pollution via array path",
+            "Description": "d3",
+            "PrimaryURL": "https://example.com/c",
+        },
+        {
+            "VulnerabilityID": "CVE-D",
+            "PkgName": "other-pkg",
+            "InstalledVersion": "1.0.0",
+            "FixedVersion": "1.0.1",
+            "Severity": "HIGH",
+            "Title": "unrelated",
+            "Description": "d4",
+            "PrimaryURL": "",
+        },
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="low")
+
+    assert len(findings) == 2
+    lodash = next(f for f in findings if f.dep_name == "lodash")
+    assert lodash.severity == "critical"  # most severe of the group
+    assert lodash.installed_version == "4.17.11"
+    # 4.18.0 numerically dominates 4.17.21/4.17.12 and resolves every CVE.
+    assert lodash.fixed_version == "4.18.0"
+    assert len(lodash.evidence) == 3
+    assert {e.log_snippet.split(":")[0] for e in lodash.evidence} == {
+        "CVE-A",
+        "CVE-B",
+        "CVE-C",
+    }
+    for title in (
+        "prototype pollution in defaultsDeep",
+        "command injection via template",
+        "prototype pollution via array path",
+    ):
+        assert title in lodash.description
+
+
+def test_single_finding_package_is_not_wrapped_by_grouping():
+    output = _trivy_output(
+        {
+            "VulnerabilityID": "CVE-SOLO",
+            "PkgName": "solo-pkg",
+            "InstalledVersion": "1.0.0",
+            "FixedVersion": "1.0.1",
+            "Severity": "HIGH",
+            "Title": "t",
+            "Description": "d",
+            "PrimaryURL": "",
+        }
+    )
+    findings = parse_trivy_vuln_findings(output, min_severity="high")
+    assert len(findings) == 1
+    assert findings[0].description == "t. d Installed 1.0.0; fixed in 1.0.1."

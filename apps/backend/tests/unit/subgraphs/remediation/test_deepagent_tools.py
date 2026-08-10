@@ -4,17 +4,17 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 from src.main_graph.subgraphs.remediation.deepagent.tools import (
     make_bump_dependency_tool,
     make_commit_outcome_tool,
-    make_commit_plan_tool,
     make_dependents_of_tool,
     make_read_release_notes_tool,
     make_verify_tool,
 )
-from src.models.remediation import MigrationPlan, MigrationTask, RemediationOutcome
+from src.models.remediation import RemediationOutcome
 
 
 class FakeContainer:
@@ -98,19 +98,6 @@ async def test_verify_tool_reports_installed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_commit_plan_writes_plan_to_state():
-    tool = make_commit_plan_tool()
-    plan = MigrationPlan(
-        target_dep="lodash",
-        tier_hint="r2",
-        tasks=[MigrationTask(kind="bump", rationale="x", to_range="^4.17.21")],
-    )
-    result = await tool.ainvoke({"plan": plan})
-    assert isinstance(result, Command)
-    assert result.update["migration_plans"]["lodash"]["tier_hint"] == "r2"
-
-
-@pytest.mark.asyncio
 async def test_commit_outcome_writes_outcome_to_state():
     tool = make_commit_outcome_tool()
     outcome = RemediationOutcome(
@@ -120,7 +107,18 @@ async def test_commit_outcome_writes_outcome_to_state():
         status="skipped",
         summary="adapted call sites",
     )
-    result = await tool.ainvoke({"target_dep": "lodash", "outcome": outcome})
+    result = await tool.ainvoke(
+        {
+            "name": "commit_outcome",
+            "args": {"target_dep": "lodash", "outcome": outcome},
+            "id": "call_1",
+            "type": "tool_call",
+        }
+    )
     assert isinstance(result, Command)
     assert result.update["outcomes"]["lodash"]["to_range"] == "^5.0.0"
     assert result.update["outcomes"]["lodash"]["code_diff"] == "--- a\n+++ b\n"
+    messages = result.update["messages"]
+    assert len(messages) == 1
+    assert isinstance(messages[0], ToolMessage)
+    assert messages[0].tool_call_id == "call_1"

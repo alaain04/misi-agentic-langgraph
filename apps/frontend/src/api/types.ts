@@ -20,12 +20,14 @@ export interface AnalysisRequest {
   repo_url: string
   concern: string
   autopilot?: boolean
+  remediate?: boolean
 }
 
 export interface JobMetadata {
   repo_url: string
   concern: string
   autopilot: boolean
+  remediate: boolean
 }
 
 export interface JobListItem {

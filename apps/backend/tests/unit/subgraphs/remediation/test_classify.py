@@ -205,3 +205,91 @@ async def test_classify_targets_node_no_findings_short_circuits():
         config,
     )
     assert result == {"targets": {}, "remediations": {}}
+
+
+@pytest.mark.asyncio
+async def test_classify_target_forces_r3_when_registry_has_no_higher_version():
+    """Regression (job 6a7773a7576d0efd7796aa8c, `matcha`): 0.7.0 was both
+    the installed and the latest published version, so no same-package
+    upgrade existed. The LLM read "no further releases" as a clean upgrade
+    and tiered it for a bump. Registry truth now decides this without
+    consulting the model at all."""
+    target = RemediationTarget(
+        target_dep="matcha",
+        addresses=["matcha"],
+        current_range="0.7.0",
+        latest_version="0.7.0",
+    )
+    mock_llm = MagicMock()
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.classify.fetch_release_notes",
+            AsyncMock(return_value={"available": True, "releases": []}),
+        ) as mock_notes,
+        patch("src.main_graph.subgraphs.remediation.classify._llm", mock_llm),
+    ):
+        result = await classify_target(
+            target, "/tmp/repo", MagicMock(), "node:lts-alpine"
+        )
+
+    assert result.tier == "r3"
+    assert "0.7.0" in result.rationale
+    # Decided from the registry alone -- no release-notes fetch, no LLM call.
+    mock_notes.assert_not_called()
+    mock_llm.with_structured_output.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_classify_target_does_not_force_r3_when_upgrade_exists():
+    """A real upgrade above the range floor must still reach the LLM."""
+    target = RemediationTarget(
+        target_dep="lodash",
+        addresses=["lodash"],
+        current_range="^4.17.11",
+        latest_version="4.17.21",
+    )
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=TargetClassification(tier="r1", rationale="patch releases")
+    )
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.classify.fetch_release_notes",
+            AsyncMock(return_value={"available": True, "releases": []}),
+        ),
+        patch("src.main_graph.subgraphs.remediation.classify._llm", mock_llm),
+    ):
+        result = await classify_target(
+            target, "/tmp/repo", MagicMock(), "node:lts-alpine"
+        )
+
+    assert result.tier == "r1"
+    mock_llm.with_structured_output.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_classify_target_unresolvable_latest_version_falls_back_to_llm():
+    """A registry lookup that failed (latest_version None) must not be read
+    as "no upgrade exists"."""
+    target = RemediationTarget(
+        target_dep="lodash",
+        addresses=["lodash"],
+        current_range="^4.17.11",
+        latest_version=None,
+    )
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=TargetClassification(tier="r2", rationale="breaking changes")
+    )
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.classify.fetch_release_notes",
+            AsyncMock(return_value={"available": True, "releases": []}),
+        ),
+        patch("src.main_graph.subgraphs.remediation.classify._llm", mock_llm),
+    ):
+        result = await classify_target(
+            target, "/tmp/repo", MagicMock(), "node:lts-alpine"
+        )
+
+    assert result.tier == "r2"

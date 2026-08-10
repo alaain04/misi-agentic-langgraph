@@ -299,6 +299,65 @@ async def test_build_dependency_graph_uses_cache_when_available():
 
 
 @pytest.mark.asyncio
+async def test_build_dependency_graph_preserves_scoped_package_names():
+    """Trivy's CycloneDX output splits a scoped npm package's purl into a
+    `group` field ("@nestjs") and an unscoped `name` ("core"). The direct
+    and packages keys must recombine them into the full "@nestjs/core" name
+    findings/tools use elsewhere -- dropping `group` silently collapses a
+    scoped package onto an unrelated top-level package of the same bare
+    name (e.g. "@nestjs/config" onto npm's unrelated "config" package).
+    """
+    root_ref = "root-ref"
+    manifest_ref = "manifest-ref"
+    core_ref = "pkg:npm/%40nestjs/core@10.4.15"
+    leaf_ref = "pkg:npm/leaf@1.0.0"
+    doc = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.7",
+        "metadata": {"component": {"name": "/workspace", "bom-ref": root_ref}},
+        "components": [
+            {
+                "bom-ref": manifest_ref,
+                "type": "application",
+                "name": "package-lock.json",
+            },
+            {
+                "bom-ref": core_ref,
+                "type": "library",
+                "group": "@nestjs",
+                "name": "core",
+                "version": "10.4.15",
+            },
+            {
+                "bom-ref": leaf_ref,
+                "type": "library",
+                "name": "leaf",
+                "version": "1.0.0",
+            },
+        ],
+        "dependencies": [
+            {"ref": root_ref, "dependsOn": [manifest_ref]},
+            {"ref": manifest_ref, "dependsOn": [core_ref]},
+            {"ref": core_ref, "dependsOn": [leaf_ref]},
+            {"ref": leaf_ref, "dependsOn": []},
+        ],
+    }
+    container = AsyncMock()
+    container.run.return_value = (0, __import__("json").dumps(doc), "")
+
+    graph = await build_dependency_graph(
+        repo_path="/tmp/repo",
+        package_manager="npm",
+        container=container,
+        docker_image="aquasec/trivy:0.71.2",
+    )
+
+    assert graph["direct"] == {"@nestjs/core": "10.4.15"}
+    assert "@nestjs/core@10.4.15" in graph["packages"]
+    assert graph["packages"]["@nestjs/core@10.4.15"]["dependencies"] == ["leaf@1.0.0"]
+
+
+@pytest.mark.asyncio
 async def test_build_dependency_graph_does_not_pool_packages_across_manifests():
     """A repo can contain more than one manifest (monorepo with two
     lockfiles, or an unrelated manifest elsewhere in the tree that Trivy's

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.main_graph.subgraphs.remediation.investigate import (
+    _resolve_versions,
     investigate_call_sites,
     investigate_dependents,
     investigate_release,
@@ -43,6 +44,42 @@ async def test_investigate_release_returns_digest_from_llm():
     assert digest.migration_needed is True
     assert digest.from_version == "1.0.0"
     assert digest.to_version == "2.0.0"
+
+
+@pytest.mark.asyncio
+async def test_investigate_release_passes_blast_radius_to_llm():
+    notes = {
+        "available": True,
+        "releases": [{"tag": "v2.0.0", "body": "removed foo()"}],
+    }
+    mock_llm = MagicMock()
+    mock_structured = mock_llm.with_structured_output.return_value
+    mock_structured.ainvoke = AsyncMock(
+        return_value=ReleaseDigest(
+            from_version="1.0.0", to_version="2.0.0", migration_needed=False
+        )
+    )
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.investigate.fetch_release_notes_between",
+            AsyncMock(return_value=notes),
+        ),
+        patch("src.main_graph.subgraphs.remediation.investigate._llm", mock_llm),
+    ):
+        await investigate_release(
+            "lodash",
+            "1.0.0",
+            "2.0.0",
+            "/tmp/repo",
+            MagicMock(),
+            "img",
+            dependents=["some-app"],
+            call_sites=["src/foo.ts"],
+        )
+    sent_messages = mock_structured.ainvoke.call_args.args[0]
+    user_content = sent_messages[1]["content"]
+    assert "some-app" in user_content
+    assert "src/foo.ts" in user_content
 
 
 @pytest.mark.asyncio
@@ -190,3 +227,27 @@ async def test_investigate_node_no_targets_short_circuits():
         {"job_id": "j", "prep_result_id": "p", "targets": {}}, config
     )
     assert out == {"investigations": {}}
+
+
+def test_resolve_versions_uses_classify_resolved_latest_as_ceiling():
+    """to_version was hardcoded None, so the release-notes window always
+    degraded to the unfiltered recent set and the planner never saw the
+    upgrade ceiling. It now comes from the registry via classify."""
+    target = RemediationTarget(
+        target_dep="lodash",
+        addresses=["lodash"],
+        current_range="^4.17.11",
+        latest_version="4.17.21",
+    )
+    graph = {"direct": {"lodash": "^4.17.11"}, "packages": {}}
+
+    assert _resolve_versions(target, graph) == ("^4.17.11", "4.17.21")
+
+
+def test_resolve_versions_degrades_honestly_when_latest_unresolved():
+    target = RemediationTarget(
+        target_dep="lodash", addresses=["lodash"], current_range="^4.17.11"
+    )
+    graph = {"direct": {"lodash": "^4.17.11"}, "packages": {}}
+
+    assert _resolve_versions(target, graph) == ("^4.17.11", None)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import tempfile
@@ -367,7 +368,8 @@ async def test_remediate_targets_node_replace_plan_settles_deferred_without_disp
     rem = out["remediations"]["old-dep"]
     assert rem["strategy"] == "replace"
     assert rem["status"] == "skipped"
-    assert "deferred" in rem["skip_reason"]
+    assert "replacement proposed: new-dep@^1.0.0" in rem["skip_reason"]
+    assert rem["replacement_dep"] == "new-dep"
     assert rem["plan"]["tasks"][0]["kind"] == "replace"
 
 
@@ -518,6 +520,7 @@ async def test_remediate_targets_node_retry_synthesizes_unknown_companion_target
         "addresses": [],
         "finding_summaries": [],
         "current_range": "^2.0.0",
+        "latest_version": None,
         "tier": None,
     }
     # Known target keeps its real addresses/current_range untouched.
@@ -595,6 +598,103 @@ async def test_remediate_targets_node_recursion_limit_omits_only_that_group():
     assert "lodash" in result["targets"]
     # The plan itself survives -- only execution was aborted, not planning.
     assert result["migration_plans"]["lodash"]["tier_hint"] == "r1"
+
+
+@pytest.mark.asyncio
+async def test_remediate_targets_node_group_failure_cancels_sibling_groups():
+    """A raw, unrecoverable exception from one group's execution agent (e.g.
+    a RateLimitError once its retry budget is exhausted) must both (a)
+    propagate out of remediate_targets_node as itself, not wrapped in an
+    ExceptionGroup -- job_runner stores str(exc) verbatim as the job's error
+    -- and (b) cancel any other still-running group instead of leaving it as
+    an untracked orphan that keeps calling the LLM after this node, and the
+    job, have already failed."""
+
+    def _plan(dep: str, to_range: str) -> dict:
+        return {
+            "target_dep": dep,
+            "tier_hint": "r1",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "bump",
+                    "rationale": "patch",
+                    "to_range": to_range,
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+
+    prep = _prep(
+        dependency_graph={
+            "direct": {"lodash": "^4.17.11", "axios": "^1.0.0"},
+            "packages": {},
+        }
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    state = {
+        "job_id": "job-1",
+        "prep_result_id": "prep-1",
+        "analysis_result_id": "a-1",
+        "concern": "c",
+        "targets": {
+            "lodash": {
+                "target_dep": "lodash",
+                "addresses": ["lodash"],
+                "current_range": "^4.17.11",
+            },
+            "axios": {
+                "target_dep": "axios",
+                "addresses": ["axios"],
+                "current_range": "^1.0.0",
+            },
+        },
+        "migration_plans": {
+            "lodash": _plan("lodash", "^4.17.21"),
+            "axios": _plan("axios", "^1.1.0"),
+        },
+    }
+
+    sibling_cancelled = asyncio.Event()
+
+    async def _slow_ainvoke(*args, **kwargs):
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            sibling_cancelled.set()
+            raise
+        return {"outcomes": {}}
+
+    def _build_agent(work_dir, container, docker_image, package_manager):
+        if not sibling_cancelled.is_set() and _build_agent.calls == 0:
+            _build_agent.calls += 1
+            return MagicMock(
+                ainvoke=AsyncMock(side_effect=RuntimeError("rate limit exhausted"))
+            )
+        return MagicMock(ainvoke=AsyncMock(side_effect=_slow_ainvoke))
+
+    _build_agent.calls = 0
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_execution_agent",
+            side_effect=_build_agent,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="rate limit exhausted"):
+            await remediate_targets_node(state, config)
+
+    assert sibling_cancelled.is_set()
 
 
 @pytest.mark.asyncio
@@ -1131,8 +1231,10 @@ async def test_group_and_verify_gate_defers_whole_group_when_member_needs_migrat
         "coupled to a dependency migration (r3) target - deferred"
     )
     assert result["remediations"]["eslint-plugin-react"]["status"] == "skipped"
+    # The r3 member keeps its OWN reason -- that is where its replacement
+    # proposal is carried. Only its coupled siblings get the group reason.
     assert result["remediations"]["eslint-plugin-react"]["skip_reason"] == (
-        "coupled to a dependency migration (r3) target - deferred"
+        "dependency migration - deferred, not yet supported"
     )
     assert result.get("retry_targets") == []
 
@@ -1636,3 +1738,306 @@ def test_pr_title_and_body_replace_case_includes_migration_notes():
     assert "- [ ] Audit re-scan: finding still present" in body
     assert "## Migration notes" in body
     assert "swap default import for the named `pad` export" in body
+
+
+@pytest.mark.asyncio
+async def test_remediate_targets_node_r3_tier_overrides_bump_only_plan():
+    """Regression (job 6a7773a7576d0efd7796aa8c, `matcha`): classify tiered
+    the target r3, but the planner emitted a bump-only plan whose to_range
+    was the installed version. Routing keyed only off the plan's task kinds,
+    so the target was dispatched and "bumped" 0.7.0 -> 0.7.0. The tier is
+    binding now, so it never reaches an execution agent."""
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"matcha": "0.7.0"}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    targets = {
+        "matcha": RemediationTarget(
+            target_dep="matcha",
+            addresses=["matcha"],
+            current_range="0.7.0",
+            tier="r3",
+        ).model_dump()
+    }
+    plans = {
+        "matcha": {
+            "target_dep": "matcha",
+            "tier_hint": "r3",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "bump",
+                    "rationale": "Clean upgrade with no migration needed.",
+                    "to_range": "^0.7.0",
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_execution_agent"
+        ) as mock_build_agent,
+    ):
+        out = await remediate_targets_node(
+            {
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": {},
+                "migration_plans": plans,
+            },
+            config,
+        )
+
+    mock_build_agent.assert_not_called()
+    rem = out["remediations"]["matcha"]
+    assert rem["strategy"] == "replace"
+    assert rem["status"] == "skipped"
+    assert "no replacement candidate was identified" in rem["skip_reason"]
+
+
+@pytest.mark.asyncio
+async def test_remediate_targets_node_noop_bump_plan_settles_without_dispatch():
+    """A bump to the range already declared changes nothing -- executing it
+    burns a container verify cycle only to fail with a misleading reason."""
+    prep = MagicMock(
+        repo_path="/tmp/repo",
+        docker_image="img",
+        detected_package_manager="npm",
+        dependency_graph={"direct": {"stale-dep": "1.2.3"}, "packages": {}},
+    )
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=prep)
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    targets = {
+        "stale-dep": RemediationTarget(
+            target_dep="stale-dep",
+            addresses=["stale-dep"],
+            current_range="1.2.3",
+            tier="r1",
+        ).model_dump()
+    }
+    plans = {
+        "stale-dep": {
+            "target_dep": "stale-dep",
+            "tier_hint": "r1",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "bump",
+                    "rationale": "clean upgrade",
+                    "to_range": "1.2.3",
+                    "files": [],
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.copy_repo",
+            return_value="/tmp/fake-work/repo",
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_execution_agent"
+        ) as mock_build_agent,
+    ):
+        out = await remediate_targets_node(
+            {
+                "job_id": "j",
+                "prep_result_id": "p",
+                "targets": targets,
+                "investigations": {},
+                "migration_plans": plans,
+            },
+            config,
+        )
+
+    mock_build_agent.assert_not_called()
+    rem = out["remediations"]["stale-dep"]
+    assert rem["status"] == "skipped"
+    assert "no upgrade available" in rem["skip_reason"]
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_never_marks_noop_bump_group_fixed():
+    """A no-op bump group has nothing to apply, so replaying it verifies a
+    pristine copy and comes back green. It must not be reported as fixed."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"stale-dep": {}},
+        "remediations": {
+            "stale-dep": {
+                "id": "r1",
+                "addresses": ["stale-dep"],
+                "target_dep": "stale-dep",
+                "strategy": "bump",
+                "from_range": "1.2.3",
+                "to_range": None,
+                "status": "skipped",
+                "plan": {
+                    "target_dep": "stale-dep",
+                    "tier_hint": "r1",
+                    "tasks": [{"kind": "bump", "rationale": "x", "to_range": "1.2.3"}],
+                    "requires": [],
+                },
+            }
+        },
+        "requires_edges": {},
+        "correction_rounds": 0,
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        AsyncMock(
+            return_value=(
+                VerificationResult(installed=True, finding_resolved=True),
+                None,
+            )
+        ),
+    ) as mock_replay:
+        result = await group_and_verify_gate(state, config)
+
+    mock_replay.assert_not_called()
+    rem = result["remediations"]["stale-dep"]
+    assert rem["status"] == "skipped"
+    assert "no upgrade available" in rem["skip_reason"]
+
+
+def test_assemble_remediations_carries_replacement_proposal_onto_record():
+    """The r3 record is the only place a replacement proposal is delivered
+    -- automating the migration is still deferred, so the named candidate
+    and its reasoning ARE the deliverable. They used to be dropped."""
+    targets = {
+        "matcha": RemediationTarget(
+            target_dep="matcha",
+            addresses=["matcha"],
+            current_range="0.7.0",
+            tier="r3",
+        ).model_dump()
+    }
+    plans = {
+        "matcha": {
+            "target_dep": "matcha",
+            "tier_hint": "r3",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "replace",
+                    "rationale": "matcha is unmaintained; tinybench is active.",
+                    "replacement_dep": "tinybench",
+                    "replacement_range": "^2.5.0",
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    out = _assemble_remediations(targets, plans, outcomes={}, omit=set())
+
+    rem = out["matcha"]
+    assert rem["strategy"] == "replace"
+    assert rem["replacement_dep"] == "tinybench"
+    assert rem["replacement_range"] == "^2.5.0"
+    assert "tinybench" in rem["migration_plan"]
+    assert "replacement proposed: tinybench@^2.5.0" in rem["skip_reason"]
+
+
+def test_assemble_remediations_says_so_when_no_replacement_candidate_named():
+    targets = {
+        "matcha": RemediationTarget(
+            target_dep="matcha",
+            addresses=["matcha"],
+            current_range="0.7.0",
+            tier="r3",
+        ).model_dump()
+    }
+    plans = {
+        "matcha": {
+            "target_dep": "matcha",
+            "tier_hint": "r3",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "replace",
+                    "rationale": "No confident candidate for a benchmark lib.",
+                    "replacement_dep": None,
+                    "replacement_range": None,
+                }
+            ],
+            "requires": [],
+        }
+    }
+
+    out = _assemble_remediations(targets, plans, outcomes={}, omit=set())
+
+    rem = out["matcha"]
+    assert rem["replacement_dep"] is None
+    assert "no replacement candidate was identified" in rem["skip_reason"]
+
+
+@pytest.mark.asyncio
+async def test_group_and_verify_gate_preserves_replacement_proposal_reason():
+    """The gate's coupled-group branch overwrote every member's skip_reason,
+    erasing the r3 member's proposal. Only its siblings get the generic
+    group reason now."""
+    dao = AsyncMock()
+    dao.get_prep = AsyncMock(return_value=_prep())
+    config = {"configurable": {"result_dao": dao, "container": MagicMock()}}
+
+    state = {
+        "prep_result_id": "prep-1",
+        "targets": {"matcha": {}, "sibling": {}},
+        "remediations": {
+            "matcha": {
+                "id": "r1",
+                "addresses": ["matcha"],
+                "target_dep": "matcha",
+                "strategy": "replace",
+                "replacement_dep": "tinybench",
+                "status": "skipped",
+                "skip_reason": "replacement proposed: tinybench@^2.5.0 -- review",
+            },
+            "sibling": {
+                "id": "r2",
+                "addresses": ["sibling"],
+                "target_dep": "sibling",
+                "strategy": "bump",
+                "to_range": "^2.0.0",
+                "status": "skipped",
+            },
+        },
+        "requires_edges": {"matcha": ["sibling"]},
+        "correction_rounds": 0,
+    }
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.nodes.replay_and_verify_group",
+        AsyncMock(return_value=(VerificationResult(installed=True), None)),
+    ) as mock_replay:
+        result = await group_and_verify_gate(state, config)
+
+    mock_replay.assert_not_called()
+    assert "tinybench" in result["remediations"]["matcha"]["skip_reason"]
+    assert "coupled" in result["remediations"]["sibling"]["skip_reason"]

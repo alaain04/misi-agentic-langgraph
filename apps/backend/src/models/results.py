@@ -113,18 +113,25 @@ class ReportFinding(BaseModel):
 
 
 class FindingEnrichmentDecision(BaseModel):
+    # Field order matters for function-calling structured output: pydantic
+    # emits schema properties in declaration order, and the model fills
+    # them in that order too. Required scalar fields placed after a large
+    # nested object (`finding`, a full ReportFinding) were being dropped
+    # from the model's function-call arguments once it started generating
+    # that object -- putting reasoning/finalize/tool_calls first, before
+    # the large payload, fixed observed missing-field validation errors.
+    reasoning: str
+    finalize: bool
     tool_calls: list[ToolCall]
     finding: ReportFinding | None
-    finalize: bool
-    reasoning: str
 
 
 class ImpactAnalysisDecision(BaseModel):
+    reasoning: str
+    finalize: bool
     tool_calls: list[ToolCall]
     narrative: str
     use_cases_impacted: list[str]
-    finalize: bool
-    reasoning: str
 
 
 class ReportResult(BaseModel):

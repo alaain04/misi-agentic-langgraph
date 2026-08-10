@@ -30,6 +30,7 @@ async def analyze(
             concern=request.concern,
             autopilot=request.autopilot,
             used_pat=bool(request.github_token),
+            remediate=request.remediate,
         )
     )
     await dao.create(job)

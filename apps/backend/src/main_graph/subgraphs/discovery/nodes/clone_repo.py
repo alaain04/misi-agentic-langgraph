@@ -22,11 +22,16 @@ def _clone_command(
     the cloned repo's own .git/config) referencing $GIT_TOKEN — the actual
     value is delivered to the shell only via the container's environment
     (see ContainerRunPort.run's secret_env), never as a literal here.
+
+    `base64 -w0` disables line wrapping: a realistic PAT base64-encodes to
+    well over the default 76-column wrap, and an embedded newline in the
+    header value makes git/curl fail with "A libcurl function was given a
+    bad argument".
     """
     if github_token:
         command = (
             'git -c http.extraHeader="AUTHORIZATION: basic '
-            '$(printf \'x-access-token:%s\' "$GIT_TOKEN" | base64)" '
+            '$(printf \'x-access-token:%s\' "$GIT_TOKEN" | base64 -w0)" '
             f"clone --depth=1 --single-branch {repo_url} /workspace"
         )
         return command, {"GIT_TOKEN": github_token}

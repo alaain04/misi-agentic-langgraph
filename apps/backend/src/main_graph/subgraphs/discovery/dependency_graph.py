@@ -107,6 +107,18 @@ def dependents_of(graph: dict, name: str) -> list[str]:
     return sorted(result)
 
 
+def _component_name(comp: dict) -> str | None:
+    """Full package name for a CycloneDX component, recombining `group` with
+    `name` for scoped npm packages -- Trivy splits "@scope/pkg" into
+    group="@scope", name="pkg", and dropping `group` collapses a scoped
+    package onto an unrelated top-level package sharing its bare name."""
+    name = comp.get("name")
+    if not name:
+        return None
+    group = comp.get("group")
+    return f"{group}/{name}" if group else name
+
+
 def _graph_from_cyclonedx(doc: dict) -> dict | None:
     """Adapt a Trivy CycloneDX document into the flat {"direct", "packages"}
     shape every consumer already expects (see build_dependency_graph's
@@ -148,9 +160,9 @@ def _graph_from_cyclonedx(doc: dict) -> dict | None:
 
     direct_refs = depends_on.get(manifest_ref, [])
     direct = {
-        by_ref[r]["name"]: by_ref[r].get("version", "")
+        _component_name(by_ref[r]): by_ref[r].get("version", "")
         for r in direct_refs
-        if r in by_ref
+        if r in by_ref and _component_name(by_ref[r])
     }
 
     # Only include components reachable from this manifest -- a repo can have
@@ -171,15 +183,17 @@ def _graph_from_cyclonedx(doc: dict) -> dict | None:
         comp = by_ref[ref]
         if comp.get("type") == "application":
             continue
-        name = comp.get("name")
+        name = _component_name(comp)
         if not name:
             continue
         version = comp.get("version", "")
         flat_key = f"{name}@{version}"
         children = sorted(
-            f"{by_ref[c]['name']}@{by_ref[c].get('version', '')}"
+            f"{_component_name(by_ref[c])}@{by_ref[c].get('version', '')}"
             for c in depends_on.get(ref, [])
-            if c in by_ref and by_ref[c].get("type") != "application"
+            if c in by_ref
+            and by_ref[c].get("type") != "application"
+            and _component_name(by_ref[c])
         )
         packages[flat_key] = {"version": version, "dependencies": children}
 

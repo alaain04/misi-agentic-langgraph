@@ -22,6 +22,9 @@ class JobMetadata(BaseModel):
     # Audit signal only — never the token itself. Set from
     # bool(request.github_token) in the /analyze route handler.
     used_pat: bool = False
+    # User's remediation write-consent, echoed from request.remediate so it's
+    # visible on the job record itself (not just RemediationResult.consent).
+    remediate: bool = False
 
 
 class Job(BaseModel):

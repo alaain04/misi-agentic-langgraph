@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from langchain_core.tools import tool
+from typing import Annotated
+
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 
 from src.domain.ports.container_run_port import ContainerRunPort
@@ -8,7 +11,7 @@ from src.main_graph.subgraphs.discovery.dependency_graph import dependents_of
 from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes
 from src.main_graph.subgraphs.remediation.verify import verify_working_copy
 from src.main_graph.subgraphs.remediation.workspace import apply_bump
-from src.models.remediation import MigrationPlan, RemediationOutcome
+from src.models.remediation import RemediationOutcome
 
 
 def make_read_release_notes_tool(
@@ -77,25 +80,28 @@ def make_verify_tool(
     return verify
 
 
-def make_commit_plan_tool():
-    @tool
-    def commit_plan(plan: MigrationPlan) -> Command:
-        """Record the migration plan for this target. Call this FIRST,
-        before dispatching any implementation work. The plan is
-        persisted for review."""
-        return Command(update={"migration_plans": {plan.target_dep: plan.model_dump()}})
-
-    return commit_plan
-
-
 def make_commit_outcome_tool():
     @tool
-    def commit_outcome(target_dep: str, outcome: RemediationOutcome) -> Command:
+    def commit_outcome(
+        target_dep: str,
+        outcome: RemediationOutcome,
+        tool_call_id: Annotated[str, InjectedToolCallId],
+    ) -> Command:
         """Record the final remediation outcome for the ONE dependency you were
         asked to work on. Call this as your LAST step. Pass the dependency name
         (target_dep) and your structured outcome, including the unified diff of
         every file you edited in `code_diff`. A prose summary alone is NOT
         captured -- this tool call is the only thing that ships your work."""
-        return Command(update={"outcomes": {target_dep: outcome.model_dump()}})
+        return Command(
+            update={
+                "outcomes": {target_dep: outcome.model_dump()},
+                "messages": [
+                    ToolMessage(
+                        f"Recorded remediation outcome for {target_dep}",
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+            }
+        )
 
     return commit_outcome

@@ -27,17 +27,22 @@ logger = logging.getLogger(__name__)
 _llm = get_llm(Model.GPT_5_4_MINI)
 
 _RELEASE_SYSTEM_PROMPT = """\
-You are the release investigator for an npm dependency upgrade. Given the \
+You are the release note analyst for an npm dependency upgrade. Given the \
 GitHub release notes for the versions BETWEEN the installed version and the \
-target version, decide whether upgrading requires any code change in a \
-consumer, and if so produce a concise migration guide.
+target version, plus this repo's blast radius for the dependency (which \
+local packages depend on it, and which files reference it), decide whether \
+upgrading requires any code change in a consumer, and if so produce a \
+concise migration guide.
 
 Set migration_needed=true ONLY when the notes describe a breaking change a \
 typical consumer would have to adapt to (removed/renamed API, changed \
-default, new required config, etc.). A pure bug/patch/feature release with \
-no consumer-facing break is migration_needed=false with an empty guide. \
-List each concrete breaking change in breaking_changes. Keep migration_guide \
-short and specific to what a caller must change."""
+default, new required config, etc.) AND that change is plausibly relevant \
+given the blast radius provided. A pure bug/patch/feature release with no \
+consumer-facing break is migration_needed=false with an empty guide -- do \
+NOT write commentary explaining that nothing is needed, leave the guide \
+empty. List each concrete breaking change in breaking_changes. When \
+migration is needed, ground migration_guide in the actual call sites given \
+(name the specific files/patterns to review) rather than generic advice."""
 
 
 async def investigate_release(
@@ -47,7 +52,11 @@ async def investigate_release(
     repo_path: str,
     container: ContainerRunPort,
     docker_image: str,
+    dependents: list[str] | None = None,
+    call_sites: list[str] | None = None,
 ) -> ReleaseDigest:
+    dependents = dependents or []
+    call_sites = call_sites or []
     try:
         notes = await fetch_release_notes_between(
             target_dep, from_version, to_version, repo_path, container, docker_image
@@ -85,6 +94,8 @@ async def investigate_release(
                             f"Dependency: {target_dep}\n"
                             f"From version: {from_version or 'unknown'}\n"
                             f"To version: {to_version or 'unknown'}\n"
+                            f"Local dependents: {dependents or 'none'}\n"
+                            f"Local call sites: {call_sites or 'none'}\n"
                             f"Release notes: {json.dumps(notes)[:6000]}"
                         ),
                     },
@@ -131,10 +142,15 @@ def _resolve_versions(
     target: RemediationTarget, dependency_graph: dict
 ) -> tuple[str | None, str | None]:
     """(from_version, to_version). from = installed version from the graph;
-    to = None until analysis-finding version-enrichment supplies fixed_version
-    (release fetch then degrades to the unfiltered recent set, spec soft-dep)."""
+    to = the registry's `latest`, resolved once by classify_targets_node.
+
+    to_version used to be hardcoded None, so fetch_release_notes_between
+    always degraded to the unfiltered recent set and the planner never knew
+    the upgrade ceiling -- which is how it came to invent a to_range for a
+    package that had no newer version at all. None here still degrades
+    honestly (classify could not reach the registry)."""
     installed = (dependency_graph.get("direct") or {}).get(target.target_dep)
-    return (installed, None)
+    return (installed, target.latest_version)
 
 
 async def investigate_target(
@@ -145,8 +161,11 @@ async def investigate_target(
     docker_image: str,
 ) -> TargetInvestigation:
     """Combine all three investigators (deterministic Dependency + Source, and
-    LLM-digested Release) into a TargetInvestigation."""
+    LLM-digested Release) into a TargetInvestigation. Dependency + Source run
+    first so their blast radius can ground the Release investigator's guide."""
     from_version, to_version = _resolve_versions(target, dependency_graph)
+    dependents = investigate_dependents(dependency_graph, target.target_dep)
+    call_sites = investigate_call_sites(repo_path, target.target_dep)
     release = await investigate_release(
         target.target_dep,
         from_version,
@@ -154,11 +173,13 @@ async def investigate_target(
         repo_path,
         container,
         docker_image,
+        dependents=dependents,
+        call_sites=call_sites,
     )
     return TargetInvestigation(
         target_dep=target.target_dep,
-        dependents=investigate_dependents(dependency_graph, target.target_dep),
-        call_sites=investigate_call_sites(repo_path, target.target_dep),
+        dependents=dependents,
+        call_sites=call_sites,
         release=release,
     )
 

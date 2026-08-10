@@ -47,6 +47,36 @@ def test_copy_repo_is_independent(git_repo):
     assert src_pkg["dependencies"]["lodash"] == "^4.17.11"
 
 
+def test_copy_repo_excludes_codegraph_dir(git_repo):
+    """index_codegraph writes .codegraph into repo_path for blast-radius
+    lookups -- it's discovery's own tooling metadata, not part of the target
+    repo, and must never ride along into a remediation PR's `git add -A`."""
+    os.makedirs(os.path.join(git_repo, ".codegraph"))
+    with open(os.path.join(git_repo, ".codegraph", "index.db"), "w") as f:
+        f.write("fake index")
+
+    copy = copy_repo(git_repo)
+
+    assert not os.path.exists(os.path.join(copy, ".codegraph"))
+    assert os.path.isfile(os.path.join(copy, "package.json"))
+
+
+def test_copy_repo_excludes_node_modules_dir(git_repo):
+    """install_deps npm-installs into repo_path's bind mount, leaving
+    node_modules on disk there -- verify_working_copy reinstalls fresh
+    inside the container regardless, so it must not be copied into the PR
+    work_dir and risk riding along into a `git add -A` commit."""
+    nm = os.path.join(git_repo, "node_modules", "lodash")
+    os.makedirs(nm)
+    with open(os.path.join(nm, "index.js"), "w") as f:
+        f.write("module.exports = {}")
+
+    copy = copy_repo(git_repo)
+
+    assert not os.path.exists(os.path.join(copy, "node_modules"))
+    assert os.path.isfile(os.path.join(copy, "package.json"))
+
+
 def test_apply_bump_dependencies(git_repo):
     assert apply_bump(git_repo, "lodash", "^4.17.21") is True
     pkg = json.load(open(os.path.join(git_repo, "package.json")))

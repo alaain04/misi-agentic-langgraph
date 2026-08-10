@@ -1,22 +1,23 @@
-"""Typed implementation subagents dispatched by plan_and_orchestrate
-(spec D4). codemod_adapter is a sandboxed deepagent that adapts call sites;
-replacement_migrator is a Spec-A stub (real r3 is Spec B)."""
+"""The single execution agent dispatched by remediate_targets_node (spec
+2026-08-08-remediation-flatten-planning-execution). One flat deep agent per
+connected group of targets, invoked directly -- never through deepagents'
+`task()` tool, so there is no agent dispatching another agent. It handles
+both `bump`-hinted and `codemod`-hinted targets in the same loop: a bump
+task is expected to just call bump_dependency + verify, but the agent can
+escalate to search/edit for any target if verify surfaces a problem the
+release digest missed."""
 
 from __future__ import annotations
 
-from typing import Annotated, NotRequired
+from typing import Annotated
 
-from deepagents import CompiledSubAgent, DeepAgentState, create_deep_agent
+from deepagents import DeepAgentState, create_deep_agent
 from deepagents.backends import FilesystemBackend
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END, START, StateGraph
-from typing_extensions import TypedDict
 
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.remediation.deepagent.limits import (
     MAX_RETRIES,
     REMEDIATION_RATE_LIMITER,
-    TARGET_SEMAPHORE,
 )
 from src.main_graph.subgraphs.remediation.deepagent.state import _merge_replace
 from src.main_graph.subgraphs.remediation.deepagent.tools import (
@@ -27,37 +28,46 @@ from src.main_graph.subgraphs.remediation.deepagent.tools import (
 )
 from src.main_graph.tools.blast_radius import make_blast_radius_tool
 from src.main_graph.tools.search_code import make_search_code_tool
-from src.models.remediation import RemediationOutcome
 from src.utils.llm import Model, get_llm
 
 
-class _CodemodState(DeepAgentState):
+class ExecutionState(DeepAgentState):
     outcomes: Annotated[dict[str, dict], _merge_replace]
 
 
-_CODEMOD_PROMPT = """\
-You adapt this Node.js project's own source to a dependency upgrade that has
-a known breaking change. The dependency you must work on is named in your
-task description. You are given the migration guide and the files that use
-it. Edit ONLY what the guide requires, then call verify. Iterate until verify
-is green or you conclude there is no safe fix.
+EXECUTION_PROMPT = """\
+You execute dependency remediation for a Node.js project. You are given one \
+or more targets that must be handled together in this working copy (they \
+are coupled by a companion-dependency requirement, or this is the only \
+target in its group). For each target you are given its migration plan's \
+task kind (bump or codemod) and its migration guide, if any.
 
-Finish by calling commit_outcome with:
-- target_dep: the dependency name from your task description
-- outcome: a RemediationOutcome with strategy (usually "bump_with_codemod"),
-  to_range (the version you bumped to), code_diff (the unified diff of the
-  source files you edited -- NOT package.json), a short summary, and
-  status/skip_reason if you could not produce a safe fix.
-commit_outcome is the only thing that ships your work; a summary alone is
-discarded."""
+For a target whose plan is bump-only: call bump_dependency, then verify. If \
+verify passes, you are done with that target -- do not search or edit its \
+code. Only if verify fails, or the plan already includes a codemod task, \
+use search_code and read_release_notes to find what needs to change and \
+edit the minimum necessary call sites, iterating with verify until it is \
+green or you conclude there is no safe fix.
+
+Finish EVERY target listed by calling commit_outcome with its target_dep \
+and a RemediationOutcome: strategy ("bump" if you never edited source for \
+this target, "bump_with_codemod" if you did), to_range, code_diff (unified \
+diff of source files only -- NOT package.json -- empty if you made no code \
+edits), a short summary, and status/skip_reason if you could not produce a \
+safe fix. commit_outcome is the only thing that ships your work for a \
+target; a summary alone is discarded."""
 
 
-def build_codemod_subagent(
+def build_execution_agent(
     work_dir: str,
     container: ContainerRunPort,
     docker_image: str,
     package_manager: str,
-) -> CompiledSubAgent:
+):
+    """Compile the flat execution agent for one group. Callers invoke the
+    returned agent's `.ainvoke` directly (see remediate_targets_node) -- it
+    is not registered as a deepagents `subagents=[...]` entry, so nothing
+    can dispatch it via `task()`."""
     tools = [
         make_read_release_notes_tool(work_dir, container, docker_image),
         make_blast_radius_tool(work_dir, container, docker_image),
@@ -66,72 +76,14 @@ def build_codemod_subagent(
         make_verify_tool(work_dir, container, docker_image, package_manager, []),
         make_commit_outcome_tool(),
     ]
-    agent = create_deep_agent(
+    return create_deep_agent(
         model=get_llm(
             Model.GPT_5_4_MINI,
             rate_limiter=REMEDIATION_RATE_LIMITER,
             max_retries=MAX_RETRIES,
         ),
         tools=tools,
-        system_prompt=_CODEMOD_PROMPT,
+        system_prompt=EXECUTION_PROMPT,
         backend=FilesystemBackend(root_dir=work_dir, virtual_mode=True),
-        state_schema=_CodemodState,
+        state_schema=ExecutionState,
     )
-
-    async def _run(state: _CodemodState, config: RunnableConfig) -> dict:
-        # Bounds how many nested codemod agents run concurrently (see
-        # deepagent/limits.py): the planner's task() fan-out is unbounded
-        # and each dispatched codemod task runs its own multi-turn LLM
-        # loop, so N parallel codemod tasks means N+ concurrent OpenAI
-        # requests with no throttling anywhere in the path otherwise.
-        async with TARGET_SEMAPHORE:
-            return await agent.ainvoke(state, config)  # type: ignore[arg-type]
-
-    graph = StateGraph(_CodemodState)
-    graph.add_node("run", _run)
-    graph.add_edge(START, "run")
-    graph.add_edge("run", END)
-
-    return {
-        "name": "codemod_adapter",
-        "description": (
-            "Adapt this project's call sites to a breaking dependency change. "
-            "Give it the migration guide and the affected files."
-        ),
-        "runnable": graph.compile(),
-    }
-
-
-class _StubState(TypedDict):
-    messages: list
-    structured_response: NotRequired[RemediationOutcome]
-
-
-async def _replacement_stub(state: _StubState, config: RunnableConfig) -> dict:
-    outcome = RemediationOutcome(
-        strategy="replace",
-        status="skipped",
-        skip_reason="dependency replacement deferred (Spec B)",
-        summary="replacement not implemented in this build",
-    )
-    return {"messages": [], "structured_response": outcome}
-
-
-def build_replacement_subagent(
-    work_dir: str,
-    container: ContainerRunPort,
-    docker_image: str,
-    package_manager: str,
-) -> CompiledSubAgent:
-    graph = StateGraph(_StubState)
-    graph.add_node("run", _replacement_stub)
-    graph.add_edge(START, "run")
-    graph.add_edge("run", END)
-    return {
-        "name": "replacement_migrator",
-        "description": (
-            "Replace a dependency with a different package and migrate usage. "
-            "Deferred in this build; reports skipped."
-        ),
-        "runnable": graph.compile(),
-    }

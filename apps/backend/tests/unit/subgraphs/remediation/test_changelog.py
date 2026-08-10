@@ -10,6 +10,7 @@ from src.main_graph.subgraphs.remediation.changelog import (
     _tag_version,
     fetch_release_notes,
     fetch_release_notes_between,
+    resolve_latest_version,
 )
 
 
@@ -129,3 +130,41 @@ async def test_fetch_between_unparseable_bounds_returns_unfiltered():
             "lodash", None, None, "/tmp/repo", None, "img"
         )
     assert out["releases"] == full["releases"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_latest_version_returns_registry_version():
+    container = MagicMock()
+    container.run = AsyncMock(return_value=(0, "4.17.21\n", ""))
+
+    result = await resolve_latest_version(
+        "lodash", "/tmp/repo", container, "node:lts-alpine"
+    )
+
+    assert result == "4.17.21"
+
+
+@pytest.mark.asyncio
+async def test_resolve_latest_version_none_on_npm_failure():
+    container = MagicMock()
+    container.run = AsyncMock(return_value=(1, "", "E404 not found"))
+
+    result = await resolve_latest_version(
+        "ghost-pkg", "/tmp/repo", container, "node:lts-alpine"
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_latest_version_none_when_container_raises():
+    """An unreachable registry must degrade to "unknown", never to a value
+    that would be read as "no upgrade exists"."""
+    container = MagicMock()
+    container.run = AsyncMock(side_effect=RuntimeError("docker down"))
+
+    result = await resolve_latest_version(
+        "lodash", "/tmp/repo", container, "node:lts-alpine"
+    )
+
+    assert result is None

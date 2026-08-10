@@ -3,9 +3,8 @@
 
 from __future__ import annotations
 
-import re
-
 from src.models.conductor import EvidenceRef, FindingNote
+from src.utils.semver import is_semver_major_bump, max_semver
 
 _SEVERITY_MAP = {
     "CRITICAL": "critical",
@@ -15,37 +14,59 @@ _SEVERITY_MAP = {
     "UNKNOWN": "info",
 }
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
-_SEMVER_RE = re.compile(r"^(\d+)\.\d+\.\d+(?:[-+].*)?$")
 
 
 def _rank(severity: str) -> int:
     return _SEVERITY_RANK.get(severity, 0)
 
 
-def _major_version(version: str) -> int | None:
-    match = _SEMVER_RE.match(version.strip())
-    return int(match.group(1)) if match else None
+def _merge_group(dep_name: str, group: list[FindingNote]) -> FindingNote:
+    """Collapse multiple per-CVE findings on one package into a single
+    FindingNote: most severe wins as the headline severity, fixed_version is
+    the highest fix version in the group -- since Trivy's FixedVersion is
+    always for this same PkgName, upgrading to it resolves every CVE in the
+    group, not just the one that reported it. Evidence from every CVE is
+    kept so nothing is lost."""
+    ranked = sorted(group, key=lambda f: _rank(f.severity), reverse=True)
+    installed = next((f.installed_version for f in group if f.installed_version), None)
+    fixed = max_semver([f.fixed_version for f in group if f.fixed_version])
+    summary = "\n".join(f"- [{f.severity}] {f.description}" for f in ranked)
+    installed_note = f" (installed {installed})" if installed else ""
+    return FindingNote(
+        dep_name=dep_name,
+        severity=ranked[0].severity,
+        description=(
+            f"{len(group)} known vulnerabilities affect {dep_name}"
+            f"{installed_note}:\n{summary}"
+        ),
+        evidence=[ev for f in ranked for ev in f.evidence],
+        installed_version=installed,
+        fixed_version=fixed,
+        is_semver_major=is_semver_major_bump(installed, fixed),
+    )
 
 
-def _is_semver_major(installed: str | None, fixed: str | None) -> bool | None:
-    """Same-dependency-upgrade comparison only - Trivy's InstalledVersion/
-    FixedVersion are always for the same PkgName, so this has no meaning for
-    a package replacement/migration. None means not computable: no fix
-    available, or either version string isn't parseable as semver."""
-    if not installed or not fixed:
-        return None
-    installed_major = _major_version(installed)
-    fixed_major = _major_version(fixed)
-    if installed_major is None or fixed_major is None:
-        return None
-    return installed_major != fixed_major
+def _group_by_dep(findings: list[FindingNote]) -> list[FindingNote]:
+    order: list[str] = []
+    groups: dict[str, list[FindingNote]] = {}
+    for f in findings:
+        if f.dep_name not in groups:
+            groups[f.dep_name] = []
+            order.append(f.dep_name)
+        groups[f.dep_name].append(f)
+    return [
+        groups[dep][0] if len(groups[dep]) == 1 else _merge_group(dep, groups[dep])
+        for dep in order
+    ]
 
 
 def parse_trivy_vuln_findings(
     trivy_output: dict, min_severity: str = "high"
 ) -> list[FindingNote]:
     """Convert a trivy_vuln_scan output into findings at or above
-    `min_severity`, most severe first."""
+    `min_severity`, most severe first. Multiple CVEs against the same
+    package collapse into one FindingNote (see `_merge_group`) so
+    remediation and report enrichment act on it once, not once per CVE."""
     threshold = _rank(min_severity)
     findings: list[FindingNote] = []
     for result in (trivy_output or {}).get("Results") or []:
@@ -79,8 +100,9 @@ def parse_trivy_vuln_findings(
                     ],
                     installed_version=installed_raw,
                     fixed_version=fixed_raw,
-                    is_semver_major=_is_semver_major(installed_raw, fixed_raw),
+                    is_semver_major=is_semver_major_bump(installed_raw, fixed_raw),
                 )
             )
-    findings.sort(key=lambda f: _rank(f.severity), reverse=True)
-    return findings
+    grouped = _group_by_dep(findings)
+    grouped.sort(key=lambda f: _rank(f.severity), reverse=True)
+    return grouped

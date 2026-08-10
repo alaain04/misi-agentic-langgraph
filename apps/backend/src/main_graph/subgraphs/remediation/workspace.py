@@ -22,9 +22,29 @@ def pm_commands(package_manager: str) -> dict[str, str]:
 
 
 def copy_repo(src_repo_path: str) -> str:
-    dst = tempfile.mkdtemp(prefix="remediation-")
+    """Copy the repo into a fresh scratch dir under the project's own `tmp/`
+    -- not the OS default tempdir (`tempfile.mkdtemp()`'s bare form lands
+    under /var/folders or /tmp, which Docker Desktop's default file-sharing
+    allowlist excludes on macOS; a docker run -v mount of that path silently
+    sees an empty directory, so `npm install` in the container ENOENTs on
+    package.json even though the host-side copy is intact). `tmp/` mirrors
+    where clone_repo already puts its checkout, which containers can read."""
+    base = os.path.abspath("tmp")
+    os.makedirs(base, exist_ok=True)
+    dst = tempfile.mkdtemp(prefix="remediation-", dir=base)
     work = os.path.join(dst, "repo")
-    shutil.copytree(src_repo_path, work, symlinks=True)
+    # .codegraph (discovery's blast-radius index) and node_modules (left on
+    # disk by install_deps, which npm-installs into repo_path's bind mount)
+    # are both host-side tooling byproducts, not part of the target repo --
+    # excluded here so neither can ride along into a `git add -A` commit in
+    # open_pr. verify_working_copy reinstalls node_modules fresh inside the
+    # container regardless, so nothing is lost by not carrying it over.
+    shutil.copytree(
+        src_repo_path,
+        work,
+        symlinks=True,
+        ignore=shutil.ignore_patterns(".codegraph", "node_modules"),
+    )
     return work
 
 

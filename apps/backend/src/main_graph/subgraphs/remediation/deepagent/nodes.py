@@ -29,6 +29,7 @@ from src.models.remediation import (
     RemediationTarget,
     VerificationResult,
 )
+from src.utils.semver import is_noop_range_change
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,53 @@ def _resolve_working_targets(state: RemediationState, prep) -> dict[str, dict]:
 
 def _plan_kinds(plan: dict) -> set[str]:
     return {t.get("kind") for t in plan.get("tasks") or []}
+
+
+def _is_replace_target(target: dict, plan: dict) -> bool:
+    """An r3 tier is binding on its own: classify decided no same-package
+    upgrade fixes this dependency, so the target belongs on the replace path
+    whether or not the planner actually wrote a `replace` task."""
+    return (target or {}).get("tier") == "r3" or "replace" in _plan_kinds(plan)
+
+
+def _replacement_proposal(plan: dict) -> dict:
+    """The r3 plan's `replace` task, i.e. what to swap this dependency for.
+    Empty when the plan has no replace task at all."""
+    for task in plan.get("tasks") or []:
+        if task.get("kind") == "replace":
+            return task
+    return {}
+
+
+def _replacement_skip_reason(proposal: dict) -> str:
+    """Automating an r3 migration is still deferred (Spec B), but the
+    proposal itself is the deliverable -- a named candidate and the reasoning
+    behind it are what a human needs to act on. Say which of the two cases
+    this is instead of reporting both as an undifferentiated deferral."""
+    dep = proposal.get("replacement_dep")
+    if not dep:
+        return (
+            "no same-package upgrade fixes this dependency and no replacement "
+            "candidate was identified -- needs a manual choice of replacement"
+        )
+    target_range = proposal.get("replacement_range")
+    named = f"{dep}@{target_range}" if target_range else dep
+    return (
+        f"replacement proposed: {named} -- review required, the migration is "
+        f"not automated"
+    )
+
+
+def _is_noop_bump_plan(plan: dict, current_range: str | None) -> bool:
+    """True when a plan does nothing but re-declare the range package.json
+    already has -- every task is a bump and no bump's to_range is provably
+    an upgrade. Dispatching one costs a full install/build/test container
+    cycle and can only land as an unexplained verification failure, so these
+    settle as an honest skip instead of being executed."""
+    tasks = plan.get("tasks") or []
+    if not tasks or any(t.get("kind") != "bump" for t in tasks):
+        return False
+    return all(is_noop_range_change(current_range, t.get("to_range")) for t in tasks)
 
 
 def _format_group_message(
@@ -153,15 +201,32 @@ def _assemble_remediations(
             ).model_dump()
             continue
         plan = MigrationPlan(**plan_dict)
-        if "replace" in _plan_kinds(plan_dict):
+        if _is_replace_target(target_dict, plan_dict):
+            proposal = _replacement_proposal(plan_dict)
             rem = Remediation(
                 addresses=target.addresses,
                 finding_summaries=target.finding_summaries,
                 target_dep=dep,
                 strategy="replace",
                 from_range=target.current_range,
+                replacement_dep=proposal.get("replacement_dep"),
+                replacement_range=proposal.get("replacement_range"),
+                migration_plan=proposal.get("rationale") or "",
                 status="skipped",
-                skip_reason="dependency replacement deferred (Spec B)",
+                skip_reason=_replacement_skip_reason(proposal),
+                plan=plan,
+            )
+        elif _is_noop_bump_plan(plan_dict, target.current_range):
+            rem = Remediation(
+                addresses=target.addresses,
+                finding_summaries=target.finding_summaries,
+                target_dep=dep,
+                from_range=target.current_range,
+                status="skipped",
+                skip_reason=(
+                    "no upgrade available: the planned range matches the one "
+                    "already declared, so a bump would change nothing"
+                ),
                 plan=plan,
             )
         elif dep in outcomes:
@@ -223,14 +288,35 @@ async def remediate_targets_node(
     if unplanned:
         plans.update(await build_plans_for_targets(unplanned, investigations))
 
+    # classify's r3 verdict is binding, not advisory. Routing used to key
+    # only off the plan's task kinds, so an r3 target whose plan carried a
+    # bump task (the planner ignoring its own tier_hint) was dispatched to
+    # the execution agent and "bumped" an abandoned package to the version
+    # already installed. Tier is checked here too so a planner slip cannot
+    # send a target with no same-package fix down the bump path.
     replace_deps = {
-        dep for dep in targets if "replace" in _plan_kinds(plans.get(dep, {}))
+        dep for dep in targets if _is_replace_target(targets[dep], plans.get(dep, {}))
+    }
+    # A bump to the range already declared is a no-op; executing it burns a
+    # container verify cycle only to fail with a reason that reads like a
+    # real defect. _assemble_remediations settles these as skipped.
+    noop_deps = {
+        dep
+        for dep in targets
+        if dep not in replace_deps
+        and _is_noop_bump_plan(
+            plans.get(dep) or {}, (targets[dep] or {}).get("current_range")
+        )
     }
     # A dep with no plan at all (the batch/single-target planning call
     # failed or omitted it) has nothing to give the execution agent -- fail
     # it honestly via _assemble_remediations instead of dispatching an
     # agent with no guidance.
-    exec_deps = [dep for dep in targets if dep in plans and dep not in replace_deps]
+    exec_deps = [
+        dep
+        for dep in targets
+        if dep in plans and dep not in replace_deps and dep not in noop_deps
+    ]
 
     requires_edges = {
         dep: plans[dep]["requires"]
@@ -268,7 +354,24 @@ async def remediate_targets_node(
         )
         return group, outcomes
 
-    group_results = await asyncio.gather(*[_bounded(g) for g in groups])
+    # asyncio.gather does not cancel still-running siblings when one task
+    # raises -- an unrecoverable error in one group (e.g. a RateLimitError
+    # that exhausts its retry budget) would otherwise leave the other
+    # groups' agents running as untracked orphans (still calling the LLM,
+    # still holding a work_dir/container) after this node has already
+    # failed. TaskGroup cancels them. except* unwraps the resulting
+    # ExceptionGroup back to the original exception so job_runner's
+    # `error=str(exc)` still stores the real message instead of TaskGroup's
+    # generic wrapper text.
+    tasks: list[asyncio.Task] = []
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for group in groups:
+                tasks.append(tg.create_task(_bounded(group)))
+    except* Exception as eg:
+        raise eg.exceptions[0] from eg
+
+    group_results = [t.result() for t in tasks]
 
     outcomes: dict[str, dict] = {}
     recursion_hit: set[str] = set()
@@ -355,12 +458,31 @@ async def group_and_verify_gate(
                 settled[member_dict["target_dep"]] = member_dict
             continue
 
-        if any(member["strategy"] == "replace" for member in members_dicts):
+        replace_coupled = any(
+            member["strategy"] == "replace" for member in members_dicts
+        )
+        # A group whose every member only ever planned a bump to the range
+        # already declared has nothing to apply. Replaying it would verify a
+        # pristine working copy, come back green, and mark the members
+        # "fixed" -- claiming a remediation that changed no file.
+        noop_only = all(
+            _is_noop_bump_plan(member.get("plan") or {}, member.get("from_range"))
+            for member in members_dicts
+        )
+        if replace_coupled or noop_only:
+            coupled_reason = (
+                "coupled to a dependency migration (r3) target - deferred"
+                if replace_coupled
+                else "no upgrade available: the planned range matches the one "
+                "already declared, so a bump would change nothing"
+            )
             for member_dict in members_dicts:
                 member_dict["status"] = "skipped"
-                member_dict["skip_reason"] = (
-                    "coupled to a dependency migration (r3) target - deferred"
-                )
+                # The r3 member's own reason carries its replacement proposal
+                # -- the whole point of settling it. Only its coupled
+                # siblings get the generic group reason.
+                if member_dict["strategy"] != "replace":
+                    member_dict["skip_reason"] = coupled_reason
                 member_dict["required_by"] = sorted(
                     required_by_map.get(member_dict["target_dep"], [])
                 )
@@ -389,7 +511,18 @@ async def group_and_verify_gate(
                 required_by_map.get(member.target_dep, [])
             )
             if group_ok:
-                member_dict["status"] = "fixed"
+                # A no-change member riding along in a group that a SIBLING's
+                # real bump turned green did not itself fix anything.
+                if _is_noop_bump_plan(
+                    member_dict.get("plan") or {}, member_dict.get("from_range")
+                ):
+                    member_dict["status"] = "skipped"
+                    member_dict["skip_reason"] = (
+                        "no upgrade available: the planned range matches the "
+                        "one already declared, so a bump would change nothing"
+                    )
+                else:
+                    member_dict["status"] = "fixed"
             elif correction_rounds < _MAX_CORRECTION_ROUNDS:
                 retry_targets.append(member.target_dep)
             else:

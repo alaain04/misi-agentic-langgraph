@@ -15,12 +15,16 @@ from pydantic import BaseModel
 
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.config import get_services
-from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes
+from src.main_graph.subgraphs.remediation.changelog import (
+    fetch_release_notes,
+    resolve_latest_version,
+)
 from src.main_graph.subgraphs.remediation.selection import select_remediation_targets
 from src.main_graph.subgraphs.remediation.state import RemediationState
 from src.models.remediation import RemediationTarget
 from src.utils.config import settings
 from src.utils.llm import Model, get_llm
+from src.utils.semver import parse_semver, range_floor
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,25 @@ class TargetClassification(BaseModel):
     rationale: str
 
 
+def _has_no_upgrade(current_range: str | None, latest_version: str | None) -> bool:
+    """True when the registry's newest published version is not above the
+    floor of the range already declared -- i.e. no same-package upgrade
+    exists at all.
+
+    Compares against the range's FLOOR ("^4.17.11" -> 4.17.11) rather than
+    whatever the lockfile resolved, so this only fires when nothing higher
+    than even the lowest accepted version was ever published. That makes it
+    a conservative one-way signal: it can force r3, never block it.
+    """
+    if not current_range or not latest_version:
+        return False
+    floor = range_floor(current_range)
+    latest = parse_semver(latest_version)
+    if floor is None or latest is None:
+        return False
+    return latest <= floor
+
+
 async def classify_target(
     target: RemediationTarget,
     repo_path: str,
@@ -58,6 +81,20 @@ async def classify_target(
     docker_image: str,
 ) -> TargetClassification:
     try:
+        # Registry truth first: if nothing newer was ever published there is
+        # no same-package fix, and no reading of the release notes can change
+        # that. Decided deterministically rather than left to the LLM, which
+        # reads "no further releases" as "a clean upgrade with nothing to
+        # break" and bumps the package to the version already installed.
+        if _has_no_upgrade(target.current_range, target.latest_version):
+            return TargetClassification(
+                tier="r3",
+                rationale=(
+                    f"npm publishes no version above {target.current_range}: "
+                    f"latest is {target.latest_version}. No same-package "
+                    f"upgrade exists, so only a replacement can resolve this."
+                ),
+            )
         release_notes = await fetch_release_notes(
             target.target_dep, repo_path, container, docker_image
         )
@@ -96,6 +133,19 @@ async def classify_target(
 _MAX_CONCURRENT_CLASSIFICATIONS = 6
 
 
+async def _latest_bounded(
+    semaphore: asyncio.Semaphore,
+    target: RemediationTarget,
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str,
+) -> str | None:
+    async with semaphore:
+        return await resolve_latest_version(
+            target.target_dep, repo_path, container, docker_image
+        )
+
+
 async def _classify_bounded(
     semaphore: asyncio.Semaphore,
     target: RemediationTarget,
@@ -123,6 +173,20 @@ async def classify_targets_node(
         return {"targets": {}, "remediations": {}}
 
     semaphore = asyncio.Semaphore(_MAX_CONCURRENT_CLASSIFICATIONS)
+    # Resolve the upgrade ceiling BEFORE classifying: classify_target uses it
+    # for its deterministic no-upgrade rule, and investigate_node reuses it
+    # off the target rather than paying for a second lookup.
+    latest_versions = await asyncio.gather(
+        *[
+            _latest_bounded(
+                semaphore, t, prep.repo_path, container, prep.docker_image
+            )
+            for t in initial
+        ]
+    )
+    for target, latest in zip(initial, latest_versions, strict=True):
+        target.latest_version = latest
+
     classifications = await asyncio.gather(
         *[
             _classify_bounded(

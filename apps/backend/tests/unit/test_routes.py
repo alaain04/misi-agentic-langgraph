@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from src.api.routes import analyze
 from src.api.schemas import AnalysisRequest
@@ -82,3 +83,22 @@ async def test_analyze_threads_remediate_flag():
         await analyze(request, dao=dao)
 
     assert mock_run.call_args.kwargs["remediate"] is True
+
+
+@pytest.mark.asyncio
+async def test_analyze_records_remediate_on_job_metadata():
+    dao = AsyncMock()
+    request = AnalysisRequest(repo_url=_REPO_URL, concern="security", remediate=True)
+
+    with patch("src.api.routes.run_analysis", new=AsyncMock()):
+        await analyze(request, dao=dao)
+
+    created_job = dao.create.call_args.args[0]
+    assert created_job.metadata.remediate is True
+
+
+def test_analyze_request_rejects_unknown_fields():
+    # A typo like "consent" instead of "remediate" must fail loudly rather
+    # than being silently dropped and defaulting to False.
+    with pytest.raises(ValidationError):
+        AnalysisRequest(repo_url=_REPO_URL, concern="security", consent=True)

@@ -52,6 +52,34 @@ async def _resolve_github_repo(
     return (match.group(1), match.group(2)) if match else None
 
 
+async def resolve_latest_version(
+    package_name: str, repo_path: str, container: ContainerRunPort, docker_image: str
+) -> str | None:
+    """The registry's current `latest` dist-tag for a package, or None when
+    it cannot be resolved (offline, unpublished, non-zero npm exit).
+
+    This is the only fact that proves a same-package upgrade EXISTS. Without
+    it the pipeline can only infer "nothing newer" from the absence of GitHub
+    release notes -- an LLM judgement that read a package with no further
+    releases as "a clean upgrade with no breaking changes" and bumped it to
+    the version already installed (job 6a7773a7576d0efd7796aa8c, `matcha`).
+    """
+    command = f"cd /workspace && npm view {shlex.quote(package_name)} version"
+    try:
+        rc, stdout, _stderr = await container.run(
+            image=docker_image,
+            command=command,
+            volume=f"{repo_path}:/workspace",
+            run_as_root=True,
+        )
+    except Exception:
+        return None
+    if rc != 0:
+        return None
+    version = stdout.strip().splitlines()[-1].strip() if stdout.strip() else ""
+    return version or None
+
+
 async def fetch_release_notes(
     package_name: str, repo_path: str, container: ContainerRunPort, docker_image: str
 ) -> dict:

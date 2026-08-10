@@ -38,7 +38,7 @@ async def test_run_analysis_records_cost_per_subgraph():
     async def fake_stream(*args, **kwargs):
         yield {"prep": {}}
         yield {"analysis": {"analysis_result_id": "ares-1"}}
-        yield {"report": {"report_result_id": None}}
+        yield {"remediation": {"remediation_result_id": None}}
 
     fake_cost_cb = MagicMock()
     fake_cost_cb.cost = MagicMock(side_effect=[0.01, 0.03, 0.07, 0.07])
@@ -53,7 +53,7 @@ async def test_run_analysis_records_cost_per_subgraph():
         mock_graph.astream = fake_stream
         mock_graph.aget_state = AsyncMock(
             return_value=MagicMock(
-                values={"report_result_id": "r-1", "prep_result_id": "p-1"}
+                values={"remediation_result_id": "r-1", "prep_result_id": "p-1"}
             )
         )
         await run_analysis(
@@ -62,7 +62,7 @@ async def test_run_analysis_records_cost_per_subgraph():
 
     dao.update_artifact_data.assert_any_call("job-2", "prep", {"cost": 0.01})
     dao.update_artifact_data.assert_any_call("job-2", "analysis", {"cost": 0.02})
-    dao.update_artifact_data.assert_any_call("job-2", "report", {"cost": 0.04})
+    dao.update_artifact_data.assert_any_call("job-2", "remediation", {"cost": 0.04})
 
 
 @pytest.mark.asyncio

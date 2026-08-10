@@ -64,7 +64,12 @@ class RemediationTarget(BaseModel):
     addresses: list[str]  # finding dep_names grouped under it
     finding_summaries: list[FindingSummary] = Field(default_factory=list)
     current_range: str | None = None  # from package.json, if known
-    tier: Literal["r1", "r2", "r3"] | None = None  # advisory hint from classify
+    # The registry's `latest` dist-tag, resolved once by classify and reused
+    # by investigate as the upgrade ceiling. None = could not be resolved.
+    latest_version: str | None = None
+    # classify's tier verdict. Binding, NOT advisory: r3 means no
+    # same-package upgrade fixes this dependency, and routing enforces it.
+    tier: Literal["r1", "r2", "r3"] | None = None
 
 
 class RemediationOutcome(BaseModel):

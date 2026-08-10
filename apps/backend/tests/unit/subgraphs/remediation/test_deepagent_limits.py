@@ -16,7 +16,7 @@ from src.main_graph.subgraphs.remediation.deepagent.limits import (
 
 
 def test_default_limits():
-    assert DEEPAGENT_LIMITS.max_parallel_calls == 3
+    assert DEEPAGENT_LIMITS.max_parallel_calls == 2
 
 
 def test_limits_are_frozen():
