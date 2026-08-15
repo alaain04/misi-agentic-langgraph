@@ -143,36 +143,6 @@ async def osv_lookup(
 
 
 @register(
-    "package_reputation",
-    "Reports package age, maintainers, release cadence, popularity, and weekly "
-    "downloads via npm registry",
-)
-async def package_reputation(package_name: str) -> dict:
-    meta, weekly_downloads = await asyncio.gather(
-        _npm_metadata(package_name),
-        _npm_weekly_downloads(package_name),
-    )
-    if "error" in meta:
-        return meta
-    time_data = meta.get("time", {})
-    versions = list(time_data.keys())
-    created = time_data.get("created", "")
-    modified = time_data.get("modified", "")
-    maintainers = meta.get("maintainers", [])
-    latest_ver = meta.get("dist-tags", {}).get("latest", "")
-    return {
-        "package": package_name,
-        "created": created,
-        "last_modified": modified,
-        "version_count": len([v for v in versions if v not in ("created", "modified")]),
-        "latest_version": latest_ver,
-        "maintainer_count": len(maintainers),
-        "maintainers": [m.get("name") for m in maintainers],
-        "weekly_downloads": weekly_downloads,
-    }
-
-
-@register(
     "package_health_data",
     "Reports raw npm registry health facts (release recency, weekly downloads, "
     "maintainer count) for every direct dependency. Returns data only — no risk "
@@ -207,30 +177,6 @@ async def package_health_data(repo_path: str) -> dict:
         "checked": len(deps_to_check),
         "total_deps": len(deps),
     }
-
-
-@register(
-    "unmaintained_packages",
-    "Flags packages with no releases for 12+ months based on npm registry data",
-)
-async def unmaintained_packages(repo_path: str) -> dict:
-    pkg = _load_pkg(repo_path)
-    deps = list(_all_deps(pkg).keys())
-    cutoff = datetime.now(UTC) - timedelta(days=365)
-    flagged = []
-    deps_to_check = deps[:30]  # limit to avoid rate limiting
-    metas = await asyncio.gather(*[_npm_metadata(d) for d in deps_to_check])
-    for dep, meta in zip(deps_to_check, metas):
-        if "error" in meta:
-            continue
-        modified_str = meta.get("time", {}).get("modified", "")
-        try:
-            modified = datetime.fromisoformat(modified_str.replace("Z", "+00:00"))
-            if modified < cutoff:
-                flagged.append({"package": dep, "last_modified": modified_str})
-        except Exception:
-            pass
-    return {"unmaintained": flagged, "checked": min(len(deps), 30)}
 
 
 _POPULAR_PACKAGES = {
@@ -299,61 +245,6 @@ async def typosquat_detection(repo_path: str) -> dict:
                 )
                 break
     return {"potential_typosquats": flagged, "checked": len(deps)}
-
-
-_LOW_WEEKLY_DOWNLOADS = 1000
-
-
-@register(
-    "high_risk_packages",
-    "Flags packages with unusual risk characteristics (very new or abandoned). "
-    "Maintainer count alone is never used as a risk signal — a single maintainer "
-    "is normal for the npm ecosystem and is not, by itself, evidence of risk.",
-)
-async def high_risk_packages(repo_path: str) -> dict:
-    pkg = _load_pkg(repo_path)
-    deps = list(_all_deps(pkg).keys())
-    cutoff_new = datetime.now(UTC) - timedelta(days=90)
-    cutoff_abandoned = datetime.now(UTC) - timedelta(days=730)
-    flagged = []
-    deps_to_check = deps[:30]
-    metas, downloads = await asyncio.gather(
-        asyncio.gather(*[_npm_metadata(d) for d in deps_to_check]),
-        asyncio.gather(*[_npm_weekly_downloads(d) for d in deps_to_check]),
-    )
-    for dep, meta, weekly_downloads in zip(deps_to_check, metas, downloads):
-        if "error" in meta:
-            continue
-        # Real, healthy adoption overrides every other signal: a package with
-        # steady weekly downloads is demonstrably in active use, even if it
-        # hasn't shipped a release in a while (many mature libs go long
-        # stretches without needing one) or has a single npm publisher.
-        has_healthy_downloads = (
-            weekly_downloads is not None and weekly_downloads >= _LOW_WEEKLY_DOWNLOADS
-        )
-        if has_healthy_downloads:
-            continue
-        time_data = meta.get("time", {})
-        created_str = time_data.get("created", "")
-        modified_str = time_data.get("modified", "")
-        reasons = []
-        try:
-            created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-            if created > cutoff_new:
-                reasons.append("very new package (<90 days)")
-        except Exception:
-            pass
-        is_abandoned = False
-        try:
-            modified = datetime.fromisoformat(modified_str.replace("Z", "+00:00"))
-            is_abandoned = modified < cutoff_abandoned
-            if is_abandoned:
-                reasons.append("abandoned (>2 years no release)")
-        except Exception:
-            pass
-        if reasons:
-            flagged.append({"package": dep, "reasons": reasons})
-    return {"high_risk": flagged, "checked": min(len(deps), 30)}
 
 
 def _package_name_variants(package_name: str) -> set[str]:

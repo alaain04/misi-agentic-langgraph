@@ -4,11 +4,6 @@ from src.db.input_cache import InputCacheDAO
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
 from src.main_graph.subgraphs.discovery.dependency_graph import is_direct
-from src.main_graph.tools.external_api import (
-    high_risk_packages,
-    package_reputation,
-    unmaintained_packages,
-)
 from src.models.results import AgentDispatch, EvidenceBundle, PrepResult
 
 
