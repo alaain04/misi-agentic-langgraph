@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 
 from src.main_graph.subgraphs.remediation.release_research import (
@@ -11,9 +10,32 @@ from src.main_graph.subgraphs.remediation.release_research import (
 )
 
 
-def _resp(status_code: int, text: str = "", location: str | None = None):
-    headers = {"location": location} if location else {}
-    return httpx.Response(status_code, text=text, headers=headers)
+class _FakeStreamResponse:
+    def __init__(
+        self, status_code: int, body: bytes = b"", location: str | None = None
+    ):
+        self.status_code = status_code
+        self.headers = {"location": location} if location else {}
+        self._body = body
+
+    async def aiter_bytes(self):
+        # Yield in chunks to exercise the early-stop-at-cap logic realistically.
+        chunk_size = 512
+        for i in range(0, len(self._body), chunk_size):
+            yield self._body[i : i + chunk_size]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+def _fake_stream(status_code: int, body: str = "", location: str | None = None):
+    def _stream(self, method, url, headers=None, extensions=None):
+        return _FakeStreamResponse(status_code, body.encode(), location)
+
+    return _stream
 
 
 @pytest.mark.asyncio
@@ -58,10 +80,7 @@ async def test_fetch_doc_success_returns_capped_body():
             "socket.getaddrinfo",
             return_value=[(None, None, None, None, ("140.82.121.3", 0))],
         ),
-        patch(
-            "httpx.AsyncClient.get",
-            AsyncMock(return_value=_resp(200, text="x" * 5000)),
-        ),
+        patch("httpx.AsyncClient.stream", _fake_stream(200, "x" * 5000)),
     ):
         result = await fetch_doc(
             "https://raw.githubusercontent.com/eslint/eslint/main/MIGRATION.md"
@@ -74,16 +93,16 @@ async def test_fetch_doc_success_returns_capped_body():
 async def test_fetch_doc_attaches_gh_token_only_for_github_hosts():
     captured = {}
 
-    async def _fake_get(self, url, headers=None):
+    def _stream(self, method, url, headers=None, extensions=None):
         captured["headers"] = headers
-        return _resp(200, text="ok")
+        return _FakeStreamResponse(200, b"ok")
 
     with (
         patch(
             "socket.getaddrinfo",
             return_value=[(None, None, None, None, ("140.82.121.3", 0))],
         ),
-        patch("httpx.AsyncClient.get", _fake_get),
+        patch("httpx.AsyncClient.stream", _stream),
         patch(
             "src.main_graph.subgraphs.remediation.release_research.settings"
         ) as mock_settings,
@@ -98,7 +117,7 @@ async def test_fetch_doc_attaches_gh_token_only_for_github_hosts():
             "socket.getaddrinfo",
             return_value=[(None, None, None, None, ("93.184.216.34", 0))],
         ),
-        patch("httpx.AsyncClient.get", _fake_get),
+        patch("httpx.AsyncClient.stream", _stream),
         patch(
             "src.main_graph.subgraphs.remediation.release_research.settings"
         ) as mock_settings,
@@ -114,10 +133,12 @@ async def test_fetch_doc_validates_redirect_target_before_following():
     the whole point of disabling auto-follow-redirects."""
     calls = {"n": 0}
 
-    async def _fake_get(self, url, headers=None):
+    def _stream(self, method, url, headers=None, extensions=None):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _resp(302, location="http://169.254.169.254/latest/meta-data/")
+            return _FakeStreamResponse(
+                302, location="http://169.254.169.254/latest/meta-data/"
+            )
         raise AssertionError("must not follow the redirect to a private IP")
 
     with (
@@ -130,7 +151,7 @@ async def test_fetch_doc_validates_redirect_target_before_following():
                 [(None, None, None, None, ("169.254.169.254", 0))],
             ],
         ),
-        patch("httpx.AsyncClient.get", _fake_get),
+        patch("httpx.AsyncClient.stream", _stream),
     ):
         result = await fetch_doc("https://example.com/redirect-to-metadata")
     assert result["available"] is False
@@ -138,19 +159,67 @@ async def test_fetch_doc_validates_redirect_target_before_following():
 
 @pytest.mark.asyncio
 async def test_fetch_doc_gives_up_after_max_redirects():
-    async def _fake_get(self, url, headers=None):
-        return _resp(302, location="https://example.com/next")
+    with (
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(None, None, None, None, ("93.184.216.34", 0))],
+        ),
+        patch(
+            "httpx.AsyncClient.stream",
+            _fake_stream(302, location="https://example.com/next"),
+        ),
+    ):
+        result = await fetch_doc("https://example.com/loop")
+    assert result["available"] is False
+    assert "redirect" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_doc_connects_to_resolved_ip_not_hostname():
+    """The whole point of the DNS-rebinding fix: the actual connection
+    target must be the validated IP, not a second hostname lookup."""
+    captured = {}
+
+    def _stream(self, method, url, headers=None, extensions=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["extensions"] = extensions
+        return _FakeStreamResponse(200, b"ok")
 
     with (
         patch(
             "socket.getaddrinfo",
             return_value=[(None, None, None, None, ("93.184.216.34", 0))],
         ),
-        patch("httpx.AsyncClient.get", _fake_get),
+        patch("httpx.AsyncClient.stream", _stream),
     ):
-        result = await fetch_doc("https://example.com/loop")
-    assert result["available"] is False
-    assert "redirect" in result["error"]
+        result = await fetch_doc("https://example.com/doc.md")
+
+    assert result["available"] is True
+    assert "93.184.216.34" in captured["url"]
+    assert "example.com" not in captured["url"]
+    assert captured["headers"]["Host"] == "example.com"
+    assert captured["extensions"]["sni_hostname"] == "example.com"
+
+
+@pytest.mark.asyncio
+async def test_fetch_doc_stops_reading_once_cap_reached():
+    """A host that tries to send far more than the cap must not have the
+    full body buffered before truncation -- the read itself should stop
+    once the cap is reached, not just slice after."""
+    huge_body = b"x" * 1_000_000  # far larger than the 2000-char cap
+
+    with (
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(None, None, None, None, ("93.184.216.34", 0))],
+        ),
+        patch("httpx.AsyncClient.stream", _fake_stream(200, huge_body.decode())),
+    ):
+        result = await fetch_doc("https://example.com/huge.md")
+
+    assert result["available"] is True
+    assert len(result["body"]) == 2000
 
 
 @pytest.mark.asyncio

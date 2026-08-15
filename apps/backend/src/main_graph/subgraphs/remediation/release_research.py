@@ -25,55 +25,81 @@ _TIMEOUT = 10.0
 _DOC_CHAR_CAP = 2000
 
 
-def _resolve_public_ips(host: str) -> bool:
-    """True only if `host` resolves and EVERY resolved address is globally
-    routable. is_global covers RFC1918/loopback/link-local (including the
-    169.254.169.254 cloud metadata address)/reserved/multicast in one
-    check -- deliberately not a hand-rolled OR of individual range checks.
+def _resolve_public_ip(host: str) -> str | None:
+    """Resolve host and return ONE globally-routable IP if every resolved
+    address is public, else None. Returning (not just validating) the IP
+    lets the caller connect directly to it -- pinning the connection to
+    the address this function actually checked closes a DNS-rebinding gap
+    a validate-then-separately-connect design would otherwise have: two
+    independent DNS lookups let an attacker's nameserver answer each one
+    differently (public for validation, private/metadata for the real
+    connection).
     """
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
-        return False
-    ips = {info[4][0] for info in infos}
+        return None
+    ips: set[str] = {str(info[4][0]) for info in infos}
     if not ips:
-        return False
+        return None
     for ip in ips:
         try:
             if not ipaddress.ip_address(ip).is_global:
-                return False
+                return None
         except ValueError:
-            return False
-    return True
+            return None
+    return next(iter(ips))
 
 
 async def _fetch_doc_once(url: str) -> dict:
-    """One hop: validate the URL, GET without following redirects. Returns
-    either the terminal {"available": ...} result, or an internal
+    """One hop: validate the URL, connect directly to its validated IP
+    (not a second, independently-resolved hostname lookup -- see
+    _resolve_public_ip), GET without following redirects. Returns either
+    the terminal {"available": ...} result, or an internal
     {"_redirect": location} for the caller to re-validate and retry."""
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         return {"available": False, "error": f"unsupported scheme: {parsed.scheme!r}"}
     if not parsed.hostname:
         return {"available": False, "error": "no host in URL"}
-    if not _resolve_public_ips(parsed.hostname):
+    resolved_ip = _resolve_public_ip(parsed.hostname)
+    if resolved_ip is None:
         return {
             "available": False,
             "error": "URL host does not resolve to a public address",
         }
 
-    headers = {}
+    headers = {"Host": parsed.hostname}
     if parsed.hostname in _GH_TOKEN_HOSTS and settings.github_token:
         headers["Authorization"] = f"Bearer {settings.github_token}"
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=False) as client:
-        r = await client.get(url, headers=headers)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    pinned_netloc = (
+        f"[{resolved_ip}]:{port}" if ":" in resolved_ip else f"{resolved_ip}:{port}"
+    )
+    pinned_url = parsed._replace(netloc=pinned_netloc).geturl()
 
-    if 300 <= r.status_code < 400 and r.headers.get("location"):
-        return {"_redirect": r.headers["location"]}
-    if r.status_code >= 400:
-        return {"available": False, "error": f"HTTP {r.status_code}"}
-    return {"available": True, "url": url, "body": r.text[:_DOC_CHAR_CAP]}
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=False) as client:
+        async with client.stream(
+            "GET",
+            pinned_url,
+            headers=headers,
+            extensions={"sni_hostname": parsed.hostname},
+        ) as r:
+            if 300 <= r.status_code < 400 and r.headers.get("location"):
+                return {"_redirect": r.headers["location"]}
+            if r.status_code >= 400:
+                return {"available": False, "error": f"HTTP {r.status_code}"}
+            body = b""
+            async for chunk in r.aiter_bytes():
+                body += chunk
+                if len(body) >= _DOC_CHAR_CAP:
+                    break
+    return {
+        "available": True,
+        "url": url,
+        "body": body[:_DOC_CHAR_CAP].decode(errors="replace"),
+    }
 
 
 async def fetch_doc(url: str) -> dict:
