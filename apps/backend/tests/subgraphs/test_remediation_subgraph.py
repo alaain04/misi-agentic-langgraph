@@ -132,9 +132,7 @@ def _select_and_research_everything_as_clean_bump():
             "src.main_graph.subgraphs.remediation.select_targets._index_codegraph",
             AsyncMock(return_value=True),
         ),
-        patch(
-            "src.main_graph.subgraphs.remediation.release_research._llm", llm_mock
-        ),
+        patch("src.main_graph.subgraphs.remediation.release_research._llm", llm_mock),
     ):
         yield resolve_mock
 
@@ -190,7 +188,7 @@ def _deps_from_group_message(content: str) -> list[str]:
 class _FakeExecutionAgent:
     def __init__(
         self,
-        plan_for: Callable[[str, dict], dict[str, Any]],
+        plan_for: Callable[[str, dict | None], dict[str, Any]],
         exec_calls: list[list[str]],
     ) -> None:
         self._plan_for = plan_for
@@ -208,7 +206,7 @@ class _FakeExecutionAgent:
 
 
 def _patch_planner_and_executor(
-    plan_for: Callable[[str, dict], dict[str, Any]],
+    plan_for: Callable[[str, dict | None], dict[str, Any]],
 ):
     """Patches both mockable boundaries with one shared plan_for callback.
     Returns (plan_calls, exec_calls) -- lists the caller can assert against

@@ -82,5 +82,7 @@ def test_role_tag_survives_with_structured_output():
 
 
 def test_remediation_release_research_role_exists_and_classify_role_removed():
-    assert AgentRole.REMEDIATION_RELEASE_RESEARCH.value == "remediation_release_research"
+    assert (
+        AgentRole.REMEDIATION_RELEASE_RESEARCH.value == "remediation_release_research"
+    )
     assert not hasattr(AgentRole, "REMEDIATION_CLASSIFY")

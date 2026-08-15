@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from src.main_graph.subgraphs.remediation.release_research import (
-    research_releases_node,
-)
-from src.main_graph.subgraphs.remediation.select_targets import select_targets_node
 from src.main_graph.subgraphs.remediation.deepagent.nodes import (
     group_and_verify_gate,
     pr_and_persist_node,
@@ -13,6 +9,10 @@ from src.main_graph.subgraphs.remediation.deepagent.nodes import (
     route_after_group_verify,
 )
 from src.main_graph.subgraphs.remediation.plan import build_migration_plan_node
+from src.main_graph.subgraphs.remediation.release_research import (
+    research_releases_node,
+)
+from src.main_graph.subgraphs.remediation.select_targets import select_targets_node
 from src.main_graph.subgraphs.remediation.state import RemediationState
 
 

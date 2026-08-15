@@ -153,9 +153,7 @@ async def fetch_release_notes_between(
     """Like fetch_release_notes, but keep only releases whose tag falls in the
     half-open window (from_version, to_version]. When either bound is missing
     or unparseable, return the unfiltered recent set (honest degradation)."""
-    full = await fetch_release_notes(
-        package_name, repo_path, container, docker_image
-    )
+    full = await fetch_release_notes(package_name, repo_path, container, docker_image)
     if not full.get("available"):
         return full
     low = _tag_version(from_version)
