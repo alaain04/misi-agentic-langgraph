@@ -94,6 +94,27 @@
       "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
       "justMyCode": true,
       "console": "integratedTerminal"
+    },
+    {
+      "name": "Backend: run_subgraph.py (remediation)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/backend/scripts/run_subgraph.py",
+      // dry-run by default; add "--remediate" to args to actually push a branch and open a PR via `gh`
+      "args": [
+        "remediation",
+        "--analysis-result-id",
+        "${input:analysisResultId}",
+        "--prep-result-id",
+        "${input:prepResultId}",
+        "--concern",
+        "${input:concern}"
+      ],
+      "cwd": "${workspaceFolder}/apps/backend",
+      "envFile": "${workspaceFolder}/apps/backend/.env",
+      "python": "${workspaceFolder}/apps/backend/.venv/bin/python",
+      "justMyCode": true,
+      "console": "integratedTerminal"
     }
   ],
   "inputs": [
