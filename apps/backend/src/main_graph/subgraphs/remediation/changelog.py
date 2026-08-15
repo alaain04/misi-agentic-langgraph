@@ -233,10 +233,7 @@ async def fetch_release_notes_page(
             "body": (r.get("body") or "")[:2000],
         }
         for r in releases
-        if high is None or (
-            _tag_version(r.get("tag_name")) is not None
-            and _tag_version(r.get("tag_name")) >= high
-        )
+        if low is None or high is None or _tag_in_window(r.get("tag_name"), low, high)
     ]
 
     oldest = _tag_version(releases[-1].get("tag_name")) if releases else None

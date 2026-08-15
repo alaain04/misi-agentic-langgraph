@@ -297,6 +297,7 @@ async def test_fetch_release_notes_page_windows_and_reports_no_more():
         [
             {"tag_name": "v9.0.0", "name": "9.0.0", "body": "flat config"},
             {"tag_name": "v8.5.0", "name": "8.5.0", "body": "minor"},
+            {"tag_name": "v7.9.0", "name": "7.9.0", "body": "below the floor"},
         ]
     )
     container = FakeContainer([(0, releases_json, "")])
@@ -318,8 +319,8 @@ async def test_fetch_release_notes_page_windows_and_reports_no_more():
 
     assert result["available"] is True
     assert result["page"] == 1
-    assert [r["tag"] for r in result["releases"]] == ["v9.0.0"]
-    # Only 2 releases returned, well under per_page=100 -- no reason to
+    assert [r["tag"] for r in result["releases"]] == ["v9.0.0", "v8.5.0"]
+    # Only 3 releases returned, well under per_page=100 -- no reason to
     # believe another page exists.
     assert result["has_more"] is False
     assert len(container.calls) == 1
