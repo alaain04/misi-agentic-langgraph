@@ -12,9 +12,8 @@ class MaintenanceAgent(BaseAgent):
     agent_type = "maintenance_agent"
     concern_types = frozenset({"maintenance"})
     description = (
-        "Assesses package health and abandonment risk by checking maintenance "
-        "status, download trends, "
-        "and known high-risk packages. Use when concern involves outdated, "
+        "Assesses package health and abandonment risk by checking release "
+        "recency and weekly download volume. Use when concern involves outdated, "
         "unmaintained, or deprecated packages."
     )
     system_prompt = """
@@ -26,29 +25,30 @@ class MaintenanceAgent(BaseAgent):
         {tool_descriptions}
 
         Investigation strategy:
-        1. Call package_health_data once to get npm registry facts (created \
-date, last release date, weekly downloads, maintainer count, latest version) \
-for every direct dependency in the repo.
-        2. For each package, weigh release recency against weekly_downloads \
+        1. If specific packages are named above ("Packages to focus on"), call \
+package_health_data(packages=<that list>) first so you have direct data for \
+exactly those packages. Otherwise (or in addition), call package_health_data() \
+with no arguments for a broad scan of the repo's first several direct \
+dependencies.
+        2. Check `checked` against `total_deps` in each result. If `checked` < \
+`total_deps`, more direct dependencies exist than were scanned -- if any \
+package named in "Packages to focus on" is missing from the result's \
+`packages`/`errors`, call package_health_data(packages=[<missing names>]) \
+to fetch them directly; you are not limited to the default scan's cap.
+        3. For each package, weigh release recency against weekly_downloads \
 before deciding it is a risk:
            - Strong current adoption overrides staleness alone. A package \
 with weekly_downloads at or above roughly 1,000 is meaningfully in active \
 use — many mature, stable libraries go a long time between releases \
 without that meaning anything is wrong. Never flag such a package as a \
-maintenance risk based on last_modified age by itself.
-           - A package IS a maintenance risk if: last_modified is more than \
-12 months old AND weekly_downloads is low (below roughly 1,000) or \
-missing/errored — OR the package was created less than 90 days ago AND \
+maintenance risk based on days_since_last_release alone.
+           - A package IS a maintenance risk if: days_since_last_release is \
+more than 365 AND weekly_downloads is low (below roughly 1,000) or \
+missing/errored — OR days_since_created is less than 90 AND \
 weekly_downloads is low or missing/errored.
-        3. Record the package name, last_modified date, weekly_downloads, \
+        4. Record the package name, days_since_last_release, weekly_downloads, \
 and risk rationale in each FindingNote so the downloads-vs-staleness \
 tradeoff is visible to a reviewer.
-
-        Rules on maintainer count:
-        - A single-maintainer package is NOT, by itself, a finding. Most healthy,
-          widely-used npm packages (lodash, many @nestjs/* scopes, etc.) have one
-          maintainer. Never create or justify a finding using maintainer count alone
-          — only the recency/downloads criteria in step 2 above count as risk.
 
         Scope:
         - Only assess DIRECT dependencies (declared in package.json). Do not
@@ -57,6 +57,9 @@ tradeoff is visible to a reviewer.
 
         Rules:
         - Never repeat a tool call with the same arguments.
+        - If your data for any focused package is incomplete (missing from a \
+result, or listed in `errors`) after step 2, note this in your summary and \
+cap confidence at 0.8 rather than treating it as resolved.
         - Set finalize=true when you have assessed all flagged packages.
         - After {max_iter} iterations, set finalize=true regardless.
         - confidence > 0.8: you have data for all focused packages.

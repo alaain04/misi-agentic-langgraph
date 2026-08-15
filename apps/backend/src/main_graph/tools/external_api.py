@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -143,39 +144,66 @@ async def osv_lookup(
 
 @register(
     "package_health_data",
-    "Reports raw npm registry health facts (release recency, weekly downloads, "
-    "maintainer count) for every direct dependency. Returns data only — no risk "
-    "judgment or flagging; the caller decides what counts as a maintenance risk.",
+    "Reports raw npm registry health facts (days since creation, days since last "
+    "release, weekly downloads) for direct dependencies -- no risk judgment or "
+    "flagging, just data. With no `packages` argument, scans the first 12 direct "
+    "dependencies declared in package.json (check `checked` vs `total_deps` in the "
+    "result to detect if more exist). Pass `packages` (a list of exact dependency "
+    "names) to look up specific dependencies instead, e.g. ones missing from the "
+    "default scan or named in the task's focus list -- no cap applies when "
+    "`packages` is given. Result shape: `packages` is a list of "
+    "`[package, days_since_created, days_since_last_release, weekly_downloads]` "
+    "rows (see `fields` for the column order); failed lookups are listed "
+    "separately under `errors`.",
 )
-async def package_health_data(repo_path: str) -> dict:
+async def package_health_data(
+    repo_path: str, packages: list[str] | None = None
+) -> dict:
     pkg = _load_pkg(repo_path)
-    deps = list(_all_deps(pkg).keys())
-    deps_to_check = deps[:30]  # limit to avoid rate limiting
+    all_deps = list(_all_deps(pkg).keys())
+    deps_to_check = packages if packages else all_deps[:12]
     metas, downloads = await asyncio.gather(
         asyncio.gather(*[_npm_metadata(d) for d in deps_to_check]),
         asyncio.gather(*[_npm_weekly_downloads(d) for d in deps_to_check]),
     )
-    packages = []
+    now = datetime.now(UTC)
+    rows = []
+    errors = []
     for dep, meta, weekly_downloads in zip(deps_to_check, metas, downloads):
         if "error" in meta:
-            packages.append({"package": dep, "error": meta["error"]})
+            errors.append({"package": dep, "error": meta["error"]})
             continue
         time_data = meta.get("time", {})
-        packages.append(
-            {
-                "package": dep,
-                "created": time_data.get("created", ""),
-                "last_modified": time_data.get("modified", ""),
-                "weekly_downloads": weekly_downloads,
-                "maintainer_count": len(meta.get("maintainers", [])),
-                "latest_version": meta.get("dist-tags", {}).get("latest", ""),
-            }
+        rows.append(
+            [
+                dep,
+                _days_since(time_data.get("created", ""), now),
+                _days_since(time_data.get("modified", ""), now),
+                weekly_downloads,
+            ]
         )
     return {
-        "packages": packages,
+        "fields": [
+            "package",
+            "days_since_created",
+            "days_since_last_release",
+            "weekly_downloads",
+        ],
+        "packages": rows,
+        "errors": errors,
         "checked": len(deps_to_check),
-        "total_deps": len(deps),
+        "total_deps": len(all_deps),
     }
+
+
+def _days_since(iso_str: str, now: datetime) -> int | None:
+    if not iso_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return (now - dt).days
 
 
 _POPULAR_PACKAGES = {
