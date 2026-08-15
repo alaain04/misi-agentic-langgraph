@@ -1,233 +1,265 @@
-# Spec: Remediation — Agentic Release-Research Node
+# Spec: Remediation — Replace `classify.py` with Deterministic Selection + Agentic Release-Research
 
 **Date:** 2026-08-15
-**Scope:** Backend only (`apps/backend`), remediation subgraph:
-`src/main_graph/subgraphs/remediation/classify.py`, a new
-`release_research.py`, `plan.py` (`_format_targets` only), `state.py`,
-`graph.py`, `src/models/remediation.py`, `src/utils/model_registry.py`.
-No changes to the execution agent (`deepagent/`) or its own
-`read_release_notes` tool, which is a separate, already-working consumer of
-`changelog.py`.
+**Scope:** Backend only (`apps/backend`), remediation subgraph. Deletes
+`subgraphs/remediation/classify.py`; adds `subgraphs/remediation/select_targets.py`
+and `subgraphs/remediation/release_research.py`; modifies `changelog.py`,
+`plan.py` (`_format_targets` only), `graph.py`, `src/utils/dependency_graph.py`,
+`src/utils/model_registry.py`. No changes to the execution agent
+(`deepagent/`) or its own `read_release_notes` tool, which is a separate,
+already-working consumer of `changelog.py`. No changes to the analysis or
+discovery subgraphs (considered and declined — see Decisions, D-ENRICH).
 
 ## Context
 
-`classify_target` (`classify.py:111-181`) currently does release-note
-research and tier classification in a single non-agentic step: it calls
-`fetch_release_notes_between` once (a deterministic version-window filter,
-capped at 20 releases, each body truncated to 2000 chars, the whole JSON
-payload truncated to 6000 chars) and feeds that into one
-`with_structured_output` LLM call that decides the tier (r1/r2/r3) **and**
-writes `migration_needed` / `migration_guide` / `breaking_changes` in the
-same call. That digest becomes `TargetInvestigation.release`
-(`ReleaseDigest`), which `plan.py`'s `_format_targets` reads verbatim to
-brief the migration planner.
+This spec started narrower — add an agentic release-research node alongside
+the existing `classify_target` — but investigation surfaced that
+`classify.py` on disk is mid-flight on a larger, uncommitted, unrelated
+refactor with real bugs (`_classify_bounded` calling `classify_target` with
+an argument it doesn't accept; `classify_targets_node` leaving `targets`/
+`investigations` unbound when codegraph indexing fails). Tracing why that
+argument (`dependency_graph`) existed led to a missing `dependents_of`
+helper in a *different* in-flight refactor (discovery's `dependency_graph.py`
+relocation to `utils/`). Given the size and uncertainty of untangling that,
+the decision was made to remove `classify.py` outright rather than repair
+it: selection/version-resolution/tier-check becomes a new deterministic
+node, and release-note research becomes the new agentic node originally
+proposed. See D-REMOVE and D-SELECT below for the reasoning.
 
-Two concrete problems motivate a change:
+**What `classify.py` did (four responsibilities, now split up):**
+1. Target selection/dedup — `select_remediation_targets` (deterministic:
+   filter by severity, anchor transitive findings to their direct
+   dependent, group by anchor). This function exists, correct and unchanged,
+   at git HEAD in the now-deleted (uncommitted) `selection.py`.
+2. Version + GitHub repo resolution — `resolve_package_info`.
+3. A deterministic "no upgrade exists" check — `_has_no_upgrade` (pure
+   version-range comparison, forces tier `r3`, no LLM, no fetch).
+4. ONE LLM call that decided tier (r1/r2/r3) **and** wrote
+   `migration_needed`/`migration_guide`/`breaking_changes` into
+   `TargetInvestigation.release`, from `fetch_release_notes_between`'s
+   output (windowed, but see the pagination bug below).
 
-1. A single one-shot, truncated call can't follow a release body that says
-   "see MIGRATION.md" or links to an external upgrade guide — the actual
-   guidance the planner needs is often not in the release body at all.
-2. The execution agent (`deepagent/tools.py`'s `read_release_notes`) already
-   has precedent for exactly this kind of on-demand, iterative lookup during
-   remediation *execution*. Nothing equivalent exists at
-   classification/planning time, where the same information would let the
-   planner write a better `MigrationPlan` (fewer blind `codemod` tasks,
-   fewer missed breaking changes) instead of the execution agent
-   discovering gaps mid-run.
-
-Additionally, `_format_targets` (`plan.py:69-83`) never includes
-`breaking_changes` in the planner's prompt, even though `classify_target`
-already computes it — a pre-existing gap this change closes since it
-directly affects whether the new node's output is used.
+Of these, (4) is the one this spec always intended to replace — a
+single-shot, truncated LLM call can't follow a release body that says "see
+MIGRATION.md," and the execution agent already has precedent for iterative,
+on-demand release-note lookup during execution (`deepagent/tools.py`'s
+`read_release_notes`) that classification/planning never had.
 
 **Known bug in the underlying fetch (fixed only for the new node, see
-D4):** `fetch_release_notes`'s `gh api ... --paginate -q '.[:20]'`
+D-TOOLS):** `fetch_release_notes`'s `gh api ... --paginate -q '.[:20]'`
 (`changelog.py:106-108`) does not mean "first page, truncated to 20." `gh`'s
 `--paginate` follows every `Link: rel="next"` header and concatenates *all*
 pages of an array response before running the `-q` filter once — so this
 command always fetches a package's *entire* release history, then keeps the
-20 most recent. `fetch_release_notes_between`'s window filter
-(`_tag_in_window`) runs *after* that slice, not before: if the requested
-upgrade window isn't among the 20 *most recent* releases (a project jumping
-several majors behind a package with active recent releases), the windowed
-result comes back empty — not "unfiltered fallback," genuinely empty — and
-`classify_target`'s LLM sees no evidence of any breaking change. This is a
-real, pre-existing correctness gap, not hypothetical.
+20 most recent. The window filter (`_tag_in_window`) runs *after* that
+slice: if the requested upgrade window isn't among the 20 *most recent*
+releases, the windowed result comes back empty — not "unfiltered fallback,"
+genuinely empty.
 
-**Known prerequisite bug (fixed as part of this work, not a design
-decision):** `classify.py` on disk currently has an uncommitted, broken
-in-flight edit — `_classify_bounded` calls `classify_target` with a 5th
-`dependency_graph` argument the function doesn't accept, and
-`classify_targets_node` only assigns `targets`/`investigations` inside
-`if is_indexed:`, leaving them unbound (crashing with `UnboundLocalError`)
-when `_index_codegraph` fails. Both must be fixed before this node can be
-wired in, since it depends on `classify_targets_node` always returning a
-usable `targets`/`investigations` pair.
+Additionally, `_format_targets` (`plan.py:69-83`) never includes
+`breaking_changes` in the planner's prompt even though it's computed —
+fixed here since it directly affects whether the new node's output is used
+(D-FORMAT).
 
 ## Decisions
 
-- **D1 — New standalone node, not folded into `classify_target` or
-  `build_plans_for_targets`.** `classify_targets_node` keeps deciding tier
-  (r1/r2/r3) exactly as it does today, using the same single-call, fast
-  triage read of `fetch_release_notes_between`. A new
-  `research_releases_node` runs **after** classify and **before**
-  `build_migration_plan_node`, and only for targets whose `tier` is `r1` or
-  `r2` — r3 targets already get a `replace` task from the planner
-  regardless of digest content, so a deep research pass adds cost with no
-  payoff there. Rationale: keeps the fast/cheap tier decision and the
-  deep/expensive research pass as separate, independently-testable
-  concerns, rather than one call doing double duty.
+- **D-REMOVE — Delete `classify.py` and `classify_targets_node` outright,
+  do not repair the in-flight WIP.** The uncommitted breakage found while
+  scoping a "prerequisite fix" turned out to depend on a *second*,
+  unrelated in-flight refactor (discovery's `dependency_graph.py` move)
+  whose own completeness couldn't be verified without significant
+  additional investigation. Repairing both together is a much larger,
+  riskier change than this feature needs. Instead: `classify.py`'s four
+  responsibilities are redistributed to two new, independently-testable
+  nodes (D-SELECT, D-RESEARCH), neither of which needs anything from the
+  discovery-side WIP.
 
-- **D2 — `TargetClassification` shrinks to `tier` + `rationale`.**
-  `migration_needed`, `migration_guide`, `breaking_changes` are removed from
-  `classify.py`'s `TargetClassification` and from the values
-  `classify_target` writes into `TargetInvestigation.release`. Classify
-  still builds a `ReleaseDigest` for every target (so `TargetInvestigation`
-  stays fully populated going into the new node), but with placeholder
-  content: `migration_needed=False`, `migration_guide=""`,
-  `breaking_changes=[]`. For r3 targets this placeholder is permanent —
-  `plan.py`'s r3 path doesn't read those fields. For r1/r2 targets,
-  `research_releases_node` overwrites this placeholder.
+- **D-SELECT — New deterministic node `select_targets_node`
+  (`select_targets.py`), no LLM.** Runs first in the remediation subgraph,
+  replacing `classify_targets_node` entirely. Per target:
+  1. `select_remediation_targets(analysis.findings, prep.dependency_graph,
+     settings.risk_min_severity)` — ported verbatim from git HEAD's deleted
+     `selection.py` (only the dependency-graph-helper import path changes,
+     to `src.utils.dependency_graph`).
+  2. `resolve_package_info` — version + GitHub repo, bounded concurrency
+     (semaphore, same cap as today, 6).
+  3. `_has_no_upgrade` — deterministic r3 check, ported unchanged from
+     `classify.py`.
+  4. Blast radius (`compute_blast_radius`) and structural dependents
+     (`dependents_of`, D-DEPENDENTS) for the **anchor** (`target.target_dep`)
+     — computed for every target regardless of tier, matching today's
+     behavior of still gathering context for r3's replacement plan.
+     Codegraph indexing (`_index_codegraph`, ported unchanged) still runs
+     once per repo before this step, same as `classify_targets_node` does
+     today — the codegraph-index-location question this raised (should it
+     move to discovery instead) is resolved by NOT moving it: it stays
+     here, because nothing about removing `classify.py` requires relocating
+     it, and doing so would mean touching the discovery subgraph, which
+     this spec explicitly avoids (D-ENRICH).
+  Writes `targets` and `investigations` (with `TargetInvestigation.release`
+  as a placeholder `ReleaseDigest` — `migration_needed=False`,
+  `migration_guide=""`, `breaking_changes=[]` — for every target;
+  `select_targets_node` never sets `tier` to anything but `"r3"` or leaves
+  it unset — there is no r1-vs-r2 distinction anymore, decided by nothing
+  since `plan.py`'s task-shape branch never read the difference anyway,
+  only `migration_needed` and `tier == "r3"` matter downstream), resets
+  `remediations`.
 
-- **D3 — Agent pattern: reuse `base_agent.py`'s `_react_loop` shape, not
-  `deepagents`.** This node only reads (release notes + linked docs) and
-  writes a digest — it never edits repo files, so it doesn't need
-  `deepagents`' `FilesystemBackend`/virtual-mode machinery the execution
-  agent uses. It follows the analysis subgraph's existing pattern instead:
-  a structured-output decision per iteration, an explicit `finalize` flag,
-  a small iteration cap, tool calls run via `asyncio.gather`. Concurrency
-  across targets is bounded by a semaphore, same style as
-  `classify.py`'s `_MAX_CONCURRENT_CLASSIFICATIONS`.
+- **D-DEPENDENTS — Port `dependents_of` into `utils/dependency_graph.py`.**
+  It existed, correct, at git HEAD in the now-deleted
+  `discovery/dependency_graph.py`, with tests already present and currently
+  failing-on-import in `test_dependency_graph_helpers.py`. Ported verbatim
+  (structural "everything that transitively depends on this package,"
+  distinct from `direct_dependents`' "which direct deps' subtrees contain
+  it" — both are needed: `select_remediation_targets` uses
+  `direct_dependents` for anchoring, `select_targets_node` uses
+  `dependents_of` for the investigation digest, same split `classify.py`'s
+  docs already described).
 
-- **D4 — Two tools.**
+- **D-ENRICH — Blast-radius/dependents enrichment stays in remediation,
+  NOT moved to the analysis subgraph.** Considered and declined: blast
+  radius is inherently about the **anchor** (the direct dep actually being
+  bumped), which is only known after `select_remediation_targets` groups
+  transitive findings to their direct dependent. Analysis produces findings
+  before that grouping exists, so enriching `FindingNote` during analysis
+  would compute blast-radius for the finding's own (possibly transitive)
+  package, not the anchor that's actually getting bumped — wrong data. No
+  changes to the analysis or discovery subgraphs are part of this spec.
+
+- **D-RESEARCH — New agentic node `research_releases_node`
+  (`release_research.py`).** Runs after `select_targets_node`, for every
+  target where `tier != "r3"` (r3 targets get a `replace` task from the
+  planner regardless of digest content — a deep research pass adds cost
+  with no payoff there). Agent pattern: reuse the analysis subgraph's
+  `_react_loop` *shape* (`base_agent.py`) — a structured-output decision
+  per iteration, an explicit `finalize` flag, a small iteration cap, tool
+  calls run via `asyncio.gather` — not `deepagents`, since this node only
+  reads (release notes + linked docs) and writes a digest, never edits repo
+  files, so it doesn't need `FilesystemBackend`/virtual-mode. It's a fresh,
+  self-contained loop (its own Pydantic decision model, own tools, own
+  prompt) rather than a literal call into `base_agent.py`'s `_react_loop`,
+  which is tightly coupled to analysis-domain types (`FindingNote`,
+  `AgentDispatch`, `critique_findings`). Concurrency across targets bounded
+  by a semaphore, same style as `select_targets_node`'s.
+
+- **D-TOOLS — Two tools.**
   - `get_release_notes(package_name, page=1)` — NOT a wrapper around
-    `fetch_release_notes_between` (see the pagination bug in Context). Fetches
-    one page directly (`gh api 'repos/{owner}/{repo}/releases?per_page=100&page={page}'`,
-    no `--paginate`), passing the `resolved_repo` already resolved by
-    `classify_targets_node` to avoid a second `npm view` spawn (same dedup the
-    execution agent's `read_release_notes` tool already does). Applies the
-    existing `_tag_in_window` filter to just that page and returns the
+    `fetch_release_notes_between` (see the pagination bug in Context).
+    Fetches one page directly (`gh api
+    'repos/{owner}/{repo}/releases?per_page=100&page={page}'`, no
+    `--paginate`), passing the `resolved_repo` already resolved by
+    `select_targets_node` to avoid a second `npm view` spawn (same dedup
+    the execution agent's `read_release_notes` tool already does). Applies
+    the existing `_tag_in_window` filter to just that page and returns the
     windowed subset plus `has_more`: true only when the page was full (hit
-    `per_page`) *and* its oldest tag is still above the window floor — i.e.
-    there's reason to believe an older, still-relevant release exists on the
-    next page. The agent calls again with `page=2`, etc. when it wants more
-    evidence; a hard cap inside the tool (independent of the loop's own
-    iteration cap) refuses any `page` beyond 10 (~1000 releases) so a
-    misbehaving loop can't runaway-fetch. Because deciding "do I have enough"
-    is now the agent's call instead of a blind top-20 slice, this closes the
-    correctness gap for this node — for r1/r2 targets specifically.
-    `classify_target`'s own tier-decision call keeps using
-    `fetch_release_notes_between` unchanged (accepted trade-off, see Out of
-    scope): a wrong r1-vs-r2 label doesn't change `plan.py`'s task shape,
-    only `migration_needed` does, and that's this node's output, not
-    classify's.
+    `per_page`) *and* its oldest tag is still above the window floor. The
+    agent calls again with `page=2`, etc. when it wants more evidence; a
+    hard cap inside the tool (independent of the loop's own iteration cap)
+    refuses any `page` beyond 10 (~1000 releases).
   - `fetch_doc(url)` — new. Fetches an arbitrary URL a release body links to
-    (a `MIGRATION.md`, `UPGRADING.md`, or external guide). Hardened against
-    SSRF given the container runs `run_as_root`: resolve the URL's host
-    before connecting and reject private/loopback/link-local/metadata-range
-    addresses (RFC1918, `127.0.0.0/8`, `169.254.0.0/16` including the
-    `169.254.169.254` cloud metadata address, `::1`); only attach the
-    `GH_TOKEN` secret when the resolved host is `github.com` or
-    `raw.githubusercontent.com`. Response body capped (matching the
-    existing 2000-char-per-release convention) before it reaches the LLM.
+    (a `MIGRATION.md`, `UPGRADING.md`, or external guide), as a direct
+    Python-side `httpx` call (same pattern as `external_api.py`'s `_get`
+    helper — this is metadata/doc fetching, not repo-context work, so it
+    doesn't need the sandboxed container). Hardened against SSRF: reject
+    non-`http(s)` schemes; resolve the URL's host via DNS before connecting
+    and reject any resolved address that is not globally routable
+    (`ipaddress.ip_address(ip).is_global` — covers RFC1918, loopback,
+    link-local including the `169.254.169.254` cloud metadata address, and
+    other IANA special-purpose ranges in one check); only attach the
+    `GH_TOKEN` header when the **validated** host is exactly `github.com` or
+    `raw.githubusercontent.com` (string equality, not substring/suffix
+    match); redirects are not auto-followed — a 3xx response's `Location`
+    is validated the same way and re-fetched manually, up to 3 hops, so a
+    redirect can't be used to bypass the initial host check. Response body
+    capped at 2000 chars (matching the existing per-release convention)
+    before it reaches the LLM.
 
-- **D5 — Output shape unchanged.** The loop's final structured decision
-  produces the same three fields `ReleaseDigest` already has
+- **D-OUTPUT — Output shape unchanged.** The loop's final structured
+  decision produces the same three fields `ReleaseDigest` already has
   (`migration_needed`, `migration_guide`, `breaking_changes`) — no new
-  Pydantic fields on `ReleaseDigest` or `TargetInvestigation`. This keeps
-  `plan.py`'s consumption code (`_apply_release_digest`, `_format_targets`)
-  untouched except for the `breaking_changes` fix in D6.
+  Pydantic fields on `ReleaseDigest` or `TargetInvestigation`.
 
-- **D6 — `_format_targets` gains `breaking_changes`.** Fixes the
+- **D-FORMAT — `_format_targets` gains `breaking_changes`.** Fixes the
   pre-existing gap: the planner's prompt currently never sees
   `breaking_changes` even though it's computed. Added as another line in
   the per-target block, same style as the existing fields.
 
-- **D7 — Failure handling matches `classify_target`'s existing
+- **D-FALLBACK — Failure handling matches today's `classify_target`
   convention.** If the loop raises, or exhausts its iteration cap without a
   clean `finalize`, the node falls back to the same conservative default
-  `classify_target`'s except-block already uses today:
-  `migration_needed=True`, `breaking_changes=["research failed, assuming
-  breaking: <exc>"]`, empty `migration_guide`. This keeps the planner
-  routing to a `codemod` task rather than silently treating a failed lookup
-  as a clean bump.
+  `classify_target`'s except-block used: `migration_needed=True`,
+  `breaking_changes=["research failed, assuming breaking: <exc>"]`, empty
+  `migration_guide`. Keeps the planner routing to a `codemod` task rather
+  than silently treating a failed lookup as a clean bump.
 
-- **D8 — New `AgentRole.REMEDIATION_RELEASE_RESEARCH`.** Added to
-  `model_registry.py`'s `AgentRole` enum, resolved through `get_role_llm`
-  like every other role, so cost/latency attribution
-  (`agent_role:remediation_release_research` tag) works the same way it
-  does for `REMEDIATION_CLASSIFY` and `REMEDIATION_PLAN`.
-
-- **D9 — Prerequisite fix bundled as the first implementation task.**
-  Before wiring in the new node, fix `classify.py`'s two known bugs (see
-  Context): drop the stray `dependency_graph` argument from
-  `_classify_bounded`'s call to `classify_target` (the function body never
-  reads it — `_has_no_upgrade` and `compute_blast_radius` use
-  `current_range`/`latest_version`/`repo_path` instead — so the argument is
-  dead, not a sign of missing plumbing), and make `classify_targets_node`
-  initialize `targets`/`investigations` before the `if is_indexed:` branch
-  (empty dicts on the `False` path) so downstream nodes never see an
-  `UnboundLocalError`.
-
-## State & wiring
-
-`RemediationState.investigations` already uses the `_merge_replace`
-reducer (`state.py:17`), so `research_releases_node` only needs to return
-the subset of `investigations` it updated (the r1/r2 targets), not the
-full dict. `graph.py` gains one edge:
-`classify_targets_node -> research_releases_node -> build_migration_plan_node`.
+- **D-ROLE — New `AgentRole.REMEDIATION_RELEASE_RESEARCH`; remove
+  `AgentRole.REMEDIATION_CLASSIFY`.** The latter becomes unused once
+  `classify.py` is deleted — removed rather than left dead, since
+  `model_registry.py`'s `_validate_override_keys` already treats an unknown
+  override key as a loud failure, and an enum member nothing resolves is
+  the same kind of dead weight in the other direction.
 
 ## Out of scope
 
 - Any change to the execution agent's own `read_release_notes` tool
-  (`deepagent/tools.py`) — it already does on-demand release-note fetching
-  during execution and is untouched by this spec.
+  (`deepagent/tools.py`) — untouched by this spec.
+- Any change to the analysis or discovery subgraphs (D-ENRICH).
 - Fixing `fetch_release_notes`/`fetch_release_notes_between`'s pagination
-  gap (see Context) for `classify_target`'s own tier-decision call.
-  `get_release_notes` (D4) fixes it for the new node only. Leaving
-  `classify_target` on the old behavior is an accepted trade-off: the
-  worst case is a wrong r1-vs-r2 label, which doesn't change `plan.py`'s
-  task shape (only `migration_needed`, produced by the new node, does) —
-  only an r3 misclassification would matter, and that comes from
-  `_has_no_upgrade`'s version comparison, not release-note content.
-- The 2000-char per-release body truncation and the per-page `per_page=100`
-  cap in `get_release_notes` — kept at their current/analogous values;
-  not raised as part of this change.
-- A domain allowlist for `fetch_doc` instead of IP-range blocking — IP-range
-  blocking was chosen so legitimate guides hosted anywhere aren't missed;
-  an allowlist can be layered on later if abuse is observed.
-- Running research for r3 targets — considered and declined (D1); r3's
-  `replace` task doesn't consume `ReleaseDigest` content.
+  gap for any *other* caller — only `get_release_notes` (D-TOOLS) is
+  paginated. `fetch_release_notes`/`fetch_release_notes_between` themselves
+  are untouched (still used by `deepagent/tools.py`'s `read_release_notes`,
+  out of scope per above).
+- The 2000-char per-release/per-doc body truncation and the `per_page=100`
+  page size — kept at their current/analogous values.
+- A domain allowlist for `fetch_doc` instead of IP-range blocking —
+  IP-range blocking was chosen so legitimate guides hosted anywhere aren't
+  missed.
+- Running research for r3 targets — r3's `replace` task doesn't consume
+  `ReleaseDigest` content.
+- Any repair of the discovery-side `dependency_graph.py` relocation beyond
+  porting the one function (`dependents_of`) this spec needs (D-DEPENDENTS)
+  — that module's broader completeness is a separate, pre-existing WIP.
 
 ## Success criteria
 
-- `classify.py`'s two prerequisite bugs (D9) are fixed and covered by a
-  regression test that exercises `classify_targets_node` when
-  `_index_codegraph` returns `False`.
-- `TargetClassification` has only `tier` + `rationale`; `classify_target`
-  no longer produces `migration_needed`/`migration_guide`/`breaking_changes`.
+- `classify.py` and `test_classify.py` are deleted; nothing imports from
+  `src.main_graph.subgraphs.remediation.classify`.
+- `select_targets.py` exists with `select_targets_node` wired as the first
+  node in `graph.py`; `select_remediation_targets` and `_has_no_upgrade`
+  behave identically to their git-HEAD/pre-WIP versions (ported, not
+  redesigned).
+- `dependents_of` exists in `utils/dependency_graph.py`;
+  `test_dependency_graph_helpers.py`'s `test_dependents_of_*` tests pass
+  without modification (they were already written against the intended
+  signature).
 - `research_releases_node` exists, runs only for targets with
-  `tier in ("r1", "r2")`, and is wired into `graph.py` between
-  `classify_targets_node` and `build_migration_plan_node`.
+  `tier != "r3"`, and is wired into `graph.py` between `select_targets_node`
+  and `build_migration_plan_node`.
 - `get_release_notes` and `fetch_doc` tools exist; `fetch_doc` rejects a
-  private/loopback/link-local/metadata-range URL in a unit test, and a unit
-  test confirms `GH_TOKEN` is only attached for `github.com`/
-  `raw.githubusercontent.com` hosts.
+  private/loopback/link-local/metadata-range URL, rejects a non-http(s)
+  scheme, validates redirect targets the same way (up to 3 hops), and only
+  attaches `GH_TOKEN` for `github.com`/`raw.githubusercontent.com` — each
+  covered by a unit test.
 - `get_release_notes` unit tests cover: a window fully covered by page 1
   (`has_more=False`, single `gh api` call), a window whose releases only
   appear on page 2 (`has_more=True` on page 1, agent's second call with
   `page=2` finds the window), and the page-10 hard cap being enforced
   regardless of `has_more`.
 - A target whose release notes link to an external migration guide produces
-  a non-empty `migration_guide` sourced from that guide's content in an
-  integration-style test with mocked HTTP/container calls.
+  a non-empty `migration_guide` sourced from that guide's content in a test
+  with mocked HTTP/container calls.
 - `research_releases_node` failure (mocked exception) produces the same
-  conservative fallback shape `classify_target`'s except-block used to
-  produce, verified by a unit test.
+  conservative fallback shape the old `classify_target` used, verified by a
+  unit test.
 - `_format_targets` includes `breaking_changes` in its output string;
   existing `plan.py` tests updated accordingly.
 - `AgentRole.REMEDIATION_RELEASE_RESEARCH` is registered and resolvable via
-  `get_role_llm`; `test_model_registry.py` covers it.
-- All existing `test_classify.py`, `test_deepagent_nodes.py`, and
-  `test_remediation_subgraph.py` tests pass with the shrunk
-  `TargetClassification` and the new node inserted.
+  `get_role_llm`; `AgentRole.REMEDIATION_CLASSIFY` no longer exists;
+  `test_model_registry.py` covers both.
+- `test_remediation_subgraph.py`'s integration test is updated to mock
+  `select_targets.select_remediation_targets`/`select_targets_node`'s
+  dependencies instead of `classify.classify_target`, and still exercises
+  the full `select → research → plan → remediate → verify` path.
+- `apps/backend/docs/graphs.md`'s remediation section (mermaid diagram +
+  node-by-node prose) is updated to describe `select_targets_node` and
+  `research_releases_node` in place of `classify_targets_node`.
