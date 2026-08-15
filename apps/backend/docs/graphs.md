@@ -158,14 +158,17 @@ Source: `subgraphs/analysis/graph.py`, `subgraphs/analysis/concern.py`, `subgrap
 
 ## Remediation subgraph
 
-Runs as a single node (`remediation`) inside the main graph. 5-node pipeline: classify → plan → remediate → verify → PR/persist, with a deterministic correction loop between verify and remediate.
+Runs as a single node (`remediation`) inside the main graph. 6-node pipeline: select → research → plan → remediate → verify → PR/persist, with a deterministic correction loop between verify and remediate.
 
 ```mermaid
 flowchart TD
-    START([start]) --> classify_targets_node
+    START([start]) --> select_targets_node
 
-    classify_targets_node["classify_targets_node\n― deterministic select + codegraph + LLM tier/digest, fan-out per target ―"]
-    classify_targets_node --> build_migration_plan_node
+    select_targets_node["select_targets_node\n― deterministic select + codegraph + version/repo resolve, fan-out per target ―"]
+    select_targets_node --> research_releases_node
+
+    research_releases_node["research_releases_node\n― agentic release-note research, fan-out per non-r3 target ―"]
+    research_releases_node --> build_migration_plan_node
 
     build_migration_plan_node["build_migration_plan_node\n― LLM, ONE batched call ―\nPLANNER"]
     build_migration_plan_node --> remediate_targets_node
@@ -185,8 +188,8 @@ flowchart TD
     classDef det fill:#f3f4f6,stroke:#6b7280
 
     class build_migration_plan_node llm
-    class remediate_targets_node agent
-    class classify_targets_node,group_and_verify_gate,pr_and_persist_node det
+    class remediate_targets_node,research_releases_node agent
+    class select_targets_node,group_and_verify_gate,pr_and_persist_node det
 ```
 
 **Intended per-node responsibility** (target model):
@@ -194,7 +197,9 @@ planner *plans*, remediator *remediates*, verifier *verifies*, PR/persist node *
 
 ### Node-by-node (as built)
 
-- **`classify_targets_node`** (`classify.py`) — `select_remediation_targets` deterministically turns analysis findings into `RemediationTarget`s (dedup, direct-dep anchoring), resolves each target's registry version + GitHub repo in one `npm view` call, then fans out `classify_target` over every target (bounded concurrency, semaphore=6). Per target: `dependents_of` (deterministic, from the dependency graph), a codegraph `blast_radius` call for real call sites, a deterministic no-upgrade check (registry publishes nothing above the declared range → tier `r3`, no fetch, no LLM), and otherwise ONE LLM call over the release notes windowed to the target version that produces both the tier (`r1`/`r2`/`r3`, advisory hint only downstream) and a migration digest (`migration_needed`/`migration_guide`/`breaking_changes`) grounded in the dependents/call-sites already gathered. Writes `targets` and `investigations`, resets `remediations`.
+- **`select_targets_node`** (`select_targets.py`) — Deterministic, no LLM. `select_remediation_targets` turns analysis findings into `RemediationTarget`s (dedup, direct-dep anchoring), resolves each target's registry version + GitHub repo (bounded concurrency, semaphore=6), and decides the deterministic no-upgrade check (registry publishes nothing above the declared range → tier `r3`, no fetch). For every target: `dependents_of` (structural, from the dependency graph) and a codegraph `blast_radius` call for real call sites. Writes `targets` and `investigations` (the latter with a placeholder release digest `research_releases_node` fills in next), resets `remediations`.
+
+- **`research_releases_node`** (`release_research.py`) — Agentic. For every target with `tier != "r3"` (fan-out, bounded concurrency, semaphore=6): a small structured-output loop (own `ReleaseResearchDecision`, own tools, iteration cap 4 — shape borrowed from the analysis subgraph's `_react_loop`, not `deepagents`) with `get_release_notes` (paginated GitHub releases, windowed to the upgrade range, the agent decides whether it needs another page) and `fetch_doc` (an SSRF-hardened fetch for a linked migration guide the release body points at) to produce `migration_needed`/`migration_guide`/`breaking_changes`. Overwrites only the `release` field of each target's `investigations` entry, preserving `dependents`/`call_sites` from `select_targets_node`.
 
 - **`build_migration_plan_node`** (`plan.py`) — **The planner.** ONE batched structured-output LLM call covering *every* target at once (not per-target), so the model can reason about cross-target `requires` coupling in a single pass. Emits one `MigrationPlan` per target (bump / bump+codemod / replace, `requires` list). Writes `migration_plans`. Does not touch the repo, dispatch an agent, or verify anything.
 
