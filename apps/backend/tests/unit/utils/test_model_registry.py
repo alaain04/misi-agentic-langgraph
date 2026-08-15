@@ -79,3 +79,8 @@ def test_role_tag_survives_with_structured_output():
     chain = get_role_llm(AgentRole.SPECIALIST_AGENT).with_structured_output(_Out)
     bound = chain.first  # the model step of the structured-output sequence
     assert "agent_role:specialist_agent" in (bound.tags or [])
+
+
+def test_remediation_release_research_role_exists_and_classify_role_removed():
+    assert AgentRole.REMEDIATION_RELEASE_RESEARCH.value == "remediation_release_research"
+    assert not hasattr(AgentRole, "REMEDIATION_CLASSIFY")

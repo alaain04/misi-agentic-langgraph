@@ -24,7 +24,7 @@ class AgentRole(StrEnum):
     FINDING_ENRICHER = "finding_enricher"
     IMPACT_ANALYSIS = "impact_analysis"
     REPORT_CRITIQUE = "report_critique"
-    REMEDIATION_CLASSIFY = "remediation_classify"
+    REMEDIATION_RELEASE_RESEARCH = "remediation_release_research"
     REMEDIATION_PLAN = "remediation_plan"
     REMEDIATION_EXECUTION_DEEPAGENT = "remediation_execution_deepagent"
 
