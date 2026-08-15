@@ -166,3 +166,91 @@ async def fetch_release_notes_between(
         r for r in full.get("releases", []) if _tag_in_window(r.get("tag"), low, high)
     ]
     return {**full, "releases": windowed}
+
+
+async def fetch_release_notes_page(
+    package_name: str,
+    page: int,
+    from_version: str | None,
+    to_version: str | None,
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str,
+    resolved_repo: tuple[str, str] | None = None,
+) -> dict:
+    """Fetch ONE page (per_page=100) of a package's GitHub releases
+    directly -- no --paginate, so this never fetches more than the caller
+    asks for (unlike fetch_release_notes, which always fetches a package's
+    entire history before slicing to 20 -- see the design spec). Windows to
+    (from_version, to_version] the same way fetch_release_notes_between
+    does. has_more is True only when there's reason to believe an older,
+    still-relevant release exists: this page was full AND its oldest tag is
+    still above the window floor.
+    """
+    resolved = resolved_repo or await _resolve_github_repo(
+        package_name, repo_path, container, docker_image
+    )
+    if resolved is None:
+        return {
+            "package_name": package_name,
+            "available": False,
+            "error": "could not resolve a GitHub repository for this package",
+        }
+    owner, repo = resolved
+    per_page = 100
+    command = (
+        "gh api "
+        f"{shlex.quote(f'repos/{owner}/{repo}/releases?per_page={per_page}&page={page}')}"
+    )
+    secret_env = {"GH_TOKEN": settings.github_token} if settings.github_token else None
+    rc, stdout, stderr = await container.run(
+        image=settings.gh_docker_image,
+        command=command,
+        run_as_root=True,
+        secret_env=secret_env,
+    )
+    if rc != 0:
+        return {
+            "package_name": package_name,
+            "available": False,
+            "error": stderr[:300],
+        }
+    try:
+        releases = json.loads(stdout.strip() or "[]")
+    except json.JSONDecodeError:
+        return {
+            "package_name": package_name,
+            "available": False,
+            "error": "unparseable gh output",
+        }
+
+    low = _tag_version(from_version)
+    high = _tag_version(to_version)
+    windowed = [
+        {
+            "tag": r.get("tag_name"),
+            "name": r.get("name"),
+            "body": (r.get("body") or "")[:2000],
+        }
+        for r in releases
+        if high is None or (
+            _tag_version(r.get("tag_name")) is not None
+            and _tag_version(r.get("tag_name")) >= high
+        )
+    ]
+
+    oldest = _tag_version(releases[-1].get("tag_name")) if releases else None
+    has_more = (
+        len(releases) == per_page
+        and low is not None
+        and (oldest is None or oldest > low)
+    )
+
+    return {
+        "package_name": package_name,
+        "available": True,
+        "repository": f"{owner}/{repo}",
+        "page": page,
+        "has_more": has_more,
+        "releases": windowed,
+    }

@@ -10,6 +10,7 @@ from src.main_graph.subgraphs.remediation.changelog import (
     _tag_version,
     fetch_release_notes,
     fetch_release_notes_between,
+    fetch_release_notes_page,
     resolve_package_info,
 )
 
@@ -288,3 +289,135 @@ async def test_resolve_package_info_none_when_container_raises():
 
     assert version is None
     assert repo is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_page_windows_and_reports_no_more():
+    releases_json = json.dumps(
+        [
+            {"tag_name": "v9.0.0", "name": "9.0.0", "body": "flat config"},
+            {"tag_name": "v8.5.0", "name": "8.5.0", "body": "minor"},
+        ]
+    )
+    container = FakeContainer([(0, releases_json, "")])
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes_page(
+            "eslint",
+            1,
+            "8.0.0",
+            "9.0.0",
+            "/repo",
+            container,
+            "node:lts-alpine",
+            resolved_repo=("eslint", "eslint"),
+        )
+
+    assert result["available"] is True
+    assert result["page"] == 1
+    assert [r["tag"] for r in result["releases"]] == ["v9.0.0"]
+    # Only 2 releases returned, well under per_page=100 -- no reason to
+    # believe another page exists.
+    assert result["has_more"] is False
+    assert len(container.calls) == 1
+    assert "per_page=100&page=1" in container.calls[0]["command"]
+    assert "--paginate" not in container.calls[0]["command"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_page_has_more_when_page_full_and_above_floor():
+    releases = [
+        {"tag_name": f"v9.{i}.0", "name": f"9.{i}.0", "body": ""}
+        for i in range(100, 0, -1)
+    ]  # 100 releases, all above the 8.0.0 floor -- oldest is v9.1.0
+    container = FakeContainer([(0, json.dumps(releases), "")])
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes_page(
+            "eslint",
+            1,
+            "8.0.0",
+            "9.100.0",
+            "/repo",
+            container,
+            "node:lts-alpine",
+            resolved_repo=("eslint", "eslint"),
+        )
+
+    assert result["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_page_no_more_when_page_reaches_floor():
+    releases = [
+        {"tag_name": "v8.1.0", "name": "8.1.0", "body": ""},
+        {"tag_name": "v8.0.0", "name": "8.0.0", "body": ""},
+    ]  # oldest tag (v8.0.0) is AT the floor, not above it
+    container = FakeContainer([(0, json.dumps(releases), "")])
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes_page(
+            "eslint",
+            1,
+            "8.0.0",
+            "8.1.0",
+            "/repo",
+            container,
+            "node:lts-alpine",
+            resolved_repo=("eslint", "eslint"),
+        )
+
+    assert result["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_page_resolves_repo_when_not_given():
+    container = FakeContainer(
+        [
+            (0, "git+https://github.com/eslint/eslint.git\n", ""),
+            (0, "[]", ""),
+        ]
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes_page(
+            "eslint", 1, None, None, "/repo", container, "node:lts-alpine"
+        )
+
+    assert result["available"] is True
+    assert len(container.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_page_gh_failure_reports_unavailable():
+    container = FakeContainer([(1, "", "HTTP 404: Not Found")])
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes_page(
+            "eslint",
+            1,
+            None,
+            None,
+            "/repo",
+            container,
+            "node:lts-alpine",
+            resolved_repo=("eslint", "eslint"),
+        )
+
+    assert result["available"] is False
+    assert "404" in result["error"]
