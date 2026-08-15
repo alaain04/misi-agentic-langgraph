@@ -59,13 +59,13 @@ async def test_maintenance_drops_transitive_findings():
     with patch.object(
         MaintenanceAgent.__bases__[0],
         "run",
-        AsyncMock(return_value=(_bundle(findings), ["unmaintained_packages"], 1)),
+        AsyncMock(return_value=(_bundle(findings), ["package_health_data"], 1)),
     ):
         bundle, tools, iters = await MaintenanceAgent().run(_dispatch(), _prep(_GRAPH))
 
     names = [f.dep_name for f in bundle.findings]
     assert names == ["express"]  # qs (transitive) dropped
-    assert tools == ["unmaintained_packages"]
+    assert tools == ["package_health_data"]
 
 
 @pytest.mark.asyncio

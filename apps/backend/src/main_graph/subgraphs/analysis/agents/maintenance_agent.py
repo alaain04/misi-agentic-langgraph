@@ -4,6 +4,7 @@ from src.db.input_cache import InputCacheDAO
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
 from src.main_graph.subgraphs.discovery.dependency_graph import is_direct
+from src.main_graph.tools.external_api import package_health_data
 from src.models.results import AgentDispatch, EvidenceBundle, PrepResult
 
 
@@ -25,22 +26,29 @@ class MaintenanceAgent(BaseAgent):
         {tool_descriptions}
 
         Investigation strategy:
-        1. Call unmaintained_packages to identify packages with no recent commits or \
-no active maintainer.
-        2. Call high_risk_packages to flag packages that are very new (<90 days) or \
-abandoned (>2 years without a release).
-        3. For packages flagged by either tool, call package_reputation to get \
-download trends and community signals.
-        4. A package is a maintenance risk if: last commit > 12 months ago AND has \
-open issues with no response, OR total weekly downloads dropped > 50% over 6 months.
-        5. Record the package name, last release date, and risk rationale in each \
-FindingNote.
+        1. Call package_health_data once to get npm registry facts (created \
+date, last release date, weekly downloads, maintainer count, latest version) \
+for every direct dependency in the repo.
+        2. For each package, weigh release recency against weekly_downloads \
+before deciding it is a risk:
+           - Strong current adoption overrides staleness alone. A package \
+with weekly_downloads at or above roughly 1,000 is meaningfully in active \
+use — many mature, stable libraries go a long time between releases \
+without that meaning anything is wrong. Never flag such a package as a \
+maintenance risk based on last_modified age by itself.
+           - A package IS a maintenance risk if: last_modified is more than \
+12 months old AND weekly_downloads is low (below roughly 1,000) or \
+missing/errored — OR the package was created less than 90 days ago AND \
+weekly_downloads is low or missing/errored.
+        3. Record the package name, last_modified date, weekly_downloads, \
+and risk rationale in each FindingNote so the downloads-vs-staleness \
+tradeoff is visible to a reviewer.
 
         Rules on maintainer count:
         - A single-maintainer package is NOT, by itself, a finding. Most healthy,
           widely-used npm packages (lodash, many @nestjs/* scopes, etc.) have one
           maintainer. Never create or justify a finding using maintainer count alone
-          — only the recency/activity criteria in steps 2 and 4 above count as risk.
+          — only the recency/downloads criteria in step 2 above count as risk.
 
         Scope:
         - Only assess DIRECT dependencies (declared in package.json). Do not
@@ -57,7 +65,7 @@ FindingNote.
         """
 
     def _agent_tools(self) -> list:
-        return [unmaintained_packages, high_risk_packages, package_reputation]
+        return [package_health_data]
 
     async def run(
         self,
