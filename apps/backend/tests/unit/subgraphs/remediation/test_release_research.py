@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.main_graph.subgraphs.remediation.release_research import (
     fetch_doc,
     make_fetch_doc_tool,
+    make_get_release_notes_tool,
 )
 
 
@@ -232,3 +233,32 @@ async def test_make_fetch_doc_tool_delegates_to_fetch_doc():
         result = await tool.ainvoke({"url": "https://example.com/doc.md"})
     mock_fetch.assert_awaited_once_with("https://example.com/doc.md")
     assert result["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_release_notes_tool_delegates_with_closed_over_args():
+    container = MagicMock()
+    with patch(
+        "src.main_graph.subgraphs.remediation.release_research.fetch_release_notes_page",
+        AsyncMock(return_value={"available": True, "page": 1, "has_more": False, "releases": []}),
+    ) as mock_fetch:
+        tool = make_get_release_notes_tool(
+            "eslint", "7.0.0", "8.0.0", ("eslint", "eslint"), "/repo", container, "node:lts-alpine"
+        )
+        result = await tool.ainvoke({"page": 1})
+
+    mock_fetch.assert_awaited_once_with(
+        "eslint", 1, "7.0.0", "8.0.0", "/repo", container, "node:lts-alpine",
+        resolved_repo=("eslint", "eslint"),
+    )
+    assert result["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_release_notes_tool_refuses_page_beyond_ten():
+    tool = make_get_release_notes_tool(
+        "eslint", "7.0.0", "8.0.0", None, "/repo", MagicMock(), "node:lts-alpine"
+    )
+    result = await tool.ainvoke({"page": 11})
+    assert result["available"] is False
+    assert "page limit" in result["error"]

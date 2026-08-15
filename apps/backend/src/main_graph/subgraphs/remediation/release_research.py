@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 import httpx
 from langchain_core.tools import tool
 
+from src.domain.ports.container_run_port import ContainerRunPort
+from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes_page
 from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
@@ -134,3 +136,35 @@ def make_fetch_doc_tool():
 
     fetch_doc_tool.name = "fetch_doc"
     return fetch_doc_tool
+
+
+def make_get_release_notes_tool(
+    target_dep: str,
+    from_version: str | None,
+    to_version: str | None,
+    resolved_repo: tuple[str, str] | None,
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str,
+):
+    @tool
+    async def get_release_notes(page: int = 1) -> dict:
+        """Fetch one page of the target package's GitHub releases, windowed
+        to the versions between the installed range and the target
+        version. Returns has_more=True when an older, still-relevant
+        release likely exists on the next page -- call again with the next
+        page number if you need more evidence. Refuses page > 10."""
+        if page > 10:
+            return {"available": False, "error": "page limit (10) exceeded"}
+        return await fetch_release_notes_page(
+            target_dep,
+            page,
+            from_version,
+            to_version,
+            repo_path,
+            container,
+            docker_image,
+            resolved_repo=resolved_repo,
+        )
+
+    return get_release_notes
