@@ -6,9 +6,9 @@ def _tags_of(module_path: str, attr: str = "_llm") -> list[str]:
     return list(getattr(module, attr).tags or [])
 
 
-def test_remediation_classify_tagged_correctly():
-    tags = _tags_of("src.main_graph.subgraphs.remediation.classify")
-    assert "agent_role:remediation_classify" in tags
+def test_remediation_release_research_tagged_correctly():
+    tags = _tags_of("src.main_graph.subgraphs.remediation.release_research")
+    assert "agent_role:remediation_release_research" in tags
 
 
 def test_remediation_plan_tagged_correctly():
