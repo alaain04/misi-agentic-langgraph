@@ -1,7 +1,7 @@
 include .env
 
 .PHONY: help setup lint format typecheck test test-cov run dev \
-        docker-build docker-build-dev docker-build-codegraph docker-up docker-down docker-logs clean
+        docker-build docker-build-dev docker-build-codegraph docker-build-gh docker-up docker-down docker-logs clean
 
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 
@@ -61,6 +61,9 @@ docker-build-dev: ## Build development image
 
 docker-build-codegraph: ## Build the codegraph-cli image used for blast-radius analysis
 	$(DOCKER_COMPOSE) --profile build-only build codegraph
+
+docker-build-gh: ## Build the gh-cli image used for release-notes lookups
+	$(DOCKER_COMPOSE) --profile build-only build gh
 
 docker-up: ## Start all services
 	$(DOCKER_COMPOSE) up -d

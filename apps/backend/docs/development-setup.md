@@ -3,6 +3,7 @@
 - MongoDB (docker-compose provided for local setup)
 - OpenAI API key (for LLM calls)
 - Docker (for the `codegraph-cli` image used by blast-radius analysis in the report subgraph — build it once with `make docker-build-codegraph`; without it, `blast_radius` findings report as unavailable for every package in a job)
+- Docker (for the `gh-cli` image used to fetch GitHub release notes in remediation — build it once with `make docker-build-gh`)
 
 
 ## Development setup

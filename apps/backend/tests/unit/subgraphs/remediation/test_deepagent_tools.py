@@ -48,8 +48,41 @@ async def test_read_release_notes_tool_delegates_to_fetch_release_notes():
         tool = make_read_release_notes_tool("/repo", container, "node:lts-alpine")
         result = await tool.ainvoke({"package_name": "eslint"})
 
-    mock_fetch.assert_awaited_once_with("eslint", "/repo", container, "node:lts-alpine")
+    mock_fetch.assert_awaited_once_with(
+        "eslint", "/repo", container, "node:lts-alpine", None
+    )
     assert result["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_read_release_notes_tool_reuses_repo_resolved_by_classify():
+    """classify already resolved eslint's GitHub repo via resolve_package_info
+    -- the tool must pass that through to fetch_release_notes instead of
+    letting it re-resolve the same package with another npm-view container
+    spawn."""
+    container = MagicMock()
+    with patch(
+        "src.main_graph.subgraphs.remediation.deepagent.tools.fetch_release_notes",
+        AsyncMock(
+            return_value={
+                "package_name": "eslint",
+                "available": True,
+                "repository": "eslint/eslint",
+                "releases": [],
+            }
+        ),
+    ) as mock_fetch:
+        tool = make_read_release_notes_tool(
+            "/repo",
+            container,
+            "node:lts-alpine",
+            {"eslint": ("eslint", "eslint")},
+        )
+        await tool.ainvoke({"package_name": "eslint"})
+
+    mock_fetch.assert_awaited_once_with(
+        "eslint", "/repo", container, "node:lts-alpine", ("eslint", "eslint")
+    )
 
 
 @pytest.mark.asyncio

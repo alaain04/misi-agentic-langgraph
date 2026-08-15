@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from src.main_graph.subgraphs.remediation.plan import _enforce_tier
+from src.main_graph.subgraphs.remediation.plan import (
+    _apply_release_digest,
+    _enforce_tier,
+)
 
 
 def _bump_plan(dep: str, tier: str, to_range: str) -> dict:
@@ -19,6 +22,17 @@ def _bump_plan(dep: str, tier: str, to_range: str) -> dict:
             }
         ],
         "requires": [],
+    }
+
+
+def _replace_task(replacement_dep: str | None = None) -> dict:
+    return {
+        "kind": "replace",
+        "rationale": "unmaintained",
+        "to_range": None,
+        "files": [],
+        "replacement_dep": replacement_dep,
+        "replacement_range": None,
     }
 
 
@@ -91,3 +105,116 @@ def test_enforce_tier_ignores_target_with_no_tier():
     _enforce_tier(plans, targets)
 
     assert [t["kind"] for t in plans["lodash"]["tasks"]] == ["bump"]
+
+
+def test_enforce_tier_caps_r3_plan_to_one_replace_task():
+    plans = {
+        "matcha": {
+            "target_dep": "matcha",
+            "tier_hint": "r3",
+            "migration_guide": "",
+            "tasks": [
+                _replace_task("first-candidate"),
+                _replace_task("second-candidate"),
+            ],
+            "requires": [],
+        }
+    }
+    targets = {"matcha": {"target_dep": "matcha", "tier": "r3"}}
+
+    _enforce_tier(plans, targets)
+
+    tasks = plans["matcha"]["tasks"]
+    assert [t["kind"] for t in tasks] == ["replace"]
+    assert tasks[0]["replacement_dep"] == "first-candidate"
+
+
+def test_enforce_tier_drops_stray_replace_task_on_r1_plan():
+    plans = {
+        "lodash": {
+            "target_dep": "lodash",
+            "tier_hint": "r1",
+            "migration_guide": "",
+            "tasks": [
+                {
+                    "kind": "bump",
+                    "rationale": "clean upgrade",
+                    "to_range": "^4.17.21",
+                },
+                _replace_task("some-alternative"),
+            ],
+            "requires": [],
+        }
+    }
+    targets = {"lodash": {"target_dep": "lodash", "tier": "r1"}}
+
+    _enforce_tier(plans, targets)
+
+    assert [t["kind"] for t in plans["lodash"]["tasks"]] == ["bump"]
+
+
+def test_enforce_tier_clears_noop_bump_to_range():
+    plans = {"lodash": _bump_plan("lodash", "r1", "^4.17.21")}
+    targets = {
+        "lodash": {
+            "target_dep": "lodash",
+            "tier": "r1",
+            "current_range": "^4.17.21",
+        }
+    }
+
+    _enforce_tier(plans, targets)
+
+    assert plans["lodash"]["tasks"][0]["to_range"] is None
+
+
+def test_enforce_tier_keeps_bump_to_range_when_it_differs_from_current():
+    plans = {"lodash": _bump_plan("lodash", "r1", "^4.17.21")}
+    targets = {
+        "lodash": {
+            "target_dep": "lodash",
+            "tier": "r1",
+            "current_range": "^4.15.0",
+        }
+    }
+
+    _enforce_tier(plans, targets)
+
+    assert plans["lodash"]["tasks"][0]["to_range"] == "^4.17.21"
+
+
+def test_apply_release_digest_overwrites_guide_and_known_to_range():
+    plans = {"lodash": _bump_plan("lodash", "r1", "^4.0.0")}
+    investigations = {
+        "lodash": {
+            "release": {
+                "migration_guide": "Follow the official upgrade guide.",
+                "to_version": "4.17.21",
+            }
+        }
+    }
+
+    _apply_release_digest(plans, investigations)
+
+    assert plans["lodash"]["migration_guide"] == "Follow the official upgrade guide."
+    assert plans["lodash"]["tasks"][0]["to_range"] == "4.17.21"
+
+
+def test_apply_release_digest_leaves_to_range_when_version_unknown():
+    plans = {"lodash": _bump_plan("lodash", "r1", "^4.99.0")}
+    investigations = {
+        "lodash": {"release": {"migration_guide": "", "to_version": None}}
+    }
+
+    _apply_release_digest(plans, investigations)
+
+    assert plans["lodash"]["migration_guide"] == ""
+    assert plans["lodash"]["tasks"][0]["to_range"] == "^4.99.0"
+
+
+def test_apply_release_digest_defaults_guide_empty_when_investigation_missing():
+    plans = {"lodash": _bump_plan("lodash", "r1", "^4.0.0")}
+
+    _apply_release_digest(plans, investigations={})
+
+    assert plans["lodash"]["migration_guide"] == ""

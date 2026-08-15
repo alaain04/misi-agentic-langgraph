@@ -137,6 +137,7 @@ def _format_group_message(
 
 async def _run_group(
     group: list[str],
+    targets: dict[str, dict],
     plans: dict[str, dict],
     investigations: dict[str, dict],
     failures: dict[str, dict],
@@ -153,8 +154,15 @@ async def _run_group(
     marking them individually failed)."""
     work_dir = copy_repo(prep.repo_path)
     try:
+        resolved_repos = {
+            dep: (targets.get(dep) or {}).get("resolved_repo") for dep in group
+        }
         agent = build_execution_agent(
-            work_dir, container, prep.docker_image, prep.detected_package_manager
+            work_dir,
+            container,
+            prep.docker_image,
+            prep.package_manager,
+            resolved_repos,
         )
         message = _format_group_message(group, plans, investigations, failures)
         initial_state = {
@@ -350,7 +358,14 @@ async def remediate_targets_node(
 
     async def _bounded(group: list[str]) -> tuple[list[str], dict[str, dict] | None]:
         outcomes = await _run_group(
-            group, plans, investigations, _failures_for(group), prep, container, config
+            group,
+            targets,
+            plans,
+            investigations,
+            _failures_for(group),
+            prep,
+            container,
+            config,
         )
         return group, outcomes
 
@@ -495,7 +510,7 @@ async def group_and_verify_gate(
             prep.repo_path,
             container,
             prep.docker_image,
-            prep.detected_package_manager,
+            prep.package_manager,
             keep_workdir=keep_workdir,
         )
         group_ok = _is_green(verification)
@@ -658,14 +673,11 @@ def _pr_findings_table(group_remediations: list[Remediation]) -> str:
             summary = summaries.get(finding)
             severity = summary.severity if summary else "-"
             description = _truncate(summary.description) if summary else "-"
-            rows.append(
-                f"| {finding} | {severity} | {description} | {r.target_dep} |"
-            )
+            rows.append(f"| {finding} | {severity} | {description} | {r.target_dep} |")
     if not rows:
         return "None."
     header = (
-        "| Finding | Severity | Description | Resolved by |\n"
-        "| --- | --- | --- | --- |"
+        "| Finding | Severity | Description | Resolved by |\n| --- | --- | --- | --- |"
     )
     return "\n".join([header, *rows])
 

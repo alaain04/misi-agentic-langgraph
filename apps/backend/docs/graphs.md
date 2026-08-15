@@ -6,113 +6,166 @@ See [architecture.md](architecture.md) for the high-level system overview and re
 
 ## Main graph
 
-8-node cognitive investigation pipeline.
+3-node top-level pipeline: `prep` → `analysis` → `remediation`, each a compiled subgraph. Either phase can short-circuit straight to `END` when it produced nothing for the next phase to build on.
 
 ```mermaid
 flowchart TD
-    START([start]) --> discovery
+    START([start]) --> prep
 
-    discovery["discovery\n― subgraph ―"]
-    discovery --> investigation_planner
+    prep["prep\n― discovery_subgraph ―"]
+    prep -->|"discovery_error OR\nno prep_result_id"| END1([end])
+    prep -->|else| analysis
 
-    investigation_planner["investigation_planner\n⏸ HITL gate 1\n― LLM ―"]
-    investigation_planner -->|plan approved| skill_dispatcher
+    analysis["analysis\n― analysis_subgraph ―"]
+    analysis -->|"no analysis_result_id"| END2([end])
+    analysis -->|else| remediation
 
-    skill_dispatcher["skill_dispatcher\n― deterministic ―"]
-    skill_dispatcher -->|"Send × N (parallel fan-out)"| skill_executor
+    remediation["remediation\n― remediation_subgraph ―"]
+    remediation --> END3([end])
 
-    skill_executor["skill_executor\n× N parallel instances\n― per-skill LLM/tool ―"]
-    skill_executor -->|fan-in| evidence_collector
+    report["report\n― report_subgraph ―\n(built, not wired in)"]
+    remediation -.->|"commented out"| report
+    report -.-> END4([end])
 
-    evidence_collector["evidence_collector\n― no-op ―"]
-    evidence_collector --> evidence_correlator
+    classDef sub fill:#dbeafe,stroke:#2563eb
+    classDef disabled fill:transparent,stroke:#9ca3af,stroke-dasharray:4 4
 
-    evidence_correlator["evidence_correlator\n― LLM ―"]
-    evidence_correlator --> finding_reviewer
-
-    finding_reviewer["finding_reviewer\n⏸ HITL gate 2\n― deterministic + interrupt ―"]
-    finding_reviewer -->|"feedback && iterations < 2"| evidence_correlator
-    finding_reviewer -->|approved| report_builder
-
-    report_builder["report_builder\n― deterministic ―"]
-    report_builder --> END([end])
-
-    classDef hitl fill:#fde68a,stroke:#d97706
-    classDef llm fill:#dbeafe,stroke:#2563eb
-    classDef det fill:#f3f4f6,stroke:#6b7280
-    classDef fanout fill:#ede9fe,stroke:#7c3aed
-
-    class investigation_planner hitl
-    class evidence_correlator llm
-    class skill_executor fanout
-    class skill_dispatcher,evidence_collector,finding_reviewer,report_builder det
+    class prep,analysis,remediation sub
+    class report disabled
 ```
 
-**HITL gates:**
-- `investigation_planner` — graph pauses (`interrupt_before`) before the node, then `interrupt()` inside presents the proposed plan. Resumes on user approve / change / cancel.
-- `finding_reviewer` — `interrupt()` fires whenever there are any findings. Auto-approves only when the correlator produces no findings at all.
+**Routing:**
+- `prep → END` — discovery failed (clone/install error) or otherwise never produced a `prep_result_id`.
+- `analysis → END` — no `analysis_result_id`; includes the case where `understand_concern` classified the input as not a dependency-risk concern (`handle_invalid_concern` deliberately withholds it).
+- `report` subgraph — implemented under `subgraphs/report/` but its `add_node`/`add_edge` calls are commented out in `build_main_graph()` ("not adding value on top of remediation output").
 
-**Fan-out / fan-in:**
-`skill_dispatcher` returns a `list[Send]` — one per `(skill, dep, hypothesis)` assignment. LangGraph executes all `skill_executor` instances in parallel and reduces their `evidence` outputs via `operator.add` before `evidence_collector` runs.
-
-**Re-correlation loop:**
-`finding_reviewer` sends feedback back to `evidence_correlator` when quality criteria fail (up to 2 iterations). Criteria: high-severity findings must have ≥ 2 supporting evidence items, risk_score > 7 requires confidence ≥ 0.5, contradictions must be addressed in the summary.
+Source: `main_graph/graph.py`.
 
 ---
 
 ## Discovery subgraph
 
-Runs as a single node (`discovery`) inside the main graph.
+Runs as a single node (`prep`) inside the main graph. 5-node pipeline: clone → inspect → (install if no lock file) → index → save.
 
 ```mermaid
 flowchart TD
-    START([start]) --> clone_repository
+    START([start]) --> clone_repo
 
-    clone_repository["clone_repository\n― Docker: alpine/git ―"]
-    clone_repository -->|success| inspector_agent
-    clone_repository -->|error| build_dependency_summary
+    clone_repo["clone_repo\n― Docker: alpine/git ―\nshallow clone, records commit_sha"]
+    clone_repo -->|discovery_error| save_prep_result
+    clone_repo -->|success| inspect_repo
 
-    inspector_agent["inspector_agent\n― ReAct LLM agent ―\ntools: list_dir, read_file"]
-    inspector_agent -->|lock file present| generate_sbom
-    inspector_agent -->|lock_file_missing| lock_generator_agent
-    inspector_agent -->|error| build_dependency_summary
+    inspect_repo["inspect_repo\n― pure Python ―\nreads package.json + lock files"]
+    inspect_repo -->|"no lock file"| install_deps
+    inspect_repo -->|"lock file present"| index_codegraph
 
-    lock_generator_agent["lock_generator_agent\n― ReAct LLM agent ―\ntools: docker_tool, read_file, write_file\nup to 6 install attempts"]
-    lock_generator_agent --> generate_sbom
+    install_deps["install_deps\n― Docker: node:XX-alpine ―\nnpm/pnpm install, peer-conflict retry,\nlockfile-only fallback"]
+    install_deps --> index_codegraph
 
-    generate_sbom["generate_sbom\n― Docker: node:XX-alpine ―\nnpm/yarn/pnpm sbom --sbom-format=cyclonedx"]
-    generate_sbom --> build_dependency_summary
+    index_codegraph["index_codegraph\n― Docker: codegraph init ―\nbuilds blast-radius index once"]
+    index_codegraph --> save_prep_result
 
-    build_dependency_summary["build_dependency_summary\n― LLM ―\nproduces discovery_summary"]
-    build_dependency_summary --> END([end])
+    save_prep_result["save_prep_result\n― builds dependency graph,\npersists PrepResult ―"]
+    save_prep_result --> END([end])
 
-    classDef docker fill:#dcfce7,stroke:#16a34a
-    classDef agent fill:#dbeafe,stroke:#2563eb
-    classDef llm fill:#ede9fe,stroke:#7c3aed
     classDef det fill:#f3f4f6,stroke:#6b7280
 
-    class clone_repository,generate_sbom docker
-    class inspector_agent,lock_generator_agent agent
-    class build_dependency_summary llm
+    class clone_repo,inspect_repo,install_deps,index_codegraph,save_prep_result det
 ```
 
-**Output written to `MainState`:** `repo_path`, `project_metadata`, `manifest_files`, `detected_package_manager`, `docker_image`, `sbom_cyclonedx`, `sbom_result_id`, `discovery_summary`, `discovery_error`.
+**Node-by-node:**
+- **`clone_repo`** — shallow git clone via a throwaway `alpine/git` container; PAT auth (if any) is injected through a process-scoped header, never written to `.git/config`. Sets `discovery_error` on failure instead of raising.
+- **`inspect_repo`** — no LLM, no Docker: parses `package.json` and whichever lock file is present to detect the package manager, its version, and picks a Node Docker image from `engines.node` (with a pnpm-11 minimum-Node bump).
+- **`install_deps`** — only reached when no lock file was committed. Runs the install in the detected package manager's Docker image, retries with `--legacy-peer-deps` / `--force` on peer-conflict errors, and forces a lockfile-only fallback if the full install exits 0 without ever writing one.
+- **`index_codegraph`** — builds the CodeGraph blast-radius index for the clone once; failure just leaves `codegraph_ready: False`, it doesn't fail the run.
+- **`save_prep_result`** — no-ops if `discovery_error` is set. Otherwise builds the full dependency graph and persists `PrepResult`. A lock file generated this run (not committed) is registry-dependent, so its cache path is skipped for it.
+
+Every node in this subgraph is deterministic — no LLM call anywhere in discovery.
+
+**Output written to `MainState`:** `prep_result_id` (everything else discovery produces — package manager, docker image, dependency graph, manifests — lives on the persisted `PrepResult`, not on `MainState` directly).
+
+Source: `subgraphs/discovery/graph.py`, `subgraphs/discovery/nodes/`.
+
+---
+
+## Analysis subgraph
+
+Runs as a single node (`analysis`) inside the main graph. 7-node pipeline routing a concern either straight through (simple) or into a deep agent investigation wrapped in a deterministic coverage guarantee (complex).
+
+```mermaid
+flowchart TD
+    START([start]) --> understand_concern
+
+    understand_concern["understand_concern\n― LLM: classifies concern\ninto type/scope/packages ―"]
+    understand_concern -->|valid| run_direct_agents
+    understand_concern -->|invalid| handle_invalid_concern
+
+    handle_invalid_concern["handle_invalid_concern\n― terminal, withholds\nanalysis_result_id ―"]
+    handle_invalid_concern --> END1([end])
+
+    run_direct_agents["run_direct_agents\n― dispatches whole-tree agents\nin parallel ―\nvulnerability_agent / license_agent"]
+    run_direct_agents -->|"simple concern"| save_analysis_result
+    run_direct_agents -->|"complex concern"| analysis_deepagent_node
+
+    analysis_deepagent_node["analysis_deepagent_node\n― deep agent: task()-dispatches\nspecialist subagents ―"]
+    analysis_deepagent_node --> coverage_gate
+
+    coverage_gate["coverage_gate\n― deterministic + LLM judge ―\nchecks every direct dep got covered"]
+    coverage_gate -->|"nothing missing"| save_analysis_result
+    coverage_gate -->|"missing, rounds ≤ max"| analysis_deepagent_node
+    coverage_gate -->|"missing, rounds > max"| backstop_dispatch
+
+    backstop_dispatch["backstop_dispatch\n― deterministic, no-LLM fallback ―\nforces coverage of stragglers"]
+    backstop_dispatch --> save_analysis_result
+
+    save_analysis_result["save_analysis_result\n― dedups findings,\npersists AnalysisResult ―"]
+    save_analysis_result --> END2([end])
+
+    classDef det fill:#f3f4f6,stroke:#6b7280
+    classDef llm fill:#dbeafe,stroke:#2563eb
+    classDef agent fill:#ede9fe,stroke:#7c3aed
+
+    class understand_concern llm
+    class handle_invalid_concern,coverage_gate,backstop_dispatch,save_analysis_result det
+    class run_direct_agents,analysis_deepagent_node agent
+```
+
+**Simple vs. complex routing** (`concern.py::route_concern`): a concern is "simple" when its type is a subset of `{vulnerability, license}`, scope is `all_dependencies`, and it doesn't ask for a per-dependency breakdown. Simple concerns skip the deep agent entirely and go straight to `save_analysis_result` after the mandatory whole-tree scan.
+
+### Node-by-node
+
+- **`understand_concern`** (`nodes/understand_concern.py`) — one structured-output LLM call classifies the free-text concern into a `Concern` (type(s), scope, named packages, whether a per-dependency breakdown is required, `is_valid`). Routes to `handle_invalid_concern` when the input isn't a dependency-risk concern at all.
+
+- **`handle_invalid_concern`** — terminal node; deliberately returns no `analysis_result_id` so `main_graph`'s `_after_analysis` routing skips remediation/report, and `job_runner`'s finalize logic still treats it as `done`, not `failed`. Writes the user-facing explanation as artifact data.
+
+- **`run_direct_agents`** (`nodes/run_direct_agents.py`) — mandatory prefix step, runs unconditionally (even on the complex path). Dispatches whichever of `vulnerability_agent` / `license_agent` are relevant and in scope, in parallel — both are whole-tree, deterministic, non-LLM scanners (Trivy / SPDX rules), so a second dispatch (including from the deep agent) adds no coverage and is capped to one run per job.
+
+- **`analysis_deepagent_node`** (`deepagent/nodes.py`) — the complex path. A deep agent whose system prompt carries the roster of specialist subagents, direct deps, and the concern; it `task()`-dispatches specialists as it sees fit. Re-invoked with a "still missing" nudge on each coverage-gate retry, picking up from its own prior `deepagent_state`.
+
+- **`coverage_gate`** (`deepagent/coverage.py`) — deterministic bookkeeping: computes which direct deps still lack a package-scoped agent call. The one LLM call inside, `whole_tree_scan_satisfies_concern`, only fires when a whole-tree scan already succeeded, to judge whether that alone fully addresses the concern (skipping the rest of per-package coverage if so).
+
+- **`backstop_dispatch`** (`deepagent/backstop.py`) — deterministic, no-LLM fallback once the correction-round budget is exhausted. Dispatches one agent call per still-missing direct dependency, reusing whichever package-scoped agent type was already in play (default `web_research_agent` if none were).
+
+- **`save_analysis_result`** — dedups byte-identical findings (a re-dispatched whole-tree agent returns its full finding set again), filters by minimum severity, and persists `AnalysisResult`.
+
+### State fields (`AnalysisState`)
+
+`structured_concern` (the classified `Concern`). `deepagent_state` (last full state returned by the deep agent's `ainvoke`, carried across coverage-gate retries). `missing_deps`, `correction_rounds`, `whole_tree_checked_roster`, `whole_tree_satisfies_concern` — coverage-loop bookkeeping. `bundle_ids` and `agent_calls` (`Annotated[..., operator.add]`) accumulate across every agent dispatch, whether from `run_direct_agents`, the deep agent's subagents, or `backstop_dispatch`. `analysis_result_id` — set by `save_analysis_result` once persisted.
+
+Source: `subgraphs/analysis/graph.py`, `subgraphs/analysis/concern.py`, `subgraphs/analysis/nodes/`, `subgraphs/analysis/deepagent/`.
 
 ---
 
 ## Remediation subgraph
 
-Runs as a single node (`remediation`) inside the main graph. 6-node pipeline: classify → investigate → plan → remediate → verify → PR/persist, with a deterministic correction loop between verify and remediate.
+Runs as a single node (`remediation`) inside the main graph. 5-node pipeline: classify → plan → remediate → verify → PR/persist, with a deterministic correction loop between verify and remediate.
 
 ```mermaid
 flowchart TD
     START([start]) --> classify_targets_node
 
-    classify_targets_node["classify_targets_node\n― deterministic select + LLM tier ―"]
-    classify_targets_node --> investigate_node
-
-    investigate_node["investigate_node\n― deterministic + LLM, fan-out per target ―"]
-    investigate_node --> build_migration_plan_node
+    classify_targets_node["classify_targets_node\n― deterministic select + codegraph + LLM tier/digest, fan-out per target ―"]
+    classify_targets_node --> build_migration_plan_node
 
     build_migration_plan_node["build_migration_plan_node\n― LLM, ONE batched call ―\nPLANNER"]
     build_migration_plan_node --> remediate_targets_node
@@ -133,7 +186,7 @@ flowchart TD
 
     class build_migration_plan_node llm
     class remediate_targets_node agent
-    class classify_targets_node,investigate_node,group_and_verify_gate,pr_and_persist_node det
+    class classify_targets_node,group_and_verify_gate,pr_and_persist_node det
 ```
 
 **Intended per-node responsibility** (target model):
@@ -141,9 +194,7 @@ planner *plans*, remediator *remediates*, verifier *verifies*, PR/persist node *
 
 ### Node-by-node (as built)
 
-- **`classify_targets_node`** (`classify.py`) — Two jobs today: (1) `select_remediation_targets` deterministically turns analysis findings into `RemediationTarget`s (dedup, direct-dep anchoring), (2) one LLM call per target classifies it into tier `r1`/`r2`/`r3` from its release notes (advisory hint only, doesn't gate anything downstream). Writes `targets`, resets `remediations`.
-
-- **`investigate_node`** (`investigate.py`) — Fans out `investigate_target` over every target (bounded concurrency, semaphore=6). Per target: `dependents_of` (deterministic, from the dependency graph), `find_local_usage_sites` (deterministic, local grep-equivalent), and `investigate_release` (LLM digest of GitHub release notes between installed and target version → `ReleaseDigest`, with `migration_needed`/`migration_guide`/`breaking_changes`). Pure evidence-gathering, no decisions. Writes `investigations`.
+- **`classify_targets_node`** (`classify.py`) — `select_remediation_targets` deterministically turns analysis findings into `RemediationTarget`s (dedup, direct-dep anchoring), resolves each target's registry version + GitHub repo in one `npm view` call, then fans out `classify_target` over every target (bounded concurrency, semaphore=6). Per target: `dependents_of` (deterministic, from the dependency graph), a codegraph `blast_radius` call for real call sites, a deterministic no-upgrade check (registry publishes nothing above the declared range → tier `r3`, no fetch, no LLM), and otherwise ONE LLM call over the release notes windowed to the target version that produces both the tier (`r1`/`r2`/`r3`, advisory hint only downstream) and a migration digest (`migration_needed`/`migration_guide`/`breaking_changes`) grounded in the dependents/call-sites already gathered. Writes `targets` and `investigations`, resets `remediations`.
 
 - **`build_migration_plan_node`** (`plan.py`) — **The planner.** ONE batched structured-output LLM call covering *every* target at once (not per-target), so the model can reason about cross-target `requires` coupling in a single pass. Emits one `MigrationPlan` per target (bump / bump+codemod / replace, `requires` list). Writes `migration_plans`. Does not touch the repo, dispatch an agent, or verify anything.
 

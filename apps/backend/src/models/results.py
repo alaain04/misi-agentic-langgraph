@@ -17,10 +17,9 @@ class PrepResult(BaseModel):
     commit_sha: str = ""
     project_metadata: dict
     manifest_files: list[str]
-    detected_package_manager: str
+    package_manager: str
     docker_image: str = "node:lts-alpine"
     dependency_graph: dict
-    codegraph_ready: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
@@ -83,10 +82,7 @@ class BlastRadiusSummary(BaseModel):
     available: bool
     affected_file_count: int = 0
     affected_files: list[str] = Field(default_factory=list)
-    production_file_count: int = 0
-    isolated_to_tests_or_scripts: bool = False
     node_count: int = 0
-    depth_searched: int = 0
     use_cases_impacted: list[str] = Field(default_factory=list)
     narrative: str = ""
     source: Literal["codegraph", "local_scan", "unavailable"] = "unavailable"

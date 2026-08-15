@@ -47,6 +47,16 @@ async def lifespan(app: FastAPI):
         )
     logger.info("startup check: trivy image runnable")
 
+    rc, _, stderr = await DockerContainerAdapter().run(
+        image=settings.gh_docker_image, command="gh --version"
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"gh image '{settings.gh_docker_image}' is not runnable "
+            f"(exit {rc}): {stderr}"
+        )
+    logger.info("startup check: gh image runnable")
+
     yield
 
 

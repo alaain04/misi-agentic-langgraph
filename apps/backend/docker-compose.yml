@@ -14,5 +14,13 @@ services:
       - build-only
     command: ["true"]
 
+  gh:
+    build:
+      context: ./docker/gh
+    image: gh-cli:latest
+    profiles:
+      - build-only
+    command: ["true"]
+
 volumes:
   mongodb_data:

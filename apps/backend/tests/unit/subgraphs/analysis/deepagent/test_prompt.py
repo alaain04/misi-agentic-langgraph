@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langgraph.errors import GraphRecursionError
 
 from src.main_graph.subgraphs.analysis.deepagent import nodes as deepagent_nodes
 from src.main_graph.subgraphs.analysis.deepagent.limits import DEEPAGENT_LIMITS
@@ -15,7 +16,7 @@ def _make_prep() -> PrepResult:
         repo_path="/tmp/repo",
         project_metadata={"name": "x"},
         manifest_files=["package.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
     )
 
@@ -144,3 +145,51 @@ async def test_first_round_excludes_already_run_whole_tree_agents_from_roster():
     # subagent_wrapper recognize it as already-run.
     assert captured["seeded_bundle_ids"] == ["bundle-vuln"]
     assert captured["seeded_agent_calls"] == [existing_vuln_call]
+
+
+@pytest.mark.asyncio
+async def test_recursion_limit_hit_discards_round_instead_of_raising():
+    """If the deep agent's internal planning/task-tool loop exceeds
+    _RECURSION_LIMIT, langgraph raises GraphRecursionError. Left uncaught,
+    that would propagate out of the analysis subgraph and get caught by
+    job_runner's top-level handler, failing the whole job. Instead this
+    round's in-progress work must be discarded and the pre-invoke
+    deepagent_state handed back unchanged, so coverage_gate's existing
+    missing-deps retry / backstop_dispatch_node path takes over on the next
+    round (mirroring remediation's deepagent/nodes.py _run_group)."""
+    fake_dao = MagicMock()
+    fake_dao.get_prep = AsyncMock(return_value=_make_prep())
+    mock_get_services = MagicMock(return_value={"result_dao": fake_dao})
+
+    fake_deep_agent = MagicMock()
+    fake_deep_agent.ainvoke = AsyncMock(side_effect=GraphRecursionError("boom"))
+
+    with (
+        patch(
+            "src.main_graph.subgraphs.analysis.deepagent.nodes.get_services",
+            mock_get_services,
+        ),
+        patch.object(deepagent_nodes, "_deep_agent", fake_deep_agent),
+    ):
+        result = await deepagent_nodes.analysis_deepagent_node(
+            {
+                "job_id": "job-1",
+                "concern": "check whether lodash is maintained",
+                "prep_result_id": "prep-1",
+                "structured_concern": {
+                    "is_valid": True,
+                    "type": ["maintenance"],
+                    "scope": "all_dependencies",
+                    "packages": [],
+                    "requires_per_dependency_analysis": True,
+                    "preferred_agents": ["maintenance_agent"],
+                },
+            },
+            {"configurable": {}},
+        )
+
+    assert result["bundle_ids"] == []
+    assert result["agent_calls"] == []
+    assert result["deepagent_state"]["messages"][0].content.startswith(
+        "You are a dependency risk investigation agent"
+    )

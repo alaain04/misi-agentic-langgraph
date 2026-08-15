@@ -17,17 +17,6 @@ _GIT_IMAGE = "alpine/git"
 def _clone_command(
     repo_url: str, github_token: str | None
 ) -> tuple[str, dict[str, str] | None]:
-    """Build the clone command. When a token is present, auth is injected via
-    a process-scoped `git -c http.extraHeader` override (never written to
-    the cloned repo's own .git/config) referencing $GIT_TOKEN — the actual
-    value is delivered to the shell only via the container's environment
-    (see ContainerRunPort.run's secret_env), never as a literal here.
-
-    `base64 -w0` disables line wrapping: a realistic PAT base64-encodes to
-    well over the default 76-column wrap, and an embedded newline in the
-    header value makes git/curl fail with "A libcurl function was given a
-    bad argument".
-    """
     if github_token:
         command = (
             'git -c http.extraHeader="AUTHORIZATION: basic '

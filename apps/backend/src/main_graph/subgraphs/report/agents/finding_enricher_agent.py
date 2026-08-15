@@ -9,10 +9,6 @@ import time
 import uuid
 from typing import cast
 
-from src.main_graph.subgraphs.discovery.dependency_graph import (
-    direct_dependents,
-    is_direct,
-)
 from src.main_graph.subgraphs.report.agents.critique import critique_report_finding
 from src.main_graph.subgraphs.report.agents.impact_analysis_agent import (
     make_impact_analysis_tool,
@@ -24,6 +20,10 @@ from src.models.results import (
     FindingEnrichmentDecision,
     PrepResult,
     ReportFinding,
+)
+from src.utils.dependency_graph import (
+    direct_dependents,
+    is_direct,
 )
 from src.utils.model_registry import AgentRole, get_role_llm
 

@@ -1,12 +1,3 @@
-"""Build the direct dependencies + flat package graph for a repo, backed by a
-Trivy CycloneDX SBOM scan rather than hand-rolled per-lockfile parsing.
-
-`_graph_from_cyclonedx` adapts Trivy's CycloneDX document (components +
-dependsOn edges) into this module's flat graph shape. See
-build_dependency_graph's docstring for why that shape is flat, not a nested
-tree.
-"""
-
 import json
 import logging
 import os
@@ -48,23 +39,16 @@ def _package_name(flat_key: str) -> str:
 
 
 def direct_dependents(graph: dict, name: str) -> list[str]:
-    """Return the direct dependencies whose subtree pulls in `name`, sorted.
-
-    Empty when `name` is itself a direct dependency, or when the flat graph
-    has no transitive data (e.g. package.json fallback) to trace edges
-    through. Walks the recorded `packages` edges upward from every installed
-    version of `name` to whichever direct-dependency roots reach it, so a
-    transitive shared by several direct deps lists all of them.
-    """
+    """Return the direct dependencies whose subtree pulls in `name`, sorted."""
     direct = graph.get("direct") or {}
-    if name in direct:
-        return []
     packages = graph.get("packages") or {}
-    if not packages:
+
+    if name in direct or not packages:
         return []
 
     direct_keys = {f"{n}@{v}" for n, v in direct.items()}
     parents: dict[str, set[str]] = {}
+
     for key, info in packages.items():
         for child in info.get("dependencies", []):
             parents.setdefault(child, set()).add(key)
@@ -72,6 +56,7 @@ def direct_dependents(graph: dict, name: str) -> list[str]:
     result: set[str] = set()
     seen: set[str] = set()
     stack = [k for k in packages if _package_name(k) == name]
+
     while stack:
         key = stack.pop()
         if key in seen:
@@ -80,30 +65,6 @@ def direct_dependents(graph: dict, name: str) -> list[str]:
         if key in direct_keys:
             result.add(_package_name(key))
         stack.extend(parents.get(key, ()))
-    return sorted(result)
-
-
-def dependents_of(graph: dict, name: str) -> list[str]:
-    """Return every package name in the tree with a recorded dependency on
-    any installed version of `name` - not limited to direct-dependency
-    roots, unlike direct_dependents(). This is what lets a remediation
-    agent check impact on packages that have no associated finding at all
-    (e.g. "does anything else in this tree depend on eslint before I bump
-    it"). Structural only: reflects the resolved graph, not whether a
-    declared version range still holds after a bump - that is what
-    verification checks.
-    """
-    packages = graph.get("packages") or {}
-    if not packages:
-        return []
-    targets = {key for key in packages if _package_name(key) == name}
-    if not targets:
-        return []
-    result = {
-        _package_name(key)
-        for key, info in packages.items()
-        if any(child in targets for child in info.get("dependencies", []))
-    }
     return sorted(result)
 
 

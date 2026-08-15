@@ -35,7 +35,7 @@ _llm = get_role_llm(AgentRole.SPECIALIST_AGENT)
 
 _INJECTED_PARAMS = {
     "repo_path",
-    "detected_package_manager",
+    "package_manager",
     "container",
     "docker_image",
 }
@@ -143,8 +143,8 @@ async def _run_tool(
         kwargs = dict(tc.args)
         if "repo_path" in sig.parameters:
             kwargs["repo_path"] = prep.repo_path
-        if "detected_package_manager" in sig.parameters:
-            kwargs["detected_package_manager"] = prep.detected_package_manager
+        if "package_manager" in sig.parameters:
+            kwargs["package_manager"] = prep.package_manager
         if "container" in sig.parameters:
             kwargs["container"] = container
         if "docker_image" in sig.parameters:

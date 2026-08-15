@@ -20,12 +20,26 @@ def test_dedup_collapses_identical_findings():
     assert result[0].dep_name == "electron"
 
 
-def test_dedup_preserves_distinct_findings_on_same_dep():
-    # same dep, different description = two distinct issues, both kept
+def test_dedup_merges_distinct_findings_on_same_dep():
+    # same dep, different description = two distinct issues, merged into one
     a = _finding("electron", "critical", "vulnerability advisory")
     b = _finding("electron", "medium", "install script risk")
     result = dedup_findings([a, b])
-    assert len(result) == 2
+    assert len(result) == 1
+    assert result[0].dep_name == "electron"
+    assert result[0].severity == "critical"
+    assert result[0].description == (
+        "critical - vulnerability advisory\nmedium - install script risk"
+    )
+    assert len(result[0].evidence) == 2
+
+
+def test_dedup_merge_keeps_highest_severity_regardless_of_order():
+    a = _finding("electron", "medium", "install script risk")
+    b = _finding("electron", "critical", "vulnerability advisory")
+    result = dedup_findings([a, b])
+    assert len(result) == 1
+    assert result[0].severity == "critical"
 
 
 def test_dedup_is_order_stable_keeps_first():

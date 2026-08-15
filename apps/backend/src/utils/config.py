@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # CodeGraph (blast-radius analysis of the target repo)
     codegraph_docker_image: str
 
+    # gh CLI (GitHub release-notes lookups in remediation's changelog.py) --
+    # containerized rather than run as a bare host subprocess so it doesn't
+    # depend on `gh` being installed/authenticated on the host.
+    gh_docker_image: str
+
     # Trivy (vulnerability/license scanning + SBOM/dependency-graph generation).
     # trivy_cache_dir is a HOST directory, mounted into every trivy container
     # invocation as a persistent cache_volume so the ~100MB vulnerability DB

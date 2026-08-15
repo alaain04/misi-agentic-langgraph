@@ -15,7 +15,7 @@ async def test_lifespan_checks_trivy_image_runnable():
         mock_get_client.return_value.admin.command = AsyncMock()
         mock_adapter = mock_adapter_cls.return_value
         mock_adapter.run = AsyncMock(
-            side_effect=[(0, "", ""), (0, "Version: 0.71.2", "")]
+            side_effect=[(0, "", ""), (0, "Version: 0.71.2", ""), (0, "gh version", "")]
         )
 
         async with lifespan(app):

@@ -3,11 +3,13 @@ domain_agent / evidence_collector (spec D1)."""
 
 from __future__ import annotations
 
+import logging
 import textwrap
 
 from deepagents import create_deep_agent
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.errors import GraphRecursionError
 
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.analysis.agents.registry import (
@@ -29,6 +31,8 @@ from src.main_graph.subgraphs.analysis.deepagent.subagent_wrapper import (
 )
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.utils.model_registry import AgentRole, get_role_llm
+
+logger = logging.getLogger(__name__)
 
 _MAX_CORRECTION_ROUNDS = 2
 _RECURSION_LIMIT = 50
@@ -166,7 +170,26 @@ async def analysis_deepagent_node(state: AnalysisState, config: RunnableConfig) 
     }
 
     run_config = {**config, "recursion_limit": _RECURSION_LIMIT}
-    result = await _deep_agent.ainvoke(deepagent_state, run_config)
+    try:
+        result = await _deep_agent.ainvoke(deepagent_state, run_config)
+    except GraphRecursionError:
+        # Discard this round's in-progress work and hand back the
+        # pre-invoke state unchanged. coverage_gate then recomputes
+        # missing_deps from what's already committed to state, so
+        # route_after_coverage_gate's existing retry/backstop path
+        # (route_after_coverage_gate -> backstop_dispatch_node once
+        # _MAX_CORRECTION_ROUNDS is exceeded) takes over instead of
+        # this failure crashing the whole job.
+        logger.warning(
+            "analysis_deepagent_node: hit recursion_limit=%d before "
+            "finishing; discarding this round's in-progress work",
+            _RECURSION_LIMIT,
+        )
+        return {
+            "deepagent_state": deepagent_state,
+            "bundle_ids": [],
+            "agent_calls": [],
+        }
 
     seen_bundle_ids = set(prev_bundle_ids)
     new_bundle_ids: list[str] = []

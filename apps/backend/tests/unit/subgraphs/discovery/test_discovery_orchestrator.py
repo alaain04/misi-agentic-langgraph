@@ -1,4 +1,4 @@
-"""Tests for the deterministic discovery nodes: clone_repo, inspect_repo,
+"""Tests for the deterministic discovery nodes: clone_repo, detect_node_environment,
 install_deps."""
 
 import json
@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.main_graph.subgraphs.discovery.nodes.clone_repo import clone_repo
-from src.main_graph.subgraphs.discovery.nodes.inspect_repo import inspect_repo
+from src.main_graph.subgraphs.discovery.nodes.detect_node_environment import (
+    detect_node_environment,
+)
 from src.main_graph.subgraphs.discovery.nodes.install_deps import install_deps
 
 _BASE_STATE = {
     "job_id": "test-job",
     "repo_url": "https://github.com/test/repo",
-    "concern": "security",
-    "autopilot": False,
 }
 
 
@@ -66,17 +66,17 @@ async def test_clone_repo_failure_sets_discovery_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# inspect_repo
+# detect_node_environment
 # ---------------------------------------------------------------------------
 
 
-def test_inspect_repo_with_package_lock(tmp_path):
+def test_detect_node_environment_with_package_lock(tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"name": "myapp", "engines": {"node": ">=20"}})
     )
     (tmp_path / "package-lock.json").write_text("{}")
 
-    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+    result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
     assert result["detected_package_manager"] == "npm"
     assert result["has_lock_file"] is True
@@ -84,45 +84,45 @@ def test_inspect_repo_with_package_lock(tmp_path):
     assert "package-lock.json" in result["manifest_files"]
 
 
-def test_inspect_repo_with_pnpm_lock(tmp_path):
+def test_detect_node_environment_with_pnpm_lock(tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"name": "myapp", "packageManager": "pnpm@9.0.0"})
     )
     (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'")
 
-    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+    result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
     assert result["detected_package_manager"] == "pnpm"
     assert result["has_lock_file"] is True
     assert result["package_manager_version"] == "9.0.0"
 
 
-def test_inspect_repo_pnpm_v11_requires_node22(tmp_path):
+def test_detect_node_environment_pnpm_v11_requires_node22(tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"packageManager": "pnpm@11.0.0", "engines": {"node": ">=18"}})
     )
     (tmp_path / "pnpm-lock.yaml").write_text("")
 
-    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+    result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
     assert result["docker_image"] == "node:22-alpine"
 
 
-def test_inspect_repo_no_lock_file(tmp_path):
+def test_detect_node_environment_no_lock_file(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"name": "myapp"}))
 
-    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+    result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
     assert result["has_lock_file"] is False
     assert result["detected_package_manager"] == "npm"
 
 
-def test_inspect_repo_packagemanager_field_sets_pm_when_no_lock(tmp_path):
+def test_detect_node_environment_packagemanager_field_sets_pm_when_no_lock(tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"packageManager": "pnpm@8.1.0+sha512.abc"})
     )
 
-    result = inspect_repo({**_BASE_STATE, "repo_path": str(tmp_path)})
+    result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
     assert result["detected_package_manager"] == "pnpm"
     assert result["package_manager_version"] == "8.1.0"

@@ -9,39 +9,35 @@ from src.main_graph.constants import ANALYSIS
 from src.main_graph.subgraphs.analysis.state import AnalysisState
 from src.models.conductor import FindingNote
 from src.models.results import AnalysisResult
-from src.utils.config import settings
-from src.utils.severity import filter_by_min_severity
+from src.utils.severity import SEVERITY_ORDER, filter_by_min_severity
 
 logger = logging.getLogger(__name__)
 
 
 def dedup_findings(findings: list[FindingNote]) -> list[FindingNote]:
-    """Collapse byte-identical findings that a re-dispatched agent produced.
-
-    A whole-tree agent (npm audit, license rules) returns its full finding set
-    on every dispatch, so if the conductor re-dispatches it the same findings
-    appear more than once. Key on (dep_name, severity, description): identical
-    duplicates collapse, while genuinely distinct issues on the same package
-    (different description) are preserved. Order-stable, keeps first occurrence.
-
-    The key is provably safe for the whole-tree agents this bug is about, whose
-    output is deterministic non-LLM text (npm audit / the SPDX rules table) —
-    re-dispatch duplicates are byte-identical. It is theoretically weaker for
-    LLM-narrative agents (maintenance, web_research): two genuinely distinct
-    issues on one package at the same severity could produce identical
-    description text and be collapsed. That is low-probability and still a
-    strict improvement over the prior zero-dedup behavior; tightening the key
-    for LLM-sourced findings (e.g. an evidence/advisory signature) is a possible
-    follow-up if it is ever observed.
-    """
     seen: set[tuple[str, str, str]] = set()
-    result: list[FindingNote] = []
+    unique: list[FindingNote] = []
     for f in findings:
         key = (f.dep_name, f.severity, f.description)
         if key in seen:
             continue
         seen.add(key)
-        result.append(f)
+        unique.append(f)
+
+    groups: dict[str, list[FindingNote]] = {}
+    for f in unique:
+        groups.setdefault(f.dep_name, []).append(f)
+
+    result: list[FindingNote] = []
+    for group in groups.values():
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+        highest = max(group, key=lambda f: SEVERITY_ORDER.get(f.severity, 0))
+        description = "\n".join(f"{f.severity} - {f.description}" for f in group)
+        evidence = [e for f in group for e in f.evidence]
+        update = {"description": description, "evidence": evidence}
+        result.append(highest.model_copy(update=update))
     return result
 
 
@@ -55,7 +51,7 @@ async def save_analysis_result(state: AnalysisState, config: RunnableConfig) -> 
 
     all_findings = [f for b in bundles for f in b.findings]
     all_findings = dedup_findings(all_findings)
-    all_findings = filter_by_min_severity(all_findings, settings.risk_min_severity)
+    all_findings = filter_by_min_severity(all_findings)
 
     result = AnalysisResult(
         job_id=state["job_id"],

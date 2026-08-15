@@ -25,7 +25,6 @@ class AgentRole(StrEnum):
     IMPACT_ANALYSIS = "impact_analysis"
     REPORT_CRITIQUE = "report_critique"
     REMEDIATION_CLASSIFY = "remediation_classify"
-    REMEDIATION_INVESTIGATE = "remediation_investigate"
     REMEDIATION_PLAN = "remediation_plan"
     REMEDIATION_EXECUTION_DEEPAGENT = "remediation_execution_deepagent"
 

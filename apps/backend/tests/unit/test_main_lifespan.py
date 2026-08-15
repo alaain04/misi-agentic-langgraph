@@ -45,6 +45,29 @@ async def test_lifespan_raises_when_codegraph_image_broken():
 
 
 @pytest.mark.asyncio
+async def test_lifespan_raises_when_gh_image_broken():
+    from src.main import lifespan
+
+    mock_client = MagicMock()
+    mock_client.admin.command = AsyncMock(return_value={"ok": 1})
+
+    with (
+        patch("src.main.get_client", return_value=mock_client),
+        patch("src.main.DockerContainerAdapter") as mock_adapter_cls,
+    ):
+        mock_adapter_cls.return_value.run = AsyncMock(
+            side_effect=[
+                (0, "codegraph v1", ""),
+                (0, "Version: 0.71.2", ""),
+                (1, "", "no such image"),
+            ]
+        )
+        with pytest.raises(RuntimeError, match="gh"):
+            async with lifespan(MagicMock()):
+                pass
+
+
+@pytest.mark.asyncio
 async def test_lifespan_raises_when_mongo_unreachable():
     from src.main import lifespan
 

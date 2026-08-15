@@ -7,7 +7,6 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 
 from src.domain.ports.container_run_port import ContainerRunPort
-from src.main_graph.subgraphs.discovery.dependency_graph import dependents_of
 from src.main_graph.subgraphs.remediation.changelog import fetch_release_notes
 from src.main_graph.subgraphs.remediation.verify import verify_working_copy
 from src.main_graph.subgraphs.remediation.workspace import apply_bump
@@ -15,8 +14,13 @@ from src.models.remediation import RemediationOutcome
 
 
 def make_read_release_notes_tool(
-    repo_path: str, container: ContainerRunPort, docker_image: str
+    repo_path: str,
+    container: ContainerRunPort,
+    docker_image: str,
+    resolved_repos: dict[str, tuple[str, str] | None] | None = None,
 ):
+    resolved_repos = resolved_repos or {}
+
     @tool
     async def read_release_notes(package_name: str) -> dict:
         """Fetch recent GitHub release notes for an npm package, resolved
@@ -25,22 +29,14 @@ def make_read_release_notes_tool(
         upgrade before deciding whether a bump is safe, or whether code
         needs to change too."""
         return await fetch_release_notes(
-            package_name, repo_path, container, docker_image
+            package_name,
+            repo_path,
+            container,
+            docker_image,
+            resolved_repos.get(package_name),
         )
 
     return read_release_notes
-
-
-def make_dependents_of_tool(dependency_graph: dict):
-    @tool
-    def dependents_of_tool(package_name: str) -> list[str]:
-        """Return every package in this project's dependency tree that
-        depends on `package_name`, whether or not it has a flagged finding.
-        Structural only - does not confirm a declared version range still
-        holds after a bump; call `verify` for that."""
-        return dependents_of(dependency_graph, package_name)
-
-    return dependents_of_tool
 
 
 def make_bump_dependency_tool(work_dir: str):

@@ -22,18 +22,12 @@ def _install_command(pm: str, pm_version: str) -> str:
     if pm == "pnpm":
         return (
             f"cd /workspace && NO_UPDATE_NOTIFIER=1 npm install -g "
-            f"pnpm@{pm_version} && pnpm install"
+            f"pnpm@{pm_version} && pnpm install  --ignore-scripts"
         )
     return "cd /workspace && NO_UPDATE_NOTIFIER=1 npm install --ignore-scripts"
 
 
 def _lockfile_only_command(pm: str, pm_version: str) -> str | None:
-    """Command to force-generate a lock file without a full install.
-
-    Only npm and pnpm expose a clean, version-stable lockfile-only mode
-    (`--package-lock-only` / `--lockfile-only`). yarn Classic and Berry
-    disagree on the equivalent flag, so yarn has no fallback here.
-    """
     if pm == "npm":
         return (
             "cd /workspace && NO_UPDATE_NOTIFIER=1 npm install "
@@ -69,15 +63,15 @@ async def _run_with_peer_retry(
     return rc, out, err
 
 
-async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
+async def install_deps(state: DiscoveryState, config: RunnableConfig) -> None:
     """Install dependencies and update has_lock_file based on what was created."""
     svc = get_services(config)
     container: ContainerRunPort = svc["container"]
 
-    repo_path = state["repo_path"]
-    pm = state.get("detected_package_manager", "npm")
-    pm_version = state.get("package_manager_version", "latest")
-    docker_image = state.get("docker_image", "node:lts-alpine")
+    repo_path = state.get("repo_path")
+    pm = state.get("package_manager")
+    pm_version = state.get("package_manager_version")
+    docker_image = state.get("docker_node_image")
     volume = f"{repo_path}:/workspace"
 
     cmd = _install_command(pm, pm_version)
@@ -86,14 +80,10 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
     if rc != 0:
         logger.warning("install_deps: install failed rc=%d err=%s", rc, err[:300])
 
-    lock_file = _LOCK_FILE_NAMES.get(pm, "package-lock.json")
+    lock_file = _LOCK_FILE_NAMES.get(pm)
     lock_created = os.path.exists(os.path.join(repo_path, lock_file))
 
     if not lock_created:
-        # A full install can exit 0 without ever writing a lock file (e.g. an
-        # .npmrc disabling it). Force one explicitly so the dependency graph
-        # still gets transitive data instead of silently degrading every
-        # finding on this repo to direct-only detection.
         fallback_cmd = _lockfile_only_command(pm, pm_version)
         if fallback_cmd is not None:
             rc2, _out2, err2 = await container.run(
@@ -111,8 +101,3 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
             lock_created = os.path.exists(os.path.join(repo_path, lock_file))
 
     logger.info("install_deps: lock_created=%s", lock_created)
-    # This node only runs when the repo had NO committed lock file, so any lock
-    # (and thus the resulting dependency graph) was resolved against the live
-    # registry this run — it is NOT a pure function of the committed source and
-    # must not be cached indefinitely. save_prep_result reads this flag.
-    return {"has_lock_file": lock_created, "lockfile_generated": True}

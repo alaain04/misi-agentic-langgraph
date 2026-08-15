@@ -63,13 +63,9 @@ async def npm_audit(
     repo_path: str,
     container: ContainerRunPort,
     docker_image: str = _DEFAULT_IMAGE,
-    detected_package_manager: str = "npm",
+    package_manager: str = "npm",
 ) -> dict:
-    executable = (
-        detected_package_manager
-        if detected_package_manager in ("pnpm", "yarn")
-        else "npm"
-    )
+    executable = package_manager if package_manager in ("pnpm", "yarn") else "npm"
     try:
         stdout, _ = await _run_npm(
             ["audit", "--json"], repo_path, container, docker_image, executable

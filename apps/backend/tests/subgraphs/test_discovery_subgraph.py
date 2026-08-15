@@ -6,7 +6,7 @@ What is real:
 - save_prep_result (writes to real MongoDB via testcontainer)
 
 What is mocked:
-- container.run (no Docker needed for git clone / codegraph init)
+- container.run (no Docker needed for git clone)
 """
 
 from __future__ import annotations
@@ -62,7 +62,6 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
     assert prep.project_metadata["direct_dependencies_count"] == 4
     assert "lodash" in prep.dependency_graph.get("direct", {})
     assert "express" in prep.dependency_graph.get("direct", {})
-    assert prep.codegraph_ready is True
 
 
 @pytest.mark.asyncio

@@ -63,13 +63,14 @@ def build_execution_agent(
     container: ContainerRunPort,
     docker_image: str,
     package_manager: str,
+    resolved_repos: dict[str, tuple[str, str] | None] | None = None,
 ):
     """Compile the flat execution agent for one group. Callers invoke the
     returned agent's `.ainvoke` directly (see remediate_targets_node) -- it
     is not registered as a deepagents `subagents=[...]` entry, so nothing
     can dispatch it via `task()`."""
     tools = [
-        make_read_release_notes_tool(work_dir, container, docker_image),
+        make_read_release_notes_tool(work_dir, container, docker_image, resolved_repos),
         make_blast_radius_tool(work_dir, container, docker_image),
         make_search_code_tool(work_dir, container, docker_image),
         make_bump_dependency_tool(work_dir),

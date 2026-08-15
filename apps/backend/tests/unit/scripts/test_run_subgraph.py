@@ -30,9 +30,7 @@ def _args(**kwargs) -> argparse.Namespace:
 @pytest.mark.asyncio
 async def test_run_discovery_prints_prep_summary(capsys):
     fake_graph = MagicMock()
-    fake_graph.ainvoke = AsyncMock(
-        return_value={"prep_result_id": "prep-1", "codegraph_ready": True}
-    )
+    fake_graph.ainvoke = AsyncMock(return_value={"prep_result_id": "prep-1"})
     fake_dao = MagicMock()
     fake_dao.get_prep = AsyncMock(
         return_value=MagicMock(

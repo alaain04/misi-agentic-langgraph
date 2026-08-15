@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import uuid
@@ -42,6 +43,11 @@ from langchain_core.runnables import RunnableConfig
 
 # Ensure src is importable from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)-8s %(name)s: %(message)s",
+)
 
 
 async def _run_discovery(args) -> None:
@@ -82,11 +88,10 @@ async def _run_discovery(args) -> None:
     prep_id = result.get("prep_result_id")
     assert prep_id is not None
     print(f"[discovery] prep_result_id = {prep_id}")
-    print(f"[discovery] codegraph_ready = {result.get('codegraph_ready', False)}")
 
     prep = await dao.get_prep(prep_id)
     print("\n--- PrepResult ---")
-    print(f"  package_manager : {prep.detected_package_manager}")
+    print(f"  package_manager : {prep.package_manager}")
     direct_deps = list(prep.dependency_graph.get("direct", {}).keys())[:10]
     print(f"  direct deps     : {direct_deps}")
     print(f"  project_metadata: {prep.project_metadata}")

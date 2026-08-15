@@ -5,14 +5,14 @@ import logging
 from langchain_core.runnables import RunnableConfig
 
 from src.main_graph.config import get_services
-from src.main_graph.subgraphs.discovery.dependency_graph import (
+from src.main_graph.subgraphs.discovery.state import DiscoveryState, ProjectMetadata
+from src.models.results import PrepResult
+from src.utils.config import settings
+from src.utils.dependency_graph import (
     build_dependency_graph,
     count_dependencies,
     read_package_json,
 )
-from src.main_graph.subgraphs.discovery.state import DiscoveryState, ProjectMetadata
-from src.models.results import PrepResult
-from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
     svc = get_services(config)
     dao = svc["result_dao"]
     cache = svc.get("input_cache")
-    pm = state.get("detected_package_manager") or "unknown"
+    pm = state.get("package_manager") or "unknown"
     repo_path = state.get("repo_path", "")
     repo_url = state.get("repo_url", "")
     commit_sha = state.get("commit_sha") or ""
@@ -59,12 +59,11 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         repo_path=repo_path,
         project_metadata=dict(metadata),
         manifest_files=state.get("manifest_files") or [],
-        detected_package_manager=pm,
+        package_manager=pm,
         docker_image=docker_image,
         repo_url=repo_url,
         commit_sha=commit_sha,
         dependency_graph=dep_graph,
-        codegraph_ready=state.get("codegraph_ready") or False,
     )
     prep_result_id = await dao.save_prep(result)
     logger.info("save_prep_result: saved prep_result_id=%s", prep_result_id)

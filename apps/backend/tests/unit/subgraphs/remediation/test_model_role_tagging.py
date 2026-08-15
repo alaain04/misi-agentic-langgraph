@@ -11,11 +11,6 @@ def test_remediation_classify_tagged_correctly():
     assert "agent_role:remediation_classify" in tags
 
 
-def test_remediation_investigate_tagged_correctly():
-    tags = _tags_of("src.main_graph.subgraphs.remediation.investigate")
-    assert "agent_role:remediation_investigate" in tags
-
-
 def test_remediation_plan_tagged_correctly():
     tags = _tags_of("src.main_graph.subgraphs.remediation.plan")
     assert "agent_role:remediation_plan" in tags

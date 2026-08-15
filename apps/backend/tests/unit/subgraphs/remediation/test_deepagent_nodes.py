@@ -82,9 +82,7 @@ def test_assemble_remediations_carries_finding_summaries_through_outcome_branch(
             target_dep="lodash", addresses=["lodash"], finding_summaries=[fs]
         ).model_dump()
     }
-    plans = {
-        "lodash": MigrationPlan(target_dep="lodash", tier_hint="r1").model_dump()
-    }
+    plans = {"lodash": MigrationPlan(target_dep="lodash", tier_hint="r1").model_dump()}
     outcomes = {"lodash": RemediationOutcome(to_range="^4.17.21").model_dump()}
     out = _assemble_remediations(targets, plans=plans, outcomes=outcomes, omit=set())
     assert out["lodash"]["finding_summaries"] == [fs.model_dump()]
@@ -521,6 +519,7 @@ async def test_remediate_targets_node_retry_synthesizes_unknown_companion_target
         "finding_summaries": [],
         "current_range": "^2.0.0",
         "latest_version": None,
+        "resolved_repo": None,
         "tier": None,
     }
     # Known target keeps its real addresses/current_range untouched.
@@ -671,7 +670,9 @@ async def test_remediate_targets_node_group_failure_cancels_sibling_groups():
             raise
         return {"outcomes": {}}
 
-    def _build_agent(work_dir, container, docker_image, package_manager):
+    def _build_agent(
+        work_dir, container, docker_image, package_manager, resolved_repos=None
+    ):
         if not sibling_cancelled.is_set() and _build_agent.calls == 0:
             _build_agent.calls += 1
             return MagicMock(
@@ -1624,8 +1625,7 @@ def test_pr_title_and_body_bump_case():
     assert "please review before merging" not in body
     assert "| lodash | bump | `^4.17.11` -> `^4.17.21` | - |" in body
     assert (
-        "| lodash | high | known prototype pollution vulnerability | lodash |"
-        in body
+        "| lodash | high | known prototype pollution vulnerability | lodash |" in body
     )
     assert "- [x] Install" in body
     assert "- [x] Tests" in body

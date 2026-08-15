@@ -16,21 +16,15 @@ class DiscoveryState(TypedDict):
     # Inputs
     job_id: str
     repo_url: str
-    concern: str
-    autopilot: bool
 
     # Set by nodes
     repo_path: NotRequired[str]
     commit_sha: NotRequired[str]
-    manifest_files: NotRequired[list[str]]
-    detected_package_manager: NotRequired[str]
+    package_manager: NotRequired[str]
     package_manager_version: NotRequired[str]
-    has_lock_file: NotRequired[bool]
-    lockfile_generated: NotRequired[bool]
-    docker_image: NotRequired[str]
-
-    # New: set by index_codegraph
-    codegraph_ready: NotRequired[bool]
+    node_version: NotRequired[str]
+    docker_node_image: NotRequired[str]
+    manifest_files: NotRequired[list[str]]
 
     # Outputs
     discovery_error: NotRequired[str | None]

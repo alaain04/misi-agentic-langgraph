@@ -3,8 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
-from src.main_graph.subgraphs.discovery.dependency_graph import (
+from apps.backend.src.utils.dependency_graph import (
     build_dependency_graph,
     dependents_of,
     direct_dependents,

@@ -10,7 +10,7 @@ from src.main_graph.subgraphs.remediation.changelog import (
     _tag_version,
     fetch_release_notes,
     fetch_release_notes_between,
-    resolve_latest_version,
+    resolve_package_info,
 )
 
 
@@ -20,11 +20,21 @@ class FakeContainer:
     def __init__(self, results):
         self._results = list(results)
         self.commands = []
+        self.calls = []
 
     async def run(
         self, image, command, volume=None, run_as_root=False, secret_env=None
     ):
         self.commands.append(command)
+        self.calls.append(
+            {
+                "image": image,
+                "command": command,
+                "volume": volume,
+                "run_as_root": run_as_root,
+                "secret_env": secret_env,
+            }
+        )
         return self._results.pop(0)
 
 
@@ -39,18 +49,20 @@ async def test_fetch_release_notes_returns_unavailable_when_repo_unresolved():
 
 @pytest.mark.asyncio
 async def test_fetch_release_notes_success():
-    container = FakeContainer([(0, "git+https://github.com/eslint/eslint.git\n", "")])
     releases_json = json.dumps(
         [{"tag_name": "v9.0.0", "name": "9.0.0", "body": "breaking: flat config"}]
-    ).encode()
-    fake_proc = MagicMock()
-    fake_proc.communicate = AsyncMock(return_value=(releases_json, b""))
-    fake_proc.returncode = 0
-
+    )
+    container = FakeContainer(
+        [
+            (0, "git+https://github.com/eslint/eslint.git\n", ""),
+            (0, releases_json, ""),
+        ]
+    )
     with patch(
-        "src.main_graph.subgraphs.remediation.changelog.asyncio.create_subprocess_exec",
-        AsyncMock(return_value=fake_proc),
-    ):
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = "ghp_test"
         result = await fetch_release_notes(
             "eslint", "/repo", container, "node:lts-alpine"
         )
@@ -58,6 +70,74 @@ async def test_fetch_release_notes_success():
     assert result["available"] is True
     assert result["repository"] == "eslint/eslint"
     assert result["releases"][0]["tag"] == "v9.0.0"
+    # Second call is the containerized gh api lookup, not a host subprocess.
+    assert container.calls[1]["image"] == "gh-cli:latest"
+    assert "gh api" in container.calls[1]["command"]
+    assert container.calls[1]["secret_env"] == {"GH_TOKEN": "ghp_test"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_uses_resolved_repo_skips_npm_view():
+    """When the caller already resolved (owner, repo) -- e.g.
+    classify_targets_node via resolve_package_info -- fetch_release_notes
+    must not spawn a second npm view container for the same package."""
+    releases_json = json.dumps([])
+    container = FakeContainer([(0, releases_json, "")])
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes(
+            "eslint",
+            "/repo",
+            container,
+            "node:lts-alpine",
+            resolved_repo=("eslint", "eslint"),
+        )
+
+    assert result["available"] is True
+    assert len(container.calls) == 1
+    assert "gh api" in container.calls[0]["command"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_omits_secret_env_without_token():
+    container = FakeContainer(
+        [
+            (0, "git+https://github.com/eslint/eslint.git\n", ""),
+            (0, "[]", ""),
+        ]
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        await fetch_release_notes("eslint", "/repo", container, "node:lts-alpine")
+
+    assert container.calls[1]["secret_env"] is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_release_notes_gh_failure_reports_unavailable():
+    container = FakeContainer(
+        [
+            (0, "git+https://github.com/eslint/eslint.git\n", ""),
+            (1, "", "HTTP 404: Not Found"),
+        ]
+    )
+    with patch(
+        "src.main_graph.subgraphs.remediation.changelog.settings"
+    ) as mock_settings:
+        mock_settings.gh_docker_image = "gh-cli:latest"
+        mock_settings.github_token = ""
+        result = await fetch_release_notes(
+            "eslint", "/repo", container, "node:lts-alpine"
+        )
+
+    assert result["available"] is False
+    assert "404" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -133,38 +213,78 @@ async def test_fetch_between_unparseable_bounds_returns_unfiltered():
 
 
 @pytest.mark.asyncio
-async def test_resolve_latest_version_returns_registry_version():
-    container = MagicMock()
-    container.run = AsyncMock(return_value=(0, "4.17.21\n", ""))
+async def test_resolve_package_info_returns_version_and_repo_from_one_call():
+    container = FakeContainer(
+        [
+            (
+                0,
+                json.dumps(
+                    {
+                        "version": "4.17.21",
+                        "repository.url": "git+https://github.com/lodash/lodash.git",
+                    }
+                ),
+                "",
+            )
+        ]
+    )
 
-    result = await resolve_latest_version(
+    version, repo = await resolve_package_info(
         "lodash", "/tmp/repo", container, "node:lts-alpine"
     )
 
-    assert result == "4.17.21"
+    assert version == "4.17.21"
+    assert repo == ("lodash", "lodash")
+    # Exactly one npm view call for both facts.
+    assert len(container.calls) == 1
+    assert "version" in container.calls[0]["command"]
+    assert "repository.url" in container.calls[0]["command"]
 
 
 @pytest.mark.asyncio
-async def test_resolve_latest_version_none_on_npm_failure():
-    container = MagicMock()
-    container.run = AsyncMock(return_value=(1, "", "E404 not found"))
+async def test_resolve_package_info_handles_missing_repository_field():
+    container = FakeContainer([(0, json.dumps({"version": "1.3.0"}), "")])
 
-    result = await resolve_latest_version(
+    version, repo = await resolve_package_info(
+        "no-repo-pkg", "/tmp/repo", container, "node:lts-alpine"
+    )
+
+    assert version == "1.3.0"
+    assert repo is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_package_info_none_on_npm_failure():
+    container = FakeContainer([(1, "", "npm error 404")])
+
+    version, repo = await resolve_package_info(
         "ghost-pkg", "/tmp/repo", container, "node:lts-alpine"
     )
 
-    assert result is None
+    assert version is None
+    assert repo is None
 
 
 @pytest.mark.asyncio
-async def test_resolve_latest_version_none_when_container_raises():
-    """An unreachable registry must degrade to "unknown", never to a value
-    that would be read as "no upgrade exists"."""
-    container = MagicMock()
-    container.run = AsyncMock(side_effect=RuntimeError("docker down"))
+async def test_resolve_package_info_none_on_unparseable_json():
+    container = FakeContainer([(0, "not json", "")])
 
-    result = await resolve_latest_version(
+    version, repo = await resolve_package_info(
         "lodash", "/tmp/repo", container, "node:lts-alpine"
     )
 
-    assert result is None
+    assert version is None
+    assert repo is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_package_info_none_when_container_raises():
+    container = MagicMock()
+    container.run = AsyncMock(side_effect=RuntimeError("docker down"))
+
+    version, repo = await resolve_package_info(
+        "lodash", "/tmp/repo", container, "node:lts-alpine"
+    )
+
+    assert version is None
+    assert repo is None

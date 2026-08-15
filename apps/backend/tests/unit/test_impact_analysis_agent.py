@@ -19,7 +19,6 @@ def _prep(**overrides) -> PrepResult:
         manifest_files=[],
         detected_package_manager="npm",
         dependency_graph={},
-        codegraph_ready=True,
     )
     return PrepResult(**{**defaults, **overrides})
 

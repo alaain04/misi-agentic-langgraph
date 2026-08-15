@@ -5,19 +5,16 @@ the flatten-planning-execution rework
 Requires Docker. Run with:
     uv run pytest tests/subgraphs/test_remediation_subgraph.py -v
 
-The subgraph is now six nodes:
-    START -> classify_targets_node -> investigate_node ->
-    build_migration_plan_node -> remediate_targets_node ->
-    group_and_verify_gate -> (route: remediate_targets_node |
-    pr_and_persist_node) -> END
+The subgraph is now five nodes:
+    START -> classify_targets_node -> build_migration_plan_node ->
+    remediate_targets_node -> group_and_verify_gate -> (route:
+    remediate_targets_node | pr_and_persist_node) -> END
 
 What is real:
-- LangGraph wiring across all six nodes, including the retry loop back from
+- LangGraph wiring across all five nodes, including the retry loop back from
   `group_and_verify_gate` to `remediate_targets_node` (`build_migration_plan_node`
   runs exactly once per job -- retries never revisit it, they reuse the
   existing `migration_plans` state, per spec D3).
-- `investigate_node`'s own fan-out/state-merge logic (only its leaf
-  `investigate_target` call is stubbed -- see below).
 - `remediate_targets_node`'s plan/outcome -> Remediation conversion
   (`_assemble_remediations`), `connected_groups`, `group_and_verify_gate`'s
   real deterministic verify/retry loop (`replay_and_verify_group` against
@@ -27,11 +24,10 @@ What is real:
 What is mocked, at the two boundaries this architecture now has (no real
 LLM, no real `deepagents` machinery, no `gh`/network calls anywhere in this
 file):
-- `classify.classify_target` (stubbed to always return tier="r1" -- tier
-  classification itself is covered by test_classify.py).
-- `investigate.investigate_target` (stubbed to a fixed, deterministic
-  TargetInvestigation with `migration_needed=False` -- covered for real by
-  test_investigate.py).
+- `classify.classify_target` (stubbed to always return tier="r1" plus a
+  fixed, deterministic TargetInvestigation with `migration_needed=False` --
+  classification and the release-digest it now produces in the same call
+  are both covered for real by test_classify.py).
 - `plan.build_plans_for_targets` -- the ONE batched structured-output
   planning call. Patched at both `plan.build_plans_for_targets` (used by
   `build_migration_plan_node`, the initial batch) and
@@ -89,40 +85,30 @@ pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------
-# Deterministic stubs for the two leaf LLM call sites upstream of planning
-# (classify_target, investigate_target) -- neither is exercised by these
-# tests, they're just containment so nothing here ever reaches a real LLM
-# or the `gh` CLI. Both are covered for real by test_classify.py and
-# test_investigate.py respectively.
+# Deterministic stub for the one leaf LLM call site upstream of planning
+# (classify_target, which now produces both the tier and the release digest
+# in a single call) -- not exercised by these tests, just containment so
+# nothing here ever reaches a real LLM, `gh`, or codegraph. Covered for real
+# by test_classify.py.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
 def _classify_everything_as_r1():
+    """Yields the AsyncMock itself (not just the patch context) so tests can
+    assert it was actually called -- proving classify_targets_node's merged
+    classify+investigate step really ran as a real step in the compiled
+    graph, not merely that downstream nodes tolerate a missing
+    `investigations` channel."""
     from src.main_graph.subgraphs.remediation.classify import TargetClassification
 
-    with patch(
-        "src.main_graph.subgraphs.remediation.classify.classify_target",
-        AsyncMock(
-            return_value=TargetClassification(
-                tier="r1", rationale="test fixture - always dispatchable"
-            )
-        ),
+    async def _fake_classify_target(
+        target, repo_path, container, docker_image, dependency_graph, resolved_repo=None
     ):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def _investigate_without_network_or_llm():
-    """Yields the AsyncMock itself (not just the patch context) so tests
-    can assert it was actually called -- proving `investigate_node` really
-    ran as a real step in the compiled graph, not merely that downstream
-    nodes tolerate a missing `investigations` channel."""
-
-    async def _fake_investigate_target(
-        target, repo_path, dependency_graph, container, docker_image
-    ):
-        return TargetInvestigation(
+        classification = TargetClassification(
+            tier="r1", rationale="test fixture - always dispatchable"
+        )
+        investigation = TargetInvestigation(
             target_dep=target.target_dep,
             dependents=[],
             call_sites=[],
@@ -132,11 +118,10 @@ def _investigate_without_network_or_llm():
                 migration_needed=False,
             ),
         )
+        return classification, investigation
 
-    mock = AsyncMock(side_effect=_fake_investigate_target)
-    with patch(
-        "src.main_graph.subgraphs.remediation.investigate.investigate_target", mock
-    ):
+    mock = AsyncMock(side_effect=_fake_classify_target)
+    with patch("src.main_graph.subgraphs.remediation.classify.classify_target", mock):
         yield mock
 
 
@@ -299,14 +284,14 @@ class _FakeGitPR:
 
 
 async def test_pure_bump_target_ships_one_fixed_pr(
-    tmp_path, result_dao, subgraph_config, _investigate_without_network_or_llm
+    tmp_path, result_dao, subgraph_config, _classify_everything_as_r1
 ):
     """A single, uncoupled target with no requires signal: one batched
     planning call commits a bump plan + outcome, the deterministic gate
     verifies green against the container mock, and exactly one PR labeled
-    "bump" ships. Also asserts `investigate_node` itself actually ran as a
-    real step of the compiled graph (not just that downstream nodes
-    tolerate a missing `investigations` channel)."""
+    "bump" ships. Also asserts classify_targets_node's merged classify step
+    itself actually ran as a real step of the compiled graph (not just that
+    downstream nodes tolerate a missing `investigations` channel)."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     repo_path = _write_repo(tmp_path, {"leftpad": "1.0.0"})
     prep = _seed_prep(job_id, repo_path, {"leftpad": "1.0.0"})
@@ -354,12 +339,12 @@ async def test_pure_bump_target_ships_one_fixed_pr(
     assert plan_calls == [{"leftpad"}]
     assert exec_calls == [["leftpad"]]
 
-    # investigate_node is a real step in the compiled graph -- it must have
-    # actually fanned out to investigate_target for "leftpad" before
-    # build_migration_plan_node's (mocked) planning call ever ran.
-    _investigate_without_network_or_llm.assert_awaited_once()
-    investigated_target = _investigate_without_network_or_llm.await_args.args[0]
-    assert investigated_target.target_dep == "leftpad"
+    # classify_targets_node's merged classify+investigate step is a real
+    # step in the compiled graph -- it must have actually run for "leftpad"
+    # before build_migration_plan_node's (mocked) planning call ever ran.
+    _classify_everything_as_r1.assert_awaited_once()
+    classified_target = _classify_everything_as_r1.await_args.args[0]
+    assert classified_target.target_dep == "leftpad"
 
 
 async def test_requires_signal_pulls_in_a_non_finding_companion(
