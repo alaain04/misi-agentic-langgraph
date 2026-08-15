@@ -40,6 +40,20 @@ Additionally, `_format_targets` (`plan.py:69-83`) never includes
 already computes it — a pre-existing gap this change closes since it
 directly affects whether the new node's output is used.
 
+**Known bug in the underlying fetch (fixed only for the new node, see
+D4):** `fetch_release_notes`'s `gh api ... --paginate -q '.[:20]'`
+(`changelog.py:106-108`) does not mean "first page, truncated to 20." `gh`'s
+`--paginate` follows every `Link: rel="next"` header and concatenates *all*
+pages of an array response before running the `-q` filter once — so this
+command always fetches a package's *entire* release history, then keeps the
+20 most recent. `fetch_release_notes_between`'s window filter
+(`_tag_in_window`) runs *after* that slice, not before: if the requested
+upgrade window isn't among the 20 *most recent* releases (a project jumping
+several majors behind a package with active recent releases), the windowed
+result comes back empty — not "unfiltered fallback," genuinely empty — and
+`classify_target`'s LLM sees no evidence of any breaking change. This is a
+real, pre-existing correctness gap, not hypothetical.
+
 **Known prerequisite bug (fixed as part of this work, not a design
 decision):** `classify.py` on disk currently has an uncommitted, broken
 in-flight edit — `_classify_bounded` calls `classify_target` with a 5th
@@ -86,11 +100,27 @@ usable `targets`/`investigations` pair.
   `classify.py`'s `_MAX_CONCURRENT_CLASSIFICATIONS`.
 
 - **D4 — Two tools.**
-  - `get_release_notes(package_name)` — thin wrapper around the existing
-    `fetch_release_notes_between`, passing the `resolved_repo` already
-    resolved by `classify_targets_node` (via `RemediationTarget.resolved_repo`)
-    to avoid a second `npm view` container spawn, exactly like the execution
-    agent's `read_release_notes` tool already does.
+  - `get_release_notes(package_name, page=1)` — NOT a wrapper around
+    `fetch_release_notes_between` (see the pagination bug in Context). Fetches
+    one page directly (`gh api 'repos/{owner}/{repo}/releases?per_page=100&page={page}'`,
+    no `--paginate`), passing the `resolved_repo` already resolved by
+    `classify_targets_node` to avoid a second `npm view` spawn (same dedup the
+    execution agent's `read_release_notes` tool already does). Applies the
+    existing `_tag_in_window` filter to just that page and returns the
+    windowed subset plus `has_more`: true only when the page was full (hit
+    `per_page`) *and* its oldest tag is still above the window floor — i.e.
+    there's reason to believe an older, still-relevant release exists on the
+    next page. The agent calls again with `page=2`, etc. when it wants more
+    evidence; a hard cap inside the tool (independent of the loop's own
+    iteration cap) refuses any `page` beyond 10 (~1000 releases) so a
+    misbehaving loop can't runaway-fetch. Because deciding "do I have enough"
+    is now the agent's call instead of a blind top-20 slice, this closes the
+    correctness gap for this node — for r1/r2 targets specifically.
+    `classify_target`'s own tier-decision call keeps using
+    `fetch_release_notes_between` unchanged (accepted trade-off, see Out of
+    scope): a wrong r1-vs-r2 label doesn't change `plan.py`'s task shape,
+    only `migration_needed` does, and that's this node's output, not
+    classify's.
   - `fetch_doc(url)` — new. Fetches an arbitrary URL a release body links to
     (a `MIGRATION.md`, `UPGRADING.md`, or external guide). Hardened against
     SSRF given the container runs `run_as_root`: resolve the URL's host
@@ -152,12 +182,17 @@ full dict. `graph.py` gains one edge:
 - Any change to the execution agent's own `read_release_notes` tool
   (`deepagent/tools.py`) — it already does on-demand release-note fetching
   during execution and is untouched by this spec.
-- Raising the 20-release page cap or the 2000-char per-release body
-  truncation in `fetch_release_notes_between` — D1's placement means this
-  node runs only for r1/r2 targets where the existing window is normally
-  small; pagination was considered and dropped in favor of the
-  linked-docs tool (D4), which covers the actual observed gap (notes
-  pointing at external guides, not notes being too long to fit).
+- Fixing `fetch_release_notes`/`fetch_release_notes_between`'s pagination
+  gap (see Context) for `classify_target`'s own tier-decision call.
+  `get_release_notes` (D4) fixes it for the new node only. Leaving
+  `classify_target` on the old behavior is an accepted trade-off: the
+  worst case is a wrong r1-vs-r2 label, which doesn't change `plan.py`'s
+  task shape (only `migration_needed`, produced by the new node, does) —
+  only an r3 misclassification would matter, and that comes from
+  `_has_no_upgrade`'s version comparison, not release-note content.
+- The 2000-char per-release body truncation and the per-page `per_page=100`
+  cap in `get_release_notes` — kept at their current/analogous values;
+  not raised as part of this change.
 - A domain allowlist for `fetch_doc` instead of IP-range blocking — IP-range
   blocking was chosen so legitimate guides hosted anywhere aren't missed;
   an allowlist can be layered on later if abuse is observed.
@@ -178,6 +213,11 @@ full dict. `graph.py` gains one edge:
   private/loopback/link-local/metadata-range URL in a unit test, and a unit
   test confirms `GH_TOKEN` is only attached for `github.com`/
   `raw.githubusercontent.com` hosts.
+- `get_release_notes` unit tests cover: a window fully covered by page 1
+  (`has_more=False`, single `gh api` call), a window whose releases only
+  appear on page 2 (`has_more=True` on page 1, agent's second call with
+  `page=2` finds the window), and the page-10 hard cap being enforced
+  regardless of `has_more`.
 - A target whose release notes link to an external migration guide produces
   a non-empty `migration_guide` sourced from that guide's content in an
   integration-style test with mocked HTTP/container calls.
