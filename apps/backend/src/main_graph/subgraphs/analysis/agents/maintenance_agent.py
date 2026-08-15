@@ -4,11 +4,7 @@ from src.db.input_cache import InputCacheDAO
 from src.domain.ports.container_run_port import ContainerRunPort
 from src.main_graph.subgraphs.analysis.agents.base_agent import BaseAgent
 from src.main_graph.subgraphs.discovery.dependency_graph import is_direct
-from src.main_graph.tools.external_api import (
-    high_risk_packages,
-    package_reputation,
-    unmaintained_packages,
-)
+from src.main_graph.tools.external_api import package_health_data
 from src.models.results import AgentDispatch, EvidenceBundle, PrepResult
 
 
@@ -16,9 +12,8 @@ class MaintenanceAgent(BaseAgent):
     agent_type = "maintenance_agent"
     concern_types = frozenset({"maintenance"})
     description = (
-        "Assesses package health and abandonment risk by checking maintenance "
-        "status, download trends, "
-        "and known high-risk packages. Use when concern involves outdated, "
+        "Assesses package health and abandonment risk by checking release "
+        "recency and weekly download volume. Use when concern involves outdated, "
         "unmaintained, or deprecated packages."
     )
     system_prompt = """
@@ -30,22 +25,30 @@ class MaintenanceAgent(BaseAgent):
         {tool_descriptions}
 
         Investigation strategy:
-        1. Call unmaintained_packages to identify packages with no recent commits or \
-no active maintainer.
-        2. Call high_risk_packages to flag packages that are very new (<90 days) or \
-abandoned (>2 years without a release).
-        3. For packages flagged by either tool, call package_reputation to get \
-download trends and community signals.
-        4. A package is a maintenance risk if: last commit > 12 months ago AND has \
-open issues with no response, OR total weekly downloads dropped > 50% over 6 months.
-        5. Record the package name, last release date, and risk rationale in each \
-FindingNote.
-
-        Rules on maintainer count:
-        - A single-maintainer package is NOT, by itself, a finding. Most healthy,
-          widely-used npm packages (lodash, many @nestjs/* scopes, etc.) have one
-          maintainer. Never create or justify a finding using maintainer count alone
-          — only the recency/activity criteria in steps 2 and 4 above count as risk.
+        1. If specific packages are named above ("Packages to focus on"), call \
+package_health_data(packages=<that list>) first so you have direct data for \
+exactly those packages. Otherwise (or in addition), call package_health_data() \
+with no arguments for a broad scan of the repo's first several direct \
+dependencies.
+        2. Check `checked` against `total_deps` in each result. If `checked` < \
+`total_deps`, more direct dependencies exist than were scanned -- if any \
+package named in "Packages to focus on" is missing from the result's \
+`packages`/`errors`, call package_health_data(packages=[<missing names>]) \
+to fetch them directly; you are not limited to the default scan's cap.
+        3. For each package, weigh release recency against weekly_downloads \
+before deciding it is a risk:
+           - Strong current adoption overrides staleness alone. A package \
+with weekly_downloads at or above roughly 1,000 is meaningfully in active \
+use — many mature, stable libraries go a long time between releases \
+without that meaning anything is wrong. Never flag such a package as a \
+maintenance risk based on days_since_last_release alone.
+           - A package IS a maintenance risk if: days_since_last_release is \
+more than 365 AND weekly_downloads is low (below roughly 1,000) or \
+missing/errored — OR days_since_created is less than 90 AND \
+weekly_downloads is low or missing/errored.
+        4. Record the package name, days_since_last_release, weekly_downloads, \
+and risk rationale in each FindingNote so the downloads-vs-staleness \
+tradeoff is visible to a reviewer.
 
         Scope:
         - Only assess DIRECT dependencies (declared in package.json). Do not
@@ -54,6 +57,9 @@ FindingNote.
 
         Rules:
         - Never repeat a tool call with the same arguments.
+        - If your data for any focused package is incomplete (missing from a \
+result, or listed in `errors`) after step 2, note this in your summary and \
+cap confidence at 0.8 rather than treating it as resolved.
         - Set finalize=true when you have assessed all flagged packages.
         - After {max_iter} iterations, set finalize=true regardless.
         - confidence > 0.8: you have data for all focused packages.
@@ -62,7 +68,7 @@ FindingNote.
         """
 
     def _agent_tools(self) -> list:
-        return [unmaintained_packages, high_risk_packages, package_reputation]
+        return [package_health_data]
 
     async def run(
         self,
