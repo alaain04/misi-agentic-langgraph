@@ -5,13 +5,14 @@ the flatten-planning-execution rework
 Requires Docker. Run with:
     uv run pytest tests/subgraphs/test_remediation_subgraph.py -v
 
-The subgraph is now five nodes:
-    START -> classify_targets_node -> build_migration_plan_node ->
-    remediate_targets_node -> group_and_verify_gate -> (route:
-    remediate_targets_node | pr_and_persist_node) -> END
+The subgraph is now six nodes:
+    START -> select_targets_node -> research_releases_node ->
+    build_migration_plan_node -> remediate_targets_node ->
+    group_and_verify_gate -> (route: remediate_targets_node |
+    pr_and_persist_node) -> END
 
 What is real:
-- LangGraph wiring across all five nodes, including the retry loop back from
+- LangGraph wiring across all six nodes, including the retry loop back from
   `group_and_verify_gate` to `remediate_targets_node` (`build_migration_plan_node`
   runs exactly once per job -- retries never revisit it, they reuse the
   existing `migration_plans` state, per spec D3).
@@ -21,13 +22,23 @@ What is real:
   the container mock), `pr_and_persist_node`'s PR-title/consent gating, and
   real MongoDB persistence (`result_dao`, via the session testcontainer).
 
-What is mocked, at the two boundaries this architecture now has (no real
-LLM, no real `deepagents` machinery, no `gh`/network calls anywhere in this
-file):
-- `classify.classify_target` (stubbed to always return tier="r1" plus a
-  fixed, deterministic TargetInvestigation with `migration_needed=False` --
-  classification and the release-digest it now produces in the same call
-  are both covered for real by test_classify.py).
+What is mocked, at the boundaries this architecture now has (no real LLM,
+no real `deepagents` machinery, no real `npm`/`gh`/codegraph/network calls
+anywhere in this file):
+- `select_targets.resolve_package_info`, `select_targets.compute_blast_radius`,
+  and `select_targets._index_codegraph` -- `select_targets_node`'s three I/O
+  boundaries (npm registry lookup, codegraph blast-radius query, codegraph
+  indexing), stubbed to a deterministic "nothing resolved, no blast-radius
+  data" result so the node's own selection/anchoring/r3-tier logic still
+  runs for real against real findings and a real dependency graph (covered
+  in full by test_select_targets.py).
+- `release_research._llm` -- the ONE structured-output call
+  `research_releases_node`'s loop makes per target, stubbed to
+  immediately finalize with `migration_needed=False` (a clean bump, no
+  breaking changes) so the loop's real control flow -- one iteration,
+  straight to finalize, `ReleaseDigest` assembly -- still runs as a real
+  step (the multi-iteration/tool-calling path is covered for real by
+  test_release_research.py).
 - `plan.build_plans_for_targets` -- the ONE batched structured-output
   planning call. Patched at both `plan.build_plans_for_targets` (used by
   `build_migration_plan_node`, the initial batch) and
@@ -65,64 +76,67 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.main_graph.subgraphs.remediation.deepagent import nodes as deepagent_nodes
 from src.main_graph.subgraphs.remediation.graph import build_remediation_subgraph
-from src.models.conductor import EvidenceRef, FindingNote
-from src.models.remediation import (
-    MigrationPlan,
-    MigrationTask,
-    ReleaseDigest,
-    RemediationOutcome,
-    TargetInvestigation,
+from src.main_graph.subgraphs.remediation.release_research import (
+    ReleaseResearchDecision,
 )
+from src.models.conductor import EvidenceRef, FindingNote
+from src.models.remediation import MigrationPlan, MigrationTask, RemediationOutcome
 from src.models.results import AnalysisResult, PrepResult
 
 pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------
-# Deterministic stub for the one leaf LLM call site upstream of planning
-# (classify_target, which now produces both the tier and the release digest
-# in a single call) -- not exercised by these tests, just containment so
-# nothing here ever reaches a real LLM, `gh`, or codegraph. Covered for real
-# by test_classify.py.
+# Deterministic stubs for select_targets_node's and research_releases_node's
+# I/O/LLM boundaries -- not exercised by these tests, just containment so
+# nothing here ever reaches a real npm/gh/codegraph/LLM call. Covered for
+# real by test_select_targets.py and test_release_research.py.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _classify_everything_as_r1():
-    """Yields the AsyncMock itself (not just the patch context) so tests can
-    assert it was actually called -- proving classify_targets_node's merged
-    classify+investigate step really ran as a real step in the compiled
-    graph, not merely that downstream nodes tolerate a missing
-    `investigations` channel."""
-    from src.main_graph.subgraphs.remediation.classify import TargetClassification
-
-    async def _fake_classify_target(
-        target, repo_path, container, docker_image, dependency_graph, resolved_repo=None
+def _select_and_research_everything_as_clean_bump():
+    """Stubs select_targets_node's and research_releases_node's I/O/LLM
+    boundaries so both run for real as compiled graph steps (selection
+    logic, tier check, the research loop's finalize path) without ever
+    reaching a real npm/gh/codegraph/LLM call. Yields the resolve mock so
+    tests can assert it was actually invoked."""
+    resolve_mock = AsyncMock(return_value=(None, None))
+    llm_mock = MagicMock()
+    llm_mock.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=ReleaseResearchDecision(
+            tool_calls=[],
+            finalize=True,
+            migration_needed=False,
+            migration_guide="",
+            breaking_changes=[],
+            reasoning="test fixture - always a clean bump",
+        )
+    )
+    with (
+        patch(
+            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            resolve_mock,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.select_targets.compute_blast_radius",
+            AsyncMock(return_value={"available": False}),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.select_targets._index_codegraph",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.release_research._llm", llm_mock
+        ),
     ):
-        classification = TargetClassification(
-            tier="r1", rationale="test fixture - always dispatchable"
-        )
-        investigation = TargetInvestigation(
-            target_dep=target.target_dep,
-            dependents=[],
-            call_sites=[],
-            release=ReleaseDigest(
-                from_version=target.current_range,
-                to_version=None,
-                migration_needed=False,
-            ),
-        )
-        return classification, investigation
-
-    mock = AsyncMock(side_effect=_fake_classify_target)
-    with patch("src.main_graph.subgraphs.remediation.classify.classify_target", mock):
-        yield mock
+        yield resolve_mock
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +263,7 @@ def _seed_prep(job_id: str, repo_path: str, direct_deps: dict[str, str]) -> Prep
             "transitive_dependencies_count": 0,
         },
         manifest_files=["package.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": direct_deps, "packages": {}},
     )
 
@@ -284,14 +298,17 @@ class _FakeGitPR:
 
 
 async def test_pure_bump_target_ships_one_fixed_pr(
-    tmp_path, result_dao, subgraph_config, _classify_everything_as_r1
+    tmp_path,
+    result_dao,
+    subgraph_config,
+    _select_and_research_everything_as_clean_bump,
 ):
     """A single, uncoupled target with no requires signal: one batched
     planning call commits a bump plan + outcome, the deterministic gate
     verifies green against the container mock, and exactly one PR labeled
-    "bump" ships. Also asserts classify_targets_node's merged classify step
-    itself actually ran as a real step of the compiled graph (not just that
-    downstream nodes tolerate a missing `investigations` channel)."""
+    "bump" ships. Also asserts select_targets_node itself actually ran as a
+    real step of the compiled graph (not just that downstream nodes
+    tolerate a missing `investigations` channel)."""
     job_id = f"rem-{uuid.uuid4().hex[:8]}"
     repo_path = _write_repo(tmp_path, {"leftpad": "1.0.0"})
     prep = _seed_prep(job_id, repo_path, {"leftpad": "1.0.0"})
@@ -339,12 +356,15 @@ async def test_pure_bump_target_ships_one_fixed_pr(
     assert plan_calls == [{"leftpad"}]
     assert exec_calls == [["leftpad"]]
 
-    # classify_targets_node's merged classify+investigate step is a real
-    # step in the compiled graph -- it must have actually run for "leftpad"
-    # before build_migration_plan_node's (mocked) planning call ever ran.
-    _classify_everything_as_r1.assert_awaited_once()
-    classified_target = _classify_everything_as_r1.await_args.args[0]
-    assert classified_target.target_dep == "leftpad"
+    # select_targets_node is a real step in the compiled graph -- it must
+    # have actually resolved "leftpad" before build_migration_plan_node's
+    # (mocked) planning call ever ran.
+    _select_and_research_everything_as_clean_bump.assert_awaited_once()
+    # resolve_package_info's first positional arg is the dep-name string
+    # itself (select_targets._resolve_bounded calls it as
+    # resolve_package_info(target.target_dep, ...)), not the target object.
+    resolved_dep = _select_and_research_everything_as_clean_bump.await_args.args[0]
+    assert resolved_dep == "leftpad"
 
 
 async def test_requires_signal_pulls_in_a_non_finding_companion(
