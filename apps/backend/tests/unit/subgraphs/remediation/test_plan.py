@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.main_graph.subgraphs.remediation.plan import (
     _apply_release_digest,
     _enforce_tier,
+    _format_targets,
 )
 
 
@@ -218,3 +219,28 @@ def test_apply_release_digest_defaults_guide_empty_when_investigation_missing():
     _apply_release_digest(plans, investigations={})
 
     assert plans["lodash"]["migration_guide"] == ""
+
+
+def test_format_targets_includes_breaking_changes():
+    targets = {"eslint": {"tier": "r2", "current_range": "7.0.0"}}
+    investigations = {
+        "eslint": {
+            "dependents": [],
+            "call_sites": [],
+            "release": {
+                "migration_needed": True,
+                "to_version": "8.0.0",
+                "migration_guide": "switch to flat config",
+                "breaking_changes": ["flat config replaces .eslintrc"],
+            },
+        }
+    }
+    formatted = _format_targets(targets, investigations)
+    assert "breaking_changes=['flat config replaces .eslintrc']" in formatted
+
+
+def test_format_targets_breaking_changes_defaults_empty_list():
+    targets = {"eslint": {"tier": "r1", "current_range": "7.0.0"}}
+    investigations = {}
+    formatted = _format_targets(targets, investigations)
+    assert "breaking_changes=[]" in formatted

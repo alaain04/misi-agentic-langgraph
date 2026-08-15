@@ -78,7 +78,8 @@ def _format_targets(targets: dict[str, dict], investigations: dict[str, dict]) -
             f"call_sites={inv.get('call_sites') or []} "
             f"migration_needed={rel.get('migration_needed')} "
             f"to_version={rel.get('to_version') or 'unknown'} "
-            f"migration_guide={rel.get('migration_guide') or 'none'}"
+            f"migration_guide={rel.get('migration_guide') or 'none'} "
+            f"breaking_changes={rel.get('breaking_changes') or []}"
         )
     return "\n".join(lines)
 
