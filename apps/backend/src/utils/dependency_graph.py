@@ -4,7 +4,6 @@ import os
 
 from src.db.input_cache import InputCacheDAO, cache_key, get_or_compute
 from src.domain.ports.container_run_port import ContainerRunPort
-from src.main_graph.tools.trivy_cli import trivy_sbom_scan
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +64,27 @@ def direct_dependents(graph: dict, name: str) -> list[str]:
         if key in direct_keys:
             result.add(_package_name(key))
         stack.extend(parents.get(key, ()))
+    return sorted(result)
+
+
+def dependents_of(graph: dict, name: str) -> list[str]:
+    """Return every package name in the tree with a recorded dependency on
+    any installed version of `name` -- not limited to direct-dependency
+    roots, unlike direct_dependents(). Structural only: reflects the
+    resolved graph, not whether a declared version range still holds after
+    a bump -- that is what verification checks.
+    """
+    packages = graph.get("packages") or {}
+    if not packages:
+        return []
+    targets = {key for key in packages if _package_name(key) == name}
+    if not targets:
+        return []
+    result = {
+        _package_name(key)
+        for key, info in packages.items()
+        if any(child in targets for child in info.get("dependencies", []))
+    }
     return sorted(result)
 
 
@@ -192,6 +212,7 @@ async def build_dependency_graph(
     — see save_prep_result's
     `lock_committed` check.
     """
+    from src.main_graph.tools.trivy_cli import trivy_sbom_scan
 
     async def _scan() -> dict:
         return await trivy_sbom_scan(repo_path=repo_path, container=container)

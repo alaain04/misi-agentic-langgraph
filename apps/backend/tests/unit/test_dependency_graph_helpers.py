@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from apps.backend.src.utils.dependency_graph import (
+from src.utils.dependency_graph import (
     build_dependency_graph,
     dependents_of,
     direct_dependents,
