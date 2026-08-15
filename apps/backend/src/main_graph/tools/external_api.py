@@ -173,6 +173,43 @@ async def package_reputation(package_name: str) -> dict:
 
 
 @register(
+    "package_health_data",
+    "Reports raw npm registry health facts (release recency, weekly downloads, "
+    "maintainer count) for every direct dependency. Returns data only — no risk "
+    "judgment or flagging; the caller decides what counts as a maintenance risk.",
+)
+async def package_health_data(repo_path: str) -> dict:
+    pkg = _load_pkg(repo_path)
+    deps = list(_all_deps(pkg).keys())
+    deps_to_check = deps[:30]  # limit to avoid rate limiting
+    metas, downloads = await asyncio.gather(
+        asyncio.gather(*[_npm_metadata(d) for d in deps_to_check]),
+        asyncio.gather(*[_npm_weekly_downloads(d) for d in deps_to_check]),
+    )
+    packages = []
+    for dep, meta, weekly_downloads in zip(deps_to_check, metas, downloads):
+        if "error" in meta:
+            packages.append({"package": dep, "error": meta["error"]})
+            continue
+        time_data = meta.get("time", {})
+        packages.append(
+            {
+                "package": dep,
+                "created": time_data.get("created", ""),
+                "last_modified": time_data.get("modified", ""),
+                "weekly_downloads": weekly_downloads,
+                "maintainer_count": len(meta.get("maintainers", [])),
+                "latest_version": meta.get("dist-tags", {}).get("latest", ""),
+            }
+        )
+    return {
+        "packages": packages,
+        "checked": len(deps_to_check),
+        "total_deps": len(deps),
+    }
+
+
+@register(
     "unmaintained_packages",
     "Flags packages with no releases for 12+ months based on npm registry data",
 )
