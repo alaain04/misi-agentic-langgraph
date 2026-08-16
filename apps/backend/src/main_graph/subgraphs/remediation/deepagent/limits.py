@@ -1,6 +1,6 @@
 """Concurrency and rate-limit guards for the remediation deep agent.
 
-remediate_targets_node (deepagent/nodes.py) runs one flat execution agent per
+remediate_targets_node (nodes/remediate_targets.py) runs one flat execution agent per
 connected group of targets, fanned out across independent groups via
 asyncio.TaskGroup. TARGET_SEMAPHORE bounds how many of those group agents
 run at once -- previously it bounded nested per-target agents dispatched via

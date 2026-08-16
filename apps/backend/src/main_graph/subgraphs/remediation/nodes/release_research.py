@@ -267,15 +267,6 @@ async def research_releases_node(
 
 
 def _resolve_public_ip(host: str) -> str | None:
-    """Resolve host and return ONE globally-routable IP if every resolved
-    address is public, else None. Returning (not just validating) the IP
-    lets the caller connect directly to it -- pinning the connection to
-    the address this function actually checked closes a DNS-rebinding gap
-    a validate-then-separately-connect design would otherwise have: two
-    independent DNS lookups let an attacker's nameserver answer each one
-    differently (public for validation, private/metadata for the real
-    connection).
-    """
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
@@ -293,22 +284,19 @@ def _resolve_public_ip(host: str) -> str | None:
 
 
 async def _fetch_doc_once(url: str) -> dict:
-    """One hop: validate the URL, connect directly to its validated IP
-    (not a second, independently-resolved hostname lookup -- see
-    _resolve_public_ip), GET without following redirects. Returns either
-    the terminal {"available": ...} result, or an internal
-    {"_redirect": location} for the caller to re-validate and retry."""
+    result: dict = {"available": False, "error": "unknown error"}
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
-        return {"available": False, "error": f"unsupported scheme: {parsed.scheme!r}"}
+        result['error'] = f"unsupported scheme: {parsed.scheme!r}"
+        return result
     if not parsed.hostname:
-        return {"available": False, "error": "no host in URL"}
+        result['error'] = "no host in URL"
+        return result
+    
     resolved_ip = _resolve_public_ip(parsed.hostname)
     if resolved_ip is None:
-        return {
-            "available": False,
-            "error": "URL host does not resolve to a public address",
-        }
+        result['error'] = "URL host does not resolve to a public address"
+        return result
 
     headers = {"Host": parsed.hostname}
     if parsed.hostname in _GH_TOKEN_HOSTS and settings.github_token:
@@ -336,21 +324,11 @@ async def _fetch_doc_once(url: str) -> dict:
                 body += chunk
                 if len(body) >= _DOC_CHAR_CAP:
                     break
-    return {
-        "available": True,
-        "url": url,
-        "body": body[:_DOC_CHAR_CAP].decode(errors="replace"),
-    }
+    result = {"available": True, "url": url, "body": body[:_DOC_CHAR_CAP].decode(errors="replace")}
+    return result
 
 
 async def fetch_doc(url: str) -> dict:
-    """Fetch a URL a release body links to (MIGRATION.md, UPGRADING.md, an
-    external guide). Hardened against SSRF: rejects non-http(s) schemes and
-    any host that doesn't resolve to a public IP; GH_TOKEN is only attached
-    when the validated host is exactly github.com or
-    raw.githubusercontent.com. Redirects are never auto-followed -- each
-    hop's target is re-validated the same way, up to 3 hops, so a redirect
-    can't be used to reach a host the initial check would have rejected."""
     current = url
     for _ in range(_MAX_REDIRECTS + 1):
         try:

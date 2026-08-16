@@ -7,12 +7,12 @@ def _tags_of(module_path: str, attr: str = "_llm") -> list[str]:
 
 
 def test_remediation_release_research_tagged_correctly():
-    tags = _tags_of("src.main_graph.subgraphs.remediation.release_research")
+    tags = _tags_of("src.main_graph.subgraphs.remediation.nodes.release_research")
     assert "agent_role:remediation_release_research" in tags
 
 
 def test_remediation_plan_tagged_correctly():
-    tags = _tags_of("src.main_graph.subgraphs.remediation.plan")
+    tags = _tags_of("src.main_graph.subgraphs.remediation.nodes.plan")
     assert "agent_role:remediation_plan" in tags
 
 

@@ -39,14 +39,15 @@ anywhere in this file):
   straight to finalize, `ReleaseDigest` assembly -- still runs as a real
   step (the multi-iteration/tool-calling path is covered for real by
   test_release_research.py).
-- `plan.build_plans_for_targets` -- the ONE batched structured-output
-  planning call. Patched at both `plan.build_plans_for_targets` (used by
+- `nodes.plan.build_plans_for_targets` -- the ONE batched structured-output
+  planning call. Patched at both `nodes.plan.build_plans_for_targets` (used by
   `build_migration_plan_node`, the initial batch) and
-  `deepagent.nodes.build_plans_for_targets` (used by `remediate_targets_node`'s
-  retry-discovered-companion fallback, a single-target call). `_fake_planner`
-  drives both from one `plan_for(dep, target_dict)` callback and records
-  every call's dep set into `plan_calls`.
-- `deepagent.nodes.build_execution_agent` -- the ONE flat execution agent,
+  `nodes.remediate_targets.build_plans_for_targets` (used by
+  `remediate_targets_node`'s retry-discovered-companion fallback, a
+  single-target call). `_fake_planner` drives both from one
+  `plan_for(dep, target_dict)` callback and records every call's dep set
+  into `plan_calls`.
+- `nodes.remediate_targets.build_execution_agent` -- the ONE flat execution agent,
   invoked directly per group (never via deepagents' `task()`, which no
   longer exists anywhere in this path). `_FakeExecutionAgent` stands in for
   its return value: an object with `ainvoke(state, config)` that parses the
@@ -80,9 +81,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.remediation.deepagent import nodes as deepagent_nodes
 from src.main_graph.subgraphs.remediation.graph import build_remediation_subgraph
-from src.main_graph.subgraphs.remediation.release_research import (
+from src.main_graph.subgraphs.remediation.nodes import group_and_verify as gv_module
+from src.main_graph.subgraphs.remediation.nodes.release_research import (
     ReleaseResearchDecision,
 )
 from src.models.conductor import EvidenceRef, FindingNote
@@ -121,18 +122,20 @@ def _select_and_research_everything_as_clean_bump():
     )
     with (
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.resolve_package_info",
             resolve_mock,
         ),
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.compute_blast_radius",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.compute_blast_radius",
             AsyncMock(return_value={"available": False}),
         ),
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets._index_codegraph",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets._index_codegraph",
             AsyncMock(return_value=True),
         ),
-        patch("src.main_graph.subgraphs.remediation.release_research._llm", llm_mock),
+        patch(
+            "src.main_graph.subgraphs.remediation.nodes.release_research._llm", llm_mock
+        ),
     ):
         yield resolve_mock
 
@@ -216,15 +219,15 @@ def _patch_planner_and_executor(
     fake_build_plans = _fake_build_plans_for_targets(plan_for, plan_calls)
     patches = (
         patch(
-            "src.main_graph.subgraphs.remediation.plan.build_plans_for_targets",
+            "src.main_graph.subgraphs.remediation.nodes.plan.build_plans_for_targets",
             fake_build_plans,
         ),
         patch(
-            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_plans_for_targets",
+            "src.main_graph.subgraphs.remediation.nodes.remediate_targets.build_plans_for_targets",
             fake_build_plans,
         ),
         patch(
-            "src.main_graph.subgraphs.remediation.deepagent.nodes.build_execution_agent",
+            "src.main_graph.subgraphs.remediation.nodes.remediate_targets.build_execution_agent",
             side_effect=lambda *a, **k: _FakeExecutionAgent(plan_for, exec_calls),
         ),
     )
@@ -495,7 +498,7 @@ async def test_correction_round_retries_then_gives_up_at_cap(
     assert r.skip_reason == "verification failed after max correction rounds"
 
     assert plan_calls == [{"always-broken"}]
-    expected_rounds = 1 + deepagent_nodes._MAX_CORRECTION_ROUNDS
+    expected_rounds = 1 + gv_module._MAX_CORRECTION_ROUNDS
     assert exec_calls == [["always-broken"]] * expected_rounds
 
 

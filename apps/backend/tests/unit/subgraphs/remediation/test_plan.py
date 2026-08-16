@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.main_graph.subgraphs.remediation.plan import (
+from src.main_graph.subgraphs.remediation.nodes.plan import (
     _apply_release_digest,
     _enforce_tier,
     _format_targets,

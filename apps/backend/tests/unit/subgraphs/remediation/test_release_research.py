@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.remediation.release_research import (
+from src.main_graph.subgraphs.remediation.nodes.release_research import (
     ReleaseResearchDecision,
     fetch_doc,
     make_fetch_doc_tool,
@@ -139,7 +139,7 @@ async def test_fetch_doc_attaches_gh_token_only_for_github_hosts():
         ),
         patch("httpx.AsyncClient.stream", _stream),
         patch(
-            "src.main_graph.subgraphs.remediation.release_research.settings"
+            "src.main_graph.subgraphs.remediation.nodes.release_research.settings"
         ) as mock_settings,
     ):
         mock_settings.github_token = "ghp_test"
@@ -154,7 +154,7 @@ async def test_fetch_doc_attaches_gh_token_only_for_github_hosts():
         ),
         patch("httpx.AsyncClient.stream", _stream),
         patch(
-            "src.main_graph.subgraphs.remediation.release_research.settings"
+            "src.main_graph.subgraphs.remediation.nodes.release_research.settings"
         ) as mock_settings,
     ):
         mock_settings.github_token = "ghp_test"
@@ -261,7 +261,7 @@ async def test_fetch_doc_stops_reading_once_cap_reached():
 async def test_make_fetch_doc_tool_delegates_to_fetch_doc():
     tool = make_fetch_doc_tool()
     with patch(
-        "src.main_graph.subgraphs.remediation.release_research.fetch_doc",
+        "src.main_graph.subgraphs.remediation.nodes.release_research.fetch_doc",
         AsyncMock(return_value={"available": True, "url": "u", "body": "b"}),
     ) as mock_fetch:
         result = await tool.ainvoke({"url": "https://example.com/doc.md"})
@@ -273,7 +273,7 @@ async def test_make_fetch_doc_tool_delegates_to_fetch_doc():
 async def test_get_release_notes_tool_delegates_with_closed_over_args():
     container = MagicMock()
     with patch(
-        "src.main_graph.subgraphs.remediation.release_research.fetch_release_notes_page",
+        "src.main_graph.subgraphs.remediation.nodes.release_research.fetch_release_notes_page",
         AsyncMock(
             return_value={
                 "available": True,
@@ -341,7 +341,9 @@ async def test_research_releases_node_finalizes_immediately_when_told():
         )
     )
 
-    with patch("src.main_graph.subgraphs.remediation.release_research._llm", mock_llm):
+    with patch(
+        "src.main_graph.subgraphs.remediation.nodes.release_research._llm", mock_llm
+    ):
         result = await research_releases_node(
             {
                 "job_id": "job-1",
@@ -377,7 +379,9 @@ async def test_research_releases_node_skips_r3_targets():
     }
     mock_llm = MagicMock()
 
-    with patch("src.main_graph.subgraphs.remediation.release_research._llm", mock_llm):
+    with patch(
+        "src.main_graph.subgraphs.remediation.nodes.release_research._llm", mock_llm
+    ):
         result = await research_releases_node(
             {
                 "job_id": "job-1",
@@ -426,9 +430,12 @@ async def test_research_releases_node_iterates_tool_calls_before_finalizing():
     )
 
     with (
-        patch("src.main_graph.subgraphs.remediation.release_research._llm", mock_llm),
         patch(
-            "src.main_graph.subgraphs.remediation.release_research.fetch_release_notes_page",
+            "src.main_graph.subgraphs.remediation.nodes.release_research._llm",
+            mock_llm,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.nodes.release_research.fetch_release_notes_page",
             AsyncMock(
                 return_value={
                     "available": True,
@@ -512,9 +519,12 @@ async def test_research_releases_node_sources_guide_from_linked_doc():
     )
 
     with (
-        patch("src.main_graph.subgraphs.remediation.release_research._llm", mock_llm),
         patch(
-            "src.main_graph.subgraphs.remediation.release_research.fetch_release_notes_page",
+            "src.main_graph.subgraphs.remediation.nodes.release_research._llm",
+            mock_llm,
+        ),
+        patch(
+            "src.main_graph.subgraphs.remediation.nodes.release_research.fetch_release_notes_page",
             AsyncMock(
                 return_value={
                     "available": True,
@@ -527,7 +537,7 @@ async def test_research_releases_node_sources_guide_from_linked_doc():
             ),
         ),
         patch(
-            "src.main_graph.subgraphs.remediation.release_research.fetch_doc",
+            "src.main_graph.subgraphs.remediation.nodes.release_research.fetch_doc",
             AsyncMock(
                 return_value={
                     "available": True,
@@ -578,7 +588,9 @@ async def test_research_releases_node_falls_back_conservatively_on_failure():
         side_effect=RuntimeError("LLM provider timeout")
     )
 
-    with patch("src.main_graph.subgraphs.remediation.release_research._llm", mock_llm):
+    with patch(
+        "src.main_graph.subgraphs.remediation.nodes.release_research._llm", mock_llm
+    ):
         result = await research_releases_node(
             {
                 "job_id": "job-1",
@@ -626,7 +638,9 @@ async def test_research_releases_node_preserves_existing_call_sites_and_dependen
         return_value=_decision(migration_needed=True, breaking_changes=["x"])
     )
 
-    with patch("src.main_graph.subgraphs.remediation.release_research._llm", mock_llm):
+    with patch(
+        "src.main_graph.subgraphs.remediation.nodes.release_research._llm", mock_llm
+    ):
         result = await research_releases_node(
             {
                 "job_id": "job-1",

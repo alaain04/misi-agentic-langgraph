@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main_graph.subgraphs.remediation.select_targets import (
+from src.main_graph.subgraphs.remediation.nodes.select_targets import (
     _has_no_upgrade,
     select_remediation_targets,
     select_targets_node,
@@ -18,14 +18,14 @@ _DEP_GRAPH = {"direct": {"lodash": "^4.17.11"}, "packages": {}}
 
 def _no_blast_radius():
     return patch(
-        "src.main_graph.subgraphs.remediation.select_targets.compute_blast_radius",
+        "src.main_graph.subgraphs.remediation.nodes.select_targets.compute_blast_radius",
         AsyncMock(return_value={"available": False}),
     )
 
 
 def _no_index(**overrides):
     return patch(
-        "src.main_graph.subgraphs.remediation.select_targets._index_codegraph",
+        "src.main_graph.subgraphs.remediation.nodes.select_targets._index_codegraph",
         AsyncMock(return_value=overrides.get("return_value", True)),
     )
 
@@ -107,7 +107,7 @@ async def test_select_targets_node_forces_r3_when_no_upgrade_exists():
 
     with (
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.resolve_package_info",
             AsyncMock(return_value=("0.7.0", None)),
         ),
         _no_blast_radius(),
@@ -138,7 +138,7 @@ async def test_select_targets_node_leaves_tier_unset_when_upgrade_exists():
 
     with (
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.resolve_package_info",
             AsyncMock(return_value=("4.17.21", ("lodash", "lodash"))),
         ),
         _no_blast_radius(),
@@ -174,7 +174,7 @@ async def test_select_targets_node_survives_codegraph_index_failure():
 
     with (
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.resolve_package_info",
             AsyncMock(return_value=("4.17.21", ("lodash", "lodash"))),
         ),
         _no_blast_radius(),
@@ -211,11 +211,11 @@ async def test_select_targets_node_populates_dependents_and_call_sites():
 
     with (
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.resolve_package_info",
             AsyncMock(return_value=(None, None)),
         ),
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.compute_blast_radius",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.compute_blast_radius",
             AsyncMock(
                 return_value={"available": True, "affected_files": ["src/a.ts:3"]}
             ),
@@ -269,7 +269,7 @@ async def test_select_targets_node_bounds_concurrency():
 
     with (
         patch(
-            "src.main_graph.subgraphs.remediation.select_targets.resolve_package_info",
+            "src.main_graph.subgraphs.remediation.nodes.select_targets.resolve_package_info",
             AsyncMock(side_effect=_fake_resolve),
         ),
         _no_blast_radius(),
