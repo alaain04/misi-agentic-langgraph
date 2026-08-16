@@ -36,7 +36,7 @@ def _seed_prep(job_id: str) -> PrepResult:
         repo_path="/tmp/test-repo",
         project_metadata={"name": "test-project"},
         manifest_files=["package.json", "package-lock.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
     )
 

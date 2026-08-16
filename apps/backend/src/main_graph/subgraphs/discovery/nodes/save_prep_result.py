@@ -29,12 +29,8 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
     repo_path = state.get("repo_path", "")
     repo_url = state.get("repo_url", "")
     commit_sha = state.get("commit_sha") or ""
-    docker_image = state.get("docker_image") or "node:lts-alpine"
+    docker_image = state.get("docker_node_image") or "node:lts-alpine"
 
-    # A freshly-generated lockfile was resolved against the live registry
-    # this run, so it is NOT a pure function of commit_sha alone and must not
-    # be cached indefinitely.
-    lock_committed = not state.get("lockfile_generated")
     pkg = read_package_json(repo_path)
     dep_graph = await build_dependency_graph(
         repo_path,
@@ -42,7 +38,7 @@ async def save_prep_result(state: DiscoveryState, config: RunnableConfig) -> dic
         container=svc["container"],
         docker_image=settings.trivy_image,
         pkg=pkg,
-        cache=cache if lock_committed else None,
+        cache=cache,
         repo_url=repo_url,
         commit_sha=commit_sha,
     )

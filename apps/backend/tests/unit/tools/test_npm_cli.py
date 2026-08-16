@@ -69,7 +69,7 @@ async def test_npm_audit_uses_pnpm_executable_when_detected():
         repo_path="/tmp/repo",
         container=container,
         docker_image="node:lts-alpine",
-        detected_package_manager="pnpm",
+        package_manager="pnpm",
     )
     _, kwargs = container.run.call_args
     assert kwargs["command"].startswith("cd /workspace && pnpm audit")
@@ -82,7 +82,7 @@ async def test_npm_audit_falls_back_to_npm_for_unknown_manager():
         repo_path="/tmp/repo",
         container=container,
         docker_image="node:lts-alpine",
-        detected_package_manager="bun",
+        package_manager="bun",
     )
     _, kwargs = container.run.call_args
     assert kwargs["command"].startswith("cd /workspace && npm audit")

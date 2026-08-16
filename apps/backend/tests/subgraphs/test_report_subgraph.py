@@ -112,7 +112,7 @@ async def test_report_produces_report_result_with_trusted_findings(
         repo_path="/tmp/fake-repo",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={},
     )
     prep_result_id = await result_dao.save_prep(prep)
@@ -228,7 +228,7 @@ async def test_report_drops_low_severity_findings_before_enrichment(
         repo_path="/tmp/fake-repo",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={},
     )
     prep_result_id = await result_dao.save_prep(prep)
@@ -256,9 +256,7 @@ async def test_report_drops_low_severity_findings_before_enrichment(
             "src.main_graph.subgraphs.report.nodes.report_synthesizer._llm",
             _make_synthesizer_llm(synth_payload),
         ),
-        patch(
-            "src.main_graph.subgraphs.report.nodes.report_intake.settings"
-        ) as mock_settings,
+        patch("src.utils.severity.settings") as mock_settings,
     ):
         mock_settings.risk_min_severity = "high"
         graph = build_report_subgraph()
@@ -301,7 +299,7 @@ async def test_report_keeps_untrusted_finding_instead_of_dropping(
         repo_path="/tmp/fake-repo",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={},
     )
     prep_result_id = await result_dao.save_prep(prep)
@@ -382,7 +380,7 @@ async def test_report_grounds_blast_radius_via_codegraph(subgraph_config, result
         repo_path="/tmp/fake-repo",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={},
     )
     prep_result_id = await result_dao.save_prep(prep)

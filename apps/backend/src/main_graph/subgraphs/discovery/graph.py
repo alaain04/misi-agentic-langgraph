@@ -21,7 +21,9 @@ def _route_after_clone(state: DiscoveryState) -> str:
 
 
 def _route_after_inspect(state: DiscoveryState) -> str:
-    return INSTALL_DEPS if not state.get("has_lock_file") else SAVE_PREP_RESULT
+    if len(state.get("lockfile_generated") or ""):
+        return SAVE_PREP_RESULT
+    return INSTALL_DEPS
 
 
 def build_discovery_subgraph() -> CompiledStateGraph:

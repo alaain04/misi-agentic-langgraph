@@ -26,7 +26,7 @@ def test_prep_result_auto_id_and_timestamp():
         repo_path="/tmp/r",
         project_metadata={},
         manifest_files=["package.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {}},
     )
     assert r.id
@@ -226,7 +226,7 @@ def test_prep_result_commit_sha_and_repo_url_default_empty():
         repo_path="/tmp/r",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {}},
     )
     assert r.commit_sha == ""
@@ -239,7 +239,7 @@ def test_prep_result_accepts_commit_sha_and_repo_url():
         repo_path="/tmp/r",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {}},
         commit_sha="deadbeef",
         repo_url="https://github.com/x/y",

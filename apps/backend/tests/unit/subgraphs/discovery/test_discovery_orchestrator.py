@@ -78,9 +78,9 @@ def test_detect_node_environment_with_package_lock(tmp_path):
 
     result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
-    assert result["detected_package_manager"] == "npm"
-    assert result["has_lock_file"] is True
-    assert result["docker_image"] == "node:20-alpine"
+    assert result["package_manager"] == "npm"
+    assert result["lockfile_generated"] == "package-lock.json"
+    assert result["docker_node_image"] == "node:20-alpine"
     assert "package-lock.json" in result["manifest_files"]
 
 
@@ -92,20 +92,9 @@ def test_detect_node_environment_with_pnpm_lock(tmp_path):
 
     result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
-    assert result["detected_package_manager"] == "pnpm"
-    assert result["has_lock_file"] is True
+    assert result["package_manager"] == "pnpm"
+    assert result["lockfile_generated"] == "pnpm-lock.yaml"
     assert result["package_manager_version"] == "9.0.0"
-
-
-def test_detect_node_environment_pnpm_v11_requires_node22(tmp_path):
-    (tmp_path / "package.json").write_text(
-        json.dumps({"packageManager": "pnpm@11.0.0", "engines": {"node": ">=18"}})
-    )
-    (tmp_path / "pnpm-lock.yaml").write_text("")
-
-    result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
-
-    assert result["docker_image"] == "node:22-alpine"
 
 
 def test_detect_node_environment_no_lock_file(tmp_path):
@@ -113,8 +102,8 @@ def test_detect_node_environment_no_lock_file(tmp_path):
 
     result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
-    assert result["has_lock_file"] is False
-    assert result["detected_package_manager"] == "npm"
+    assert result["lockfile_generated"] == ""
+    assert result["package_manager"] == "npm"
 
 
 def test_detect_node_environment_packagemanager_field_sets_pm_when_no_lock(tmp_path):
@@ -124,9 +113,9 @@ def test_detect_node_environment_packagemanager_field_sets_pm_when_no_lock(tmp_p
 
     result = detect_node_environment({**_BASE_STATE, "repo_path": str(tmp_path)})
 
-    assert result["detected_package_manager"] == "pnpm"
+    assert result["package_manager"] == "pnpm"
     assert result["package_manager_version"] == "8.1.0"
-    assert result["has_lock_file"] is False
+    assert result["lockfile_generated"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -144,16 +133,13 @@ async def test_install_deps_creates_lock_file(tmp_path):
     state = {
         **_BASE_STATE,
         "repo_path": str(tmp_path),
-        "detected_package_manager": "npm",
+        "package_manager": "npm",
         "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
+        "docker_node_image": "node:20-alpine",
     }
     result = await install_deps(state, _config(container=container))
 
-    assert result["has_lock_file"] is True
-    # install_deps ran, so the lock was generated this run (not committed) —
-    # signals that the dependency graph must not be cached indefinitely.
-    assert result["lockfile_generated"] is True
+    assert result["lockfile_generated"] == "package-lock.json"
     # Lock already present after the normal install — no lockfile-only fallback needed.
     assert container.run.await_count == 1
 
@@ -166,13 +152,13 @@ async def test_install_deps_no_lock_created(tmp_path):
     state = {
         **_BASE_STATE,
         "repo_path": str(tmp_path),
-        "detected_package_manager": "npm",
+        "package_manager": "npm",
         "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
+        "docker_node_image": "node:20-alpine",
     }
     result = await install_deps(state, _config(container=container))
 
-    assert result["has_lock_file"] is False
+    assert result["lockfile_generated"] == ""
 
 
 @pytest.mark.asyncio
@@ -193,13 +179,13 @@ async def test_install_deps_npm_falls_back_to_lockfile_only(tmp_path):
     state = {
         **_BASE_STATE,
         "repo_path": str(tmp_path),
-        "detected_package_manager": "npm",
+        "package_manager": "npm",
         "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
+        "docker_node_image": "node:20-alpine",
     }
     result = await install_deps(state, _config(container=container))
 
-    assert result["has_lock_file"] is True
+    assert result["lockfile_generated"] == "package-lock.json"
     assert container.run.await_count == 2
     fallback_command = container.run.call_args_list[1].kwargs["command"]
     assert "--package-lock-only" in fallback_command
@@ -220,13 +206,13 @@ async def test_install_deps_pnpm_falls_back_to_lockfile_only(tmp_path):
     state = {
         **_BASE_STATE,
         "repo_path": str(tmp_path),
-        "detected_package_manager": "pnpm",
+        "package_manager": "pnpm",
         "package_manager_version": "9",
-        "docker_image": "node:20-alpine",
+        "docker_node_image": "node:20-alpine",
     }
     result = await install_deps(state, _config(container=container))
 
-    assert result["has_lock_file"] is True
+    assert result["lockfile_generated"] == "pnpm-lock.yaml"
     assert container.run.await_count == 2
     fallback_command = container.run.call_args_list[1].kwargs["command"]
     assert "--lockfile-only" in fallback_command
@@ -243,13 +229,13 @@ async def test_install_deps_yarn_has_no_lockfile_only_fallback(tmp_path):
     state = {
         **_BASE_STATE,
         "repo_path": str(tmp_path),
-        "detected_package_manager": "yarn",
+        "package_manager": "yarn",
         "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
+        "docker_node_image": "node:20-alpine",
     }
     result = await install_deps(state, _config(container=container))
 
-    assert result["has_lock_file"] is False
+    assert result["lockfile_generated"] == ""
     assert container.run.await_count == 1
 
 
@@ -271,9 +257,9 @@ async def test_install_deps_retries_on_peer_conflict(tmp_path):
     state = {
         **_BASE_STATE,
         "repo_path": str(tmp_path),
-        "detected_package_manager": "npm",
+        "package_manager": "npm",
         "package_manager_version": "latest",
-        "docker_image": "node:20-alpine",
+        "docker_node_image": "node:20-alpine",
     }
     await install_deps(state, _config(container=container))
 

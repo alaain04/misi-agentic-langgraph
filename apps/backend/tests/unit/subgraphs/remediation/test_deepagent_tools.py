@@ -10,7 +10,6 @@ from langgraph.types import Command
 from src.main_graph.subgraphs.remediation.deepagent.tools import (
     make_bump_dependency_tool,
     make_commit_outcome_tool,
-    make_dependents_of_tool,
     make_read_release_notes_tool,
     make_verify_tool,
 )
@@ -83,20 +82,6 @@ async def test_read_release_notes_tool_reuses_repo_resolved_by_classify():
     mock_fetch.assert_awaited_once_with(
         "eslint", "/repo", container, "node:lts-alpine", ("eslint", "eslint")
     )
-
-
-@pytest.mark.asyncio
-async def test_dependents_of_tool_delegates_to_pure_function():
-    graph = {
-        "direct": {"a": "1.0.0"},
-        "packages": {
-            "a@1.0.0": {"dependencies": ["b@1.0.0"]},
-            "b@1.0.0": {"dependencies": []},
-        },
-    }
-    tool = make_dependents_of_tool(graph)
-    result = await tool.ainvoke({"package_name": "b"})
-    assert result == ["a"]
 
 
 @pytest.mark.asyncio

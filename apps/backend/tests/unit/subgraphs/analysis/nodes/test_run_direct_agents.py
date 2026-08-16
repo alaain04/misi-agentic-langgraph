@@ -18,7 +18,7 @@ def _make_prep() -> PrepResult:
         repo_path="/tmp/repo",
         project_metadata={"name": "x"},
         manifest_files=["package.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
     )
 

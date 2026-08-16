@@ -17,7 +17,7 @@ def _make_prep(direct: dict[str, str] | None = None) -> PrepResult:
         repo_path="/tmp/repo",
         project_metadata={"name": "x"},
         manifest_files=["package.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": direct or {"lodash": "4.17.20"}, "packages": {}},
     )
 

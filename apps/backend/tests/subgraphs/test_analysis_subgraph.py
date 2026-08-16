@@ -147,7 +147,7 @@ def _seed_prep(job_id: str) -> PrepResult:
             "transitive_dependencies_count": 0,
         },
         manifest_files=["package.json", "package-lock.json"],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={"direct": {"lodash": "4.17.20"}, "packages": {}},
     )
 

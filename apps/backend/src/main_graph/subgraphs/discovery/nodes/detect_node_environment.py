@@ -33,23 +33,6 @@ def _min_node_from_engines(engine: str) -> str:
     return _DEFAULT_NODE_VERSION
 
 
-def _parse_package_manager(value: str):
-    """
-    Examples:
-        npm@10.9.0        -> ("npm", "10.9.0")
-        pnpm@9.15.0       -> ("pnpm", "9.15.0")
-        yarn@4.5.1        -> ("yarn", "4.5.1")
-        pnpm@9.15.0+sha   -> ("pnpm", "9.15.0")
-    """
-    if "@" not in value:
-        return value, "latest"
-
-    name, version = value.split("@", 1)
-    version = version.split("+", 1)[0]
-
-    return name, version
-
-
 def detect_node_environment(state: DiscoveryState):
     repo_path = state.get("repo_path")
     pkg_path = os.path.join(repo_path, "package.json")
@@ -66,9 +49,11 @@ def detect_node_environment(state: DiscoveryState):
 
     # 1. Detect package manager from lockfile.
     lock_pm = None
+    lockfile_generated = ""
     for lock_file, pm in _LOCK_FILES:
         if os.path.exists(os.path.join(repo_path, lock_file)):
             lock_pm = pm
+            lockfile_generated = lock_file
             manifest_files.append(lock_file)
             break
 
@@ -90,6 +75,7 @@ def detect_node_environment(state: DiscoveryState):
         "package_manager_version": pm_version,
         "node_version": min_node,
         "docker_node_image": f"node:{min_node}-alpine",
+        "lockfile_generated": lockfile_generated,
         "manifest_files": manifest_files,
     }
 

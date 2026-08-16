@@ -27,6 +27,8 @@ _llm = get_role_llm(AgentRole.IMPACT_ANALYSIS)
 _BLAST_RADIUS_FIELDS = {
     "affected_file_count",
     "affected_files",
+    "production_file_count",
+    "isolated_to_tests_or_scripts",
     "node_count",
 }
 

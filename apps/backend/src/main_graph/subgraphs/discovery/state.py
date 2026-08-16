@@ -24,6 +24,7 @@ class DiscoveryState(TypedDict):
     package_manager_version: NotRequired[str]
     node_version: NotRequired[str]
     docker_node_image: NotRequired[str]
+    lockfile_generated: NotRequired[str]
     manifest_files: NotRequired[list[str]]
 
     # Outputs

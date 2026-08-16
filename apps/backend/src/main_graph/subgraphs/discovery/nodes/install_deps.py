@@ -63,8 +63,8 @@ async def _run_with_peer_retry(
     return rc, out, err
 
 
-async def install_deps(state: DiscoveryState, config: RunnableConfig) -> None:
-    """Install dependencies and update has_lock_file based on what was created."""
+async def install_deps(state: DiscoveryState, config: RunnableConfig) -> dict:
+    """Install dependencies and report the lock file produced, if any."""
     svc = get_services(config)
     container: ContainerRunPort = svc["container"]
 
@@ -101,3 +101,4 @@ async def install_deps(state: DiscoveryState, config: RunnableConfig) -> None:
             lock_created = os.path.exists(os.path.join(repo_path, lock_file))
 
     logger.info("install_deps: lock_created=%s", lock_created)
+    return {"lockfile_generated": lock_file if lock_created else ""}

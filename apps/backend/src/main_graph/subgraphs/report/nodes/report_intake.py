@@ -7,7 +7,6 @@ from langchain_core.runnables import RunnableConfig
 from src.main_graph.config import get_services
 from src.main_graph.subgraphs.report.state import ReportState
 from src.models.results import AnalysisResult
-from src.utils.config import settings
 from src.utils.severity import filter_by_min_severity
 
 logger = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ async def report_intake(state: ReportState, config: RunnableConfig) -> dict:
     dao = get_services(config)["result_dao"]
     analysis: AnalysisResult = await dao.get_analysis(state["analysis_result_id"])
 
-    findings = filter_by_min_severity(analysis.findings, settings.risk_min_severity)
+    findings = filter_by_min_severity(analysis.findings)
     dep_names = [f.dep_name for f in findings]
 
     logger.info(

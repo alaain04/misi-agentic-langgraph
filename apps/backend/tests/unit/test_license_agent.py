@@ -13,7 +13,7 @@ def _prep() -> PrepResult:
         repo_path="/tmp/r",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={
             "direct": {},
             "packages": {

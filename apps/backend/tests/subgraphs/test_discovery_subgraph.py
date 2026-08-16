@@ -57,7 +57,7 @@ async def test_discovery_produces_prep_result(subgraph_config, result_dao):
 
     prep = await result_dao.get_prep(result["prep_result_id"])
     assert prep.job_id == job_id
-    assert prep.detected_package_manager == "npm"
+    assert prep.package_manager == "npm"
     assert prep.project_metadata["name"] == "test-project"
     assert prep.project_metadata["direct_dependencies_count"] == 4
     assert "lodash" in prep.dependency_graph.get("direct", {})
@@ -100,7 +100,7 @@ async def test_save_prep_result_calls_build_dependency_graph_with_container():
         "repo_path": "/tmp/repo",
         "repo_url": "https://github.com/x/y",
         "commit_sha": "sha1",
-        "detected_package_manager": "npm",
+        "package_manager": "npm",
         "docker_image": "aquasec/trivy:0.71.2",
     }
     dao = AsyncMock()

@@ -82,6 +82,8 @@ class BlastRadiusSummary(BaseModel):
     available: bool
     affected_file_count: int = 0
     affected_files: list[str] = Field(default_factory=list)
+    production_file_count: int = 0
+    isolated_to_tests_or_scripts: bool = False
     node_count: int = 0
     use_cases_impacted: list[str] = Field(default_factory=list)
     narrative: str = ""

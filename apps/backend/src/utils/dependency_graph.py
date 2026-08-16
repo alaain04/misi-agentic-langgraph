@@ -206,11 +206,7 @@ async def build_dependency_graph(
     scan fails or finds no manifest, e.g. an empty repo or a scan error.
 
     When `cache`/`repo_url`/`commit_sha` are all provided, the underlying
-    Trivy scan is cached by (repo_url, commit_sha, package_manager). Callers
-    must only pass `cache` when the lockfile is a pure function of
-    commit_sha (i.e. it was committed to the repo, not generated this run)
-    — see save_prep_result's
-    `lock_committed` check.
+    Trivy scan is cached by (repo_url, commit_sha, package_manager).
     """
     from src.main_graph.tools.trivy_cli import trivy_sbom_scan
 

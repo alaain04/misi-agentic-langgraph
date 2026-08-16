@@ -34,7 +34,7 @@ async def test_run_discovery_prints_prep_summary(capsys):
     fake_dao = MagicMock()
     fake_dao.get_prep = AsyncMock(
         return_value=MagicMock(
-            detected_package_manager="npm",
+            package_manager="npm",
             dependency_graph={"direct": {"lodash": {}}},
             project_metadata={"name": "demo"},
         )

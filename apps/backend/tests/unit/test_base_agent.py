@@ -19,7 +19,7 @@ def _prep() -> PrepResult:
         repo_path="/tmp/r",
         project_metadata={},
         manifest_files=[],
-        detected_package_manager="npm",
+        package_manager="npm",
         dependency_graph={},
     )
 
@@ -198,7 +198,7 @@ def test_format_params_excludes_injected_params():
     async def some_tool(
         package_name: str,
         repo_path: str,
-        detected_package_manager: str,
+        package_manager: str,
         container,
         docker_image: str,
     ): ...
@@ -206,7 +206,7 @@ def test_format_params_excludes_injected_params():
     sig = _format_params(some_tool)
     assert "package_name" in sig
     assert "repo_path" not in sig
-    assert "detected_package_manager" not in sig
+    assert "package_manager" not in sig
     assert "container" not in sig
     assert "docker_image" not in sig
 
